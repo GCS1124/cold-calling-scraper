@@ -34,7 +34,7 @@ type VercelSearchServiceDeps = {
 const jobTtlMs = 15 * 60 * 1000;
 const discoveryBatchSize = 1;
 const enrichmentBatchSize = 1;
-const perSeedCount = 12;
+const perSeedCount = 30;
 const maxCandidatePool = 3000;
 
 const withNow = () => Date.now();
@@ -89,6 +89,15 @@ const refreshProgress = (job: SearchJobRecord) => {
   job.progress.blockedCount = blockedCount;
   job.progress.estimatedRemaining = Math.max(0, job.request.count - qualifiedCount);
 };
+
+const hasEnrichmentTargets = (job: SearchJobRecord) =>
+  job.leads.some(
+    (lead) =>
+      lead.website &&
+      !lead.verifiedEmail &&
+      lead.rejectionReason !== 'blocked_website' &&
+      lead.rejectionReason !== 'blocked_google',
+  );
 
 const dedupeWithCount = (leads: Lead[]) => {
   const deduped = deduplicateLeads(leads);
@@ -278,12 +287,12 @@ const tickJob = async (
   } else if (!job.discoveryComplete) {
     job.status = 'discovering';
     job.progress.currentSource = 'Google Places';
-  } else if (job.leads.some((lead) => lead.website && !lead.verifiedEmail)) {
+  } else if (hasEnrichmentTargets(job)) {
     job.status = 'enriching';
     job.progress.currentSource = 'Website Crawl';
   } else {
-    job.status = 'complete';
-    job.progress.currentSource = 'Complete';
+    job.status = 'qualifying';
+    job.progress.currentSource = 'Qualification';
   }
 
   refreshProgress(job);

@@ -91,7 +91,7 @@ describe('createSearchService', () => {
     expect(failed?.meta.providerWarnings[0]?.message).toContain('No US location match found');
   });
 
-  it('progresses from queued to complete after background enrichment', async () => {
+  it('progresses from queued to qualifying after background enrichment when still under target', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 
     const service = createSearchService({
@@ -133,7 +133,7 @@ describe('createSearchService', () => {
     await task();
     const completed = await service.getSearch('search-2');
 
-    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.meta.status).toBe('qualifying');
     expect(completed?.meta.locationLabel).toBe('Austin, TX');
     expect(completed?.meta.progress.enriched).toBe(1);
     expect(completed?.meta.progress.qualifiedCount).toBe(1);
@@ -141,7 +141,7 @@ describe('createSearchService', () => {
     expect(completed?.leads[0]?.qualified).toBe(true);
   });
 
-  it('keeps category warnings while still serving leads after the queued job completes', async () => {
+  it('keeps category warnings while keeping the job open until the target is met', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 
     const service = createSearchService({
@@ -178,7 +178,7 @@ describe('createSearchService', () => {
     await task();
     const result = await service.getSearch('search-3');
 
-    expect(result?.meta.status).toBe('complete');
+    expect(result?.meta.status).toBe('qualifying');
     expect(result?.leads).toHaveLength(1);
     expect(result?.meta.providerWarnings).toEqual([
       expect.objectContaining({
@@ -187,7 +187,7 @@ describe('createSearchService', () => {
     ]);
   });
 
-  it('fans out a nationwide search across multiple regional discovery batches', async () => {
+  it('fans out a nationwide search across multiple regional discovery batches without closing early', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
     const googleCalls: string[] = [];
     const osmCalls: string[] = [];
@@ -238,9 +238,9 @@ describe('createSearchService', () => {
     await task();
     const completed = await service.getSearch('search-4');
 
-    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.meta.status).toBe('enriching');
     expect(completed?.meta.locationLabel).toBe('United States');
-    expect(completed?.meta.progress.currentSource).toBe('Complete');
+    expect(completed?.meta.progress.currentSource).toBe('Website Crawl');
     expect(googleCalls.length).toBeGreaterThan(1);
     expect(osmCalls.length).toBeGreaterThan(1);
     expect(completed?.leads.length).toBeGreaterThanOrEqual(1);

@@ -77,15 +77,17 @@ export const enrichLead = (lead: Lead): Lead => {
     lead.rejectionReason === 'blocked_website' || lead.rejectionReason === 'blocked_google'
       ? lead.rejectionReason
       : undefined;
-  const rejectionReason = qualified
-    ? undefined
-    : !mobile.trim()
-      ? 'missing_phone'
-      : !hasPhone
-        ? 'invalid_phone'
-        : !verifiedEmail
-          ? 'missing_email'
-          : preservedBlockedReason ?? lead.rejectionReason;
+  const rejectionReason = preservedBlockedReason
+    ? preservedBlockedReason
+    : qualified
+      ? undefined
+      : !mobile.trim()
+        ? 'missing_phone'
+        : !hasPhone
+          ? 'invalid_phone'
+          : !verifiedEmail
+            ? 'missing_email'
+            : lead.rejectionReason;
 
   const enriched: Lead = {
     ...lead,

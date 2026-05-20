@@ -124,6 +124,15 @@ const rankDiscoveryCandidates = (leads: Lead[]) =>
     );
   });
 
+const hasEnrichmentTargets = (job: SearchJob) =>
+  job.leads.some(
+    (lead) =>
+      lead.website &&
+      !lead.qualified &&
+      lead.rejectionReason !== 'blocked_website' &&
+      lead.rejectionReason !== 'blocked_google',
+  );
+
 const computeTotals = (leads: Lead[]) => ({
   total: leads.length,
   withEmail: leads.filter((lead) => lead.hasEmail).length,
@@ -403,8 +412,16 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       }
     }
 
-    job.status = 'complete';
-    job.progress.currentSource = 'Complete';
+    if (job.progress.qualifiedCount >= job.request.count) {
+      job.status = 'complete';
+      job.progress.currentSource = 'Complete';
+    } else if (hasEnrichmentTargets(job)) {
+      job.status = 'enriching';
+      job.progress.currentSource = 'Website Crawl';
+    } else {
+      job.status = 'qualifying';
+      job.progress.currentSource = 'Qualification';
+    }
     refreshProgress(job);
   };
 
