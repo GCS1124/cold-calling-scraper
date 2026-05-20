@@ -1,0 +1,114 @@
+- generic [ref=e2]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - paragraph [ref=e7]:
+        - img [ref=e8]
+        - text: Lead Finder Pro
+      - heading "Find leads in seconds." [level=1] [ref=e11]
+      - paragraph [ref=e12]: Search US businesses by category and metro area, blend live APIs with open mapping discovery and direct website crawling, then export a clean outbound list without leaving the browser.
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - paragraph [ref=e15]: Visual Thesis
+          - paragraph [ref=e16]: Editorial first viewport, quiet data surfaces, and a US-market search workflow built for speed.
+        - generic [ref=e17]:
+          - paragraph [ref=e18]: Interaction Thesis
+          - paragraph [ref=e19]: Search-first motion, quick table scanning, and export readiness for US lead lists without clutter.
+    - generic [ref=e21]:
+      - generic [ref=e22]:
+        - text: Company Type
+        - generic [ref=e23]:
+          - combobox "Company Type" [ref=e24]
+          - img
+      - generic [ref=e25]:
+        - text: City
+        - generic [ref=e26]:
+          - combobox "City" [ref=e27]
+          - img
+      - generic [ref=e28]:
+        - text: "Results:"
+        - generic [ref=e29]: "50"
+        - 'slider "Results: 50" [ref=e30]': "50"
+      - button "Find Leads" [disabled] [ref=e31]:
+        - img [ref=e32]
+        - text: Find Leads
+  - main [ref=e35]:
+    - generic [ref=e36]:
+      - generic [ref=e37]:
+        - paragraph [ref=e38]: Search Summary
+        - heading "0 qualified leads ready for your query in your city" [level=2] [ref=e39]
+      - generic [ref=e40]:
+        - paragraph [ref=e41]: Requested
+        - paragraph [ref=e42]: "50"
+      - generic [ref=e43]:
+        - paragraph [ref=e44]: Missing Email
+        - paragraph [ref=e45]: "0"
+      - generic [ref=e46]:
+        - paragraph [ref=e47]: Missing Phone
+        - paragraph [ref=e48]: "0"
+      - generic [ref=e49]:
+        - paragraph [ref=e50]: Blocked
+        - paragraph [ref=e51]: "0"
+      - generic [ref=e52]:
+        - paragraph [ref=e53]: Duplicates
+        - paragraph [ref=e54]: "0"
+    - generic [ref=e55]:
+      - generic [ref=e56]:
+        - complementary [ref=e57]:
+          - generic [ref=e58]:
+            - paragraph [ref=e59]: Filters
+            - heading "Tighten the lead pool" [level=3] [ref=e60]
+          - generic [ref=e61]:
+            - generic [ref=e62]:
+              - checkbox "Has Email" [ref=e63]
+              - text: Has Email
+            - generic [ref=e64]:
+              - checkbox "Has Phone" [ref=e65]
+              - text: Has Phone
+            - generic [ref=e66]:
+              - checkbox "Has Website" [ref=e67]
+              - text: Has Website
+            - generic [ref=e68]:
+              - checkbox "Include partial leads" [ref=e69]
+              - text: Include partial leads
+            - generic [ref=e70]:
+              - checkbox "Show rejected leads" [ref=e71]
+              - text: Show rejected leads
+          - generic [ref=e72]:
+            - text: Source
+            - combobox "Source" [ref=e73]:
+              - option "All sources" [selected]
+        - generic [ref=e74]:
+          - paragraph [ref=e75]:
+            - img [ref=e76]
+            - text: Export Queue
+          - paragraph [ref=e78]: "0"
+          - paragraph [ref=e79]: Qualified leads only are export-ready by default.
+      - generic [ref=e81]:
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - paragraph [ref=e84]: Results
+            - paragraph [ref=e85]: Click any company row to verify details before export.
+          - button "Select visible" [ref=e86]:
+            - img [ref=e87]
+            - text: Select visible
+        - table "Lead results" [ref=e90]:
+          - rowgroup [ref=e91]:
+            - row "# Company Phone Email Website Source Actions" [ref=e92]:
+              - columnheader "#" [ref=e93]
+              - columnheader "Company" [ref=e94]
+              - columnheader "Phone" [ref=e95]
+              - columnheader "Email" [ref=e96]
+              - columnheader "Website" [ref=e97]
+              - columnheader "Source" [ref=e98]
+              - columnheader "Actions" [ref=e99]
+          - rowgroup [ref=e100]:
+            - row "No leads match the current filters." [ref=e101]:
+              - cell "No leads match the current filters." [ref=e102]
+  - generic [ref=e103]:
+    - generic [ref=e104]:
+      - paragraph [ref=e105]: Ready to export
+      - paragraph [ref=e106]: 0 qualified visible leads
+    - button "Download Excel" [ref=e107]:
+      - img [ref=e108]
+      - text: Download Excel
+  - region "Notifications alt+T"

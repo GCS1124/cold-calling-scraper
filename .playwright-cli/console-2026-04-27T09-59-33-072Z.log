@@ -1,0 +1,89 @@
+[     383ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=8840f867:14336
+[   61772ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[ 3332840ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:14336
+[ 3694627ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:14336
+[ 3704376ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:14336
+[ 3755940ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:14336
+[ 3758764ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:14336
+[ 4603352ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5174/src/components/FeaturedListings.tsx?t=1777288576250:0
+[ 4603355ms] [ERROR] [vite] Failed to reload /src/pages/HomePage.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:5174/@vite/client:904
+[ 4603520ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5174/src/components/FeaturedListings.tsx?t=1777288576247:0
+[ 4603527ms] [ERROR] [vite] Failed to reload /src/components/FeaturedListings.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:5174/@vite/client:904
+[ 4603528ms] [ERROR] [vite] Failed to reload /src/components/FeaturedListings.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:5174/@vite/client:904
+[ 4603531ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5174/src/components/CinematicShowcase.tsx?t=1777288576250:0
+[ 4603532ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5174/src/components/SignatureStory.tsx?t=1777288576250:0
+[ 4603533ms] [ERROR] [vite] Failed to reload /src/components/CinematicShowcase.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:5174/@vite/client:904
+[ 4603533ms] [ERROR] [vite] Failed to reload /src/components/SignatureStory.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:5174/@vite/client:904
+[ 4603550ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5174/src/components/SignatureStory.tsx?t=1777288576251:0
+[ 4603566ms] [ERROR] [vite] Failed to reload /src/components/SignatureStory.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:5174/@vite/client:904
+[ 4603576ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5174/src/components/CinematicShowcase.tsx?t=1777288576252:0
+[ 4603576ms] [ERROR] [vite] Failed to reload /src/components/CinematicShowcase.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:5174/@vite/client:904
+[ 4940973ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5174/src/components/FeaturedListings.tsx?t=1777288576250:0
+[ 4955070ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5174/src/components/FeaturedListings.tsx?t=1777288576250:0
+[ 5004825ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5174/src/components/FeaturedListings.tsx?t=1777288977772:0
+[ 5005118ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5174/src/components/FeaturedListings.tsx?t=1777288978071:0
+[ 5084964ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:14336
+[ 6728203ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:14336
+[ 8851511ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:14336
+[ 8994814ms] [ERROR] Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem. @ http://localhost:5174/node_modules/.vite/deps/react-BDWiK9rz.js?v=9e821a66:327
+[ 8994821ms] [ERROR] Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem. @ http://localhost:5174/node_modules/.vite/deps/react-BDWiK9rz.js?v=9e821a66:327
+[ 8994846ms] TypeError: Cannot read properties of null (reading 'useState')
+    at exports.useState (http://localhost:5174/node_modules/.vite/deps/react-BDWiK9rz.js?v=9e821a66:779:30)
+    at LazyMotion (http://localhost:5174/node_modules/.vite/deps/framer-motion.js?v=3dca199c:9181:52)
+    at Object.react_stack_bottom_frame (http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:12867:12)
+    at renderWithHooks (http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:4212:19)
+    at updateFunctionComponent (http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:5568:16)
+    at beginWork (http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:6139:20)
+    at runWithFiberInDEV (http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:850:66)
+    at performUnitOfWork (http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:8428:92)
+    at workLoopSync (http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:8324:37)
+    at renderRootSync (http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:8308:6)
+[ 8994830ms] [WARNING] %s
+
+%s
+ An error occurred in the <LazyMotion> component. Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries. @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=f90af0e4:5256
+[ 8995094ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[ 9560544ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[ 9872913ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[10407171ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[10407480ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[17065337ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[17065403ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[22414484ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[22414555ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[25687033ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[25687194ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[27028875ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[27029022ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[28942180ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[28942631ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[28955586ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[28955900ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[29027853ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[29028099ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[29831006ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[29831115ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[31368635ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[31370723ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[53717103ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[53717363ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[60138272ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[60138667ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[60588120ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[60588241ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[60776640ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[60776741ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[60955343ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[60956054ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[61141274ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968
+[61142012ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=9e821a66:14336
+[67882321ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:968

@@ -1,0 +1,24 @@
+{
+  "name": "cold-calling-scraper",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Lead Finder Pro monorepo",
+  "packageManager": "npm@11.6.2",
+  "scripts": {
+    "dev": "npm run dev --workspace client",
+    "build": "npm run build --workspace client && npm run build --workspace server",
+    "test": "npm run test --workspace server && npm run test --workspace client"
+  },
+  "license": "ISC",
+  "type": "module",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "dependencies": {
+    "@vercel/postgres": "^0.10.0"
+  }
+}

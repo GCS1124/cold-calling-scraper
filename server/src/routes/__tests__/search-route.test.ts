@@ -1,0 +1,172 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  handleGetSearch,
+  handleStartSearch,
+  type SearchService,
+} from '../search';
+
+const sampleResponse = {
+  searchId: 'search-1',
+  leads: [],
+  meta: {
+    query: 'Dental Clinics in Austin, TX',
+    locationLabel: 'Austin, TX',
+    status: 'complete' as const,
+    progress: {
+      discovered: 0,
+      enriched: 0,
+      totalCandidates: 0,
+      requestedCount: 50,
+      qualifiedCount: 0,
+      discardedCount: 0,
+      blockedCount: 0,
+      duplicatesRemoved: 0,
+      currentSource: 'Queued',
+      batchesCompleted: 0,
+      estimatedRemaining: 50,
+    },
+    totals: {
+      total: 0,
+      withEmail: 0,
+      withPhone: 0,
+      withWebsite: 0,
+    },
+    providerWarnings: [],
+  },
+};
+
+const createResponse = () => {
+  const state = {
+    statusCode: 200,
+    body: undefined as unknown,
+  };
+
+  const response = {
+    status(code: number) {
+      state.statusCode = code;
+      return response;
+    },
+    json(payload: unknown) {
+      state.body = payload;
+      return response;
+    },
+  };
+
+  return {
+    response,
+    state,
+  };
+};
+
+describe('/api/search handlers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects malformed payloads', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn(),
+    };
+    const { response, state } = createResponse();
+
+    await handleStartSearch(
+      search,
+      {
+        body: {
+          companyType: '',
+          city: 'Austin',
+          count: 10,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(400);
+    expect(state.body).toMatchObject({
+      error: 'Invalid search request',
+      details: {
+        fieldErrors: {
+          companyType: expect.any(Array),
+          count: expect.any(Array),
+        },
+      },
+    });
+  });
+
+  it('returns the staged search response from the service layer', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn().mockResolvedValue(sampleResponse as never),
+      getSearch: vi.fn(),
+    };
+    const { response, state } = createResponse();
+
+    await handleStartSearch(
+      search,
+      {
+        body: {
+          companyType: 'Dental Clinics',
+          city: 'Austin',
+          count: 50,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(200);
+    expect(search.startSearch).toHaveBeenCalledOnce();
+    expect(state.body).toMatchObject({
+      searchId: 'search-1',
+      meta: {
+        locationLabel: 'Austin, TX',
+      },
+    });
+  });
+
+  it('returns search job snapshots by id', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn().mockResolvedValue(sampleResponse as never),
+    };
+    const { response, state } = createResponse();
+
+    await handleGetSearch(
+      search,
+      {
+        params: {
+          searchId: 'search-1',
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(200);
+    expect(search.getSearch).toHaveBeenCalledWith('search-1');
+    expect(state.body).toMatchObject({
+      searchId: 'search-1',
+      meta: {
+        locationLabel: 'Austin, TX',
+      },
+    });
+  });
+
+  it('returns 404 when a search id is missing', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn(),
+    };
+    const { response, state } = createResponse();
+
+    await handleGetSearch(
+      search,
+      {
+        params: {},
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(400);
+    expect(state.body).toEqual({ error: 'Missing search id' });
+  });
+});

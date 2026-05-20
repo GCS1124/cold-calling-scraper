@@ -1,0 +1,16 @@
+{
+  "installCommand": "npm install",
+  "buildCommand": "npm run build --workspace client",
+  "outputDirectory": "client/dist",
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/((?!api/.*).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

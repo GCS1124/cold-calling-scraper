@@ -1,0 +1,14 @@
+node_modules
+coverage
+dist
+.DS_Store
+.env
+client/node_modules
+client/dist
+client/coverage
+server/node_modules
+server/dist
+server/coverage
+server/.env
+.vercel
+.env*.local
