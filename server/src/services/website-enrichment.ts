@@ -182,6 +182,10 @@ const getInternalLinks = (html: string, currentUrl: URL, origin: URL) => {
 export const enrichLeadFromWebsite = async (
   lead: Lead,
 ): Promise<{ lead: Lead; warnings: ProviderWarning[] }> => {
+  if (lead.rejectionReason === 'blocked_website') {
+    return { lead, warnings: [] };
+  }
+
   const website = normalizeUrl(lead.website ?? '');
   if (!website) {
     return { lead, warnings: [] };
@@ -195,11 +199,11 @@ export const enrichLeadFromWebsite = async (
         {
           providerId: 'website-crawl',
           providerName: 'Website Crawl',
-          message: `${origin.hostname} is not used as a primary business website.`,
-        },
-      ],
-    };
-  }
+      message: `${origin.hostname} is not used as a primary business website.`,
+      },
+    ],
+  };
+}
 
   const queue = [{ url: website, depth: 0 }];
   const visited = new Set<string>();
@@ -228,17 +232,17 @@ export const enrichLeadFromWebsite = async (
 
       const contentType = String(response.headers['content-type'] ?? '');
       if (response.status >= 400 || blockedPattern.test(response.data)) {
-        warnings.push({
-          providerId: 'website-crawl',
-          providerName: 'Website Crawl',
-          message: `${origin.hostname} blocked contact crawling at ${current.url}`,
-        });
         const rejectedLead: Lead = {
           ...lead,
           crawlAttempts: visited.size,
           rejectionReason: lead.rejectionReason ?? 'blocked_website',
         };
         lead = rejectedLead;
+        warnings.push({
+          providerId: 'website-crawl',
+          providerName: 'Website Crawl',
+          message: `${origin.hostname} blocked contact crawling at ${current.url}`,
+        });
         continue;
       }
 
@@ -261,16 +265,16 @@ export const enrichLeadFromWebsite = async (
         }
       }
     } catch {
-      warnings.push({
-        providerId: 'website-crawl',
-        providerName: 'Website Crawl',
-        message: `${origin.hostname} timed out during contact crawling.`,
-      });
       lead = {
         ...lead,
         crawlAttempts: visited.size,
         rejectionReason: lead.rejectionReason ?? 'blocked_website',
       };
+      warnings.push({
+        providerId: 'website-crawl',
+        providerName: 'Website Crawl',
+        message: `${origin.hostname} timed out during contact crawling.`,
+      });
     }
   }
 

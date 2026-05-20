@@ -170,7 +170,7 @@ export const discoverUsLeadsFromGoogleMaps = async ({
   });
 
   try {
-    const maxResults = Math.min(Math.max(Math.ceil(request.count / 2), 18), 36);
+    const maxResults = Math.min(Math.max(Math.ceil(request.count * 0.6), 20), 30);
     const query = `${request.companyType} in ${location.label}`;
     await page.goto(`https://www.google.com/maps/search/${encodeURIComponent(query)}`, {
       waitUntil: 'domcontentloaded',

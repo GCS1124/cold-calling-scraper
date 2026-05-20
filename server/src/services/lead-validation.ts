@@ -73,6 +73,10 @@ export const enrichLead = (lead: Lead): Lead => {
   const hasPhone = Boolean(parsedPhone?.isValid() && parsedPhone.country === 'US');
   const hasWebsite = website.length > 0;
   const qualified = verifiedEmail && hasPhone;
+  const preservedBlockedReason =
+    lead.rejectionReason === 'blocked_website' || lead.rejectionReason === 'blocked_google'
+      ? lead.rejectionReason
+      : undefined;
   const rejectionReason = qualified
     ? undefined
     : !mobile.trim()
@@ -81,7 +85,7 @@ export const enrichLead = (lead: Lead): Lead => {
         ? 'invalid_phone'
         : !verifiedEmail
           ? 'missing_email'
-          : lead.rejectionReason;
+          : preservedBlockedReason ?? lead.rejectionReason;
 
   const enriched: Lead = {
     ...lead,

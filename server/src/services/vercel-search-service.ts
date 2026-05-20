@@ -176,7 +176,13 @@ const enrichMissingEmails = async (
   enrichWebsiteLead: typeof enrichLeadFromWebsite,
 ) => {
   const targets = rankDiscoveryCandidates(job.leads)
-    .filter((lead) => lead.website && !lead.verifiedEmail)
+    .filter(
+      (lead) =>
+        lead.website &&
+        !lead.verifiedEmail &&
+        lead.rejectionReason !== 'blocked_website' &&
+        lead.rejectionReason !== 'blocked_google',
+    )
     .slice(0, enrichmentBatchSize);
 
   if (!targets.length) {

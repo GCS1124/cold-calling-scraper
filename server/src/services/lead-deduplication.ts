@@ -56,6 +56,11 @@ const mergeGroup = (group: Lead[]) => {
     hasWebsite: sorted.some((lead) => lead.hasWebsite),
     verifiedEmail: sorted.some((lead) => lead.verifiedEmail),
     verifiedPhone: sorted.some((lead) => lead.verifiedPhone),
+    rejectionReason:
+      sorted.find((lead) => lead.rejectionReason === 'blocked_website')?.rejectionReason ??
+      sorted.find((lead) => lead.rejectionReason === 'blocked_google')?.rejectionReason ??
+      sorted.find((lead) => lead.rejectionReason)?.rejectionReason,
+    crawlAttempts: Math.max(...group.map((lead) => lead.crawlAttempts ?? 0)),
   };
 };
 

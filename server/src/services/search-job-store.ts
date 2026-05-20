@@ -47,6 +47,10 @@ const memoryStore = () => {
   } satisfies SearchJobStore;
 };
 
+const isHiddenWarning = (warning: ProviderWarning) =>
+  warning.providerId === 'website-crawl' &&
+  /blocked contact crawling|timed out during contact crawling/i.test(warning.message);
+
 const postgresStore = (): SearchJobStore => {
   let schemaReady = false;
 
@@ -142,6 +146,6 @@ export const toSearchResponse = (job: SearchJobRecord): SearchResponse => ({
       withPhone: job.leads.filter((lead) => lead.hasPhone).length,
       withWebsite: job.leads.filter((lead) => lead.hasWebsite).length,
     },
-    providerWarnings: job.providerWarnings,
+    providerWarnings: job.providerWarnings.filter((warning) => !isHiddenWarning(warning)),
   },
 });

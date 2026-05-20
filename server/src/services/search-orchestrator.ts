@@ -285,9 +285,15 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
 
   const runEnrichment = async (job: SearchJob) => {
     const shortlistSize = Math.max(minimumEnrichmentTarget, job.request.count * 2);
-    const targets = rankDiscoveryCandidates(job.leads)
-      .filter((lead) => lead.website && !lead.qualified)
-      .slice(0, shortlistSize);
+  const targets = rankDiscoveryCandidates(job.leads)
+    .filter(
+      (lead) =>
+        lead.website &&
+        !lead.qualified &&
+        lead.rejectionReason !== 'blocked_website' &&
+        lead.rejectionReason !== 'blocked_google',
+    )
+    .slice(0, shortlistSize);
     if (!targets.length) {
       return;
     }

@@ -265,4 +265,67 @@ describe('createVercelSearchServiceWithDeps', () => {
 
     expect(googleCalls.length).toBeGreaterThan(1);
   });
+
+  it('does not retry blocked website crawls or surface them in the response', async () => {
+    const enrichWebsiteLead = vi
+      .fn()
+      .mockResolvedValue({
+        lead: makeLead({
+          id: 'lead-blocked',
+          website: 'condoblackbook.com',
+          mobile: '',
+          email: '',
+          hasEmail: false,
+          hasPhone: false,
+          hasWebsite: true,
+          verifiedEmail: false,
+          rejectionReason: 'blocked_website',
+        }),
+        warnings: [
+          {
+            providerId: 'website-crawl',
+            providerName: 'Website Crawl',
+            message: 'condoblackbook.com blocked contact crawling at https://condoblackbook.com/',
+          },
+        ],
+      });
+
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      googlePlaces: {
+        id: 'google-places',
+        name: 'Google Places',
+        fetchLeads: vi.fn().mockResolvedValue([
+          makeLead({
+            id: 'lead-blocked',
+            website: 'condoblackbook.com',
+            mobile: '',
+            email: '',
+            hasEmail: false,
+            hasPhone: false,
+            hasWebsite: true,
+            verifiedEmail: false,
+          }),
+        ]),
+      } as never,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      enrichWebsiteLead,
+      idFactory: () => 'search-5',
+      now: () => 1000,
+    });
+
+    const started = await service.startSearch({
+      companyType: 'Medical Clinics',
+      city: 'Miami, FL',
+      count: 50,
+    });
+
+    const first = await service.getSearch(started.searchId);
+    const second = await service.getSearch(started.searchId);
+
+    expect(enrichWebsiteLead).toHaveBeenCalledTimes(1);
+    expect(first?.meta.providerWarnings).toEqual([]);
+    expect(second?.meta.providerWarnings).toEqual([]);
+  });
 });
