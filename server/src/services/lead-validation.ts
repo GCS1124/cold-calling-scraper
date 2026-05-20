@@ -15,7 +15,7 @@ const isLikelyBusinessEmail = (value: string) => {
     return false;
   }
 
-  const topLevelLabel = labels.at(-1) ?? '';
+  const topLevelLabel = labels[labels.length - 1] ?? '';
   if (topLevelLabel.length < 2 || topLevelLabel.length > 12) {
     return false;
   }

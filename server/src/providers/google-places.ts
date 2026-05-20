@@ -63,7 +63,7 @@ export const googlePlacesProvider: LeadProvider = {
     const allResults: GooglePlacesResponse['results'] = [];
     let pageToken: string | undefined;
 
-    for (let pageIndex = 0; pageIndex < 3 && allResults.length < request.count; pageIndex += 1) {
+      for (let pageIndex = 0; pageIndex < 1 && allResults.length < request.count; pageIndex += 1) {
       const response = await axios.get<GooglePlacesResponse>(
         'https://maps.googleapis.com/maps/api/place/textsearch/json',
         {
@@ -73,7 +73,7 @@ export const googlePlacesProvider: LeadProvider = {
             language: 'en',
             pagetoken: pageToken,
           },
-          timeout: 12000,
+          timeout: 6000,
         },
       );
 
@@ -116,7 +116,7 @@ export const googlePlacesProvider: LeadProvider = {
               fields: detailsFields,
               language: 'en',
             },
-            timeout: 12000,
+            timeout: 6000,
           },
         );
 

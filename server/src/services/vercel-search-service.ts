@@ -32,9 +32,9 @@ type VercelSearchServiceDeps = {
 };
 
 const jobTtlMs = 15 * 60 * 1000;
-const discoveryBatchSize = 2;
-const enrichmentBatchSize = 6;
-const perSeedCount = 24;
+const discoveryBatchSize = 1;
+const enrichmentBatchSize = 1;
+const perSeedCount = 12;
 const maxCandidatePool = 3000;
 
 const withNow = () => Date.now();
@@ -327,13 +327,6 @@ export const createVercelSearchServiceWithDeps = (
       };
 
       await store.upsert(job);
-      job = await tickJob(job, store, {
-        googlePlaces,
-        normalizeLocation,
-        discoverOsmLeads: discoverOsm,
-        enrichWebsiteLead,
-        now,
-      });
 
       return toSearchResponse(job);
     },

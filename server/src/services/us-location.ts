@@ -260,7 +260,7 @@ export const normalizeUsLocation = async (
     {
       params: queryParams,
       headers: nominatimHeaders,
-      timeout: 10000,
+      timeout: 6000,
     },
   );
 

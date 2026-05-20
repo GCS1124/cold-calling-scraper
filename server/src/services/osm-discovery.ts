@@ -55,7 +55,7 @@ export const discoverUsLeadsFromOsm = async ({
 }): Promise<Lead[]> => {
   const bbox = `${location.boundingBox.south},${location.boundingBox.west},${location.boundingBox.north},${location.boundingBox.east}`;
   const union = profile.tagClauses.map((clause) => `nwr${clause}(${bbox});`).join('\n');
-  const query = `[out:json][timeout:25];(${union});out center tags;`;
+  const query = `[out:json][timeout:12];(${union});out center tags;`;
 
   let response: OverpassResponse | null = null;
   let lastError: Error | null = null;
@@ -67,7 +67,7 @@ export const discoverUsLeadsFromOsm = async ({
           'Content-Type': 'text/plain',
           'User-Agent': 'LeadFinderPro/1.0 (US-only discovery)',
         },
-        timeout: 20000,
+        timeout: 6000,
       });
 
       response = result.data;

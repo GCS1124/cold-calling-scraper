@@ -1,4 +1,4 @@
-import { vercelSearchService } from '../../server/src/services/vercel-search-service';
+import { vercelSearchService } from '../../server/src/services/vercel-search-service.js';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'GET') {

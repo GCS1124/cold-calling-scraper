@@ -104,6 +104,7 @@ describe('createVercelSearchServiceWithDeps', () => {
 
     expect(started.searchId).toBe('search-1');
     expect(started.meta.query).toBe('Dental Clinics in Austin, TX');
+    expect(started.meta.status).toBe('queued');
 
     const second = createVercelSearchServiceWithDeps({
       store,
@@ -113,7 +114,17 @@ describe('createVercelSearchServiceWithDeps', () => {
       }),
       googlePlaces,
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      enrichWebsiteLead: vi.fn(),
+      enrichWebsiteLead: vi.fn().mockImplementation(async (lead: Lead) => ({
+        lead: {
+          ...lead,
+          email: 'hello@northstarlabs.ai',
+          qualified: true,
+          hasEmail: true,
+          verifiedEmail: true,
+          source: `${lead.source}, Website Crawl`,
+        },
+        warnings: [],
+      })),
       now: () => 2000,
     });
 
@@ -160,10 +171,12 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
     });
 
-    expect(response.leads[0]?.mobile).toBe('+1 512 555 0101');
-    expect(response.leads[0]?.website).toBe('https://northstarlabs.ai');
-    expect(response.leads[0]?.hasPhone).toBe(true);
-    expect(response.leads[0]?.hasWebsite).toBe(true);
+    const snapshot = await service.getSearch(response.searchId);
+
+    expect(snapshot?.leads[0]?.mobile).toBe('+1 512 555 0101');
+    expect(snapshot?.leads[0]?.website).toBe('https://northstarlabs.ai');
+    expect(snapshot?.leads[0]?.hasPhone).toBe(true);
+    expect(snapshot?.leads[0]?.hasWebsite).toBe(true);
   });
 
   it('enriches only missing email fields and keeps the job moving', async () => {
@@ -212,9 +225,11 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
     });
 
-    expect(response.leads[0]?.email).toBe('hello@northstarlabs.ai');
-    expect(response.leads[0]?.qualified).toBe(true);
-    expect(response.meta.progress.qualifiedCount).toBeGreaterThanOrEqual(1);
+    const snapshot = await service.getSearch(response.searchId);
+
+    expect(snapshot?.leads[0]?.email).toBe('hello@northstarlabs.ai');
+    expect(snapshot?.leads[0]?.qualified).toBe(true);
+    expect(snapshot?.meta.progress.qualifiedCount).toBeGreaterThanOrEqual(1);
   });
 
   it('fans out nationwide searches across multiple state seeds', async () => {
@@ -244,6 +259,9 @@ describe('createVercelSearchServiceWithDeps', () => {
       city: 'USA',
       count: 50,
     });
+
+    await service.getSearch('search-4');
+    await service.getSearch('search-4');
 
     expect(googleCalls.length).toBeGreaterThan(1);
   });
