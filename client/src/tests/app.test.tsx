@@ -54,19 +54,19 @@ const completedResponse: SearchResponse = {
   meta: {
     query: 'Dental Clinics in Austin, TX',
     locationLabel: 'Austin, TX',
-    status: 'complete',
+      status: 'complete',
     progress: {
       discovered: 2,
       enriched: 2,
       totalCandidates: 2,
-      requestedCount: 50,
+      requestedCount: 200,
       qualifiedCount: 1,
       discardedCount: 1,
       blockedCount: 0,
       duplicatesRemoved: 0,
       currentSource: 'Complete',
       batchesCompleted: 2,
-      estimatedRemaining: 49,
+      estimatedRemaining: 199,
     },
     totals: {
       total: 2,
@@ -115,14 +115,14 @@ describe('App', () => {
     expect(searchApi.startSearch).toHaveBeenCalledWith({
       companyType: 'Dental Clinics',
       city: 'Austin',
-      count: 50,
+      count: 200,
     });
 
     expect(await screen.findByText('Northstar Labs')).toBeTruthy();
     expect(
       screen.getByText(/1 qualified leads ready for Dental Clinics in Austin, TX/i),
     ).toBeTruthy();
-    expect(screen.queryByText('Orbit Data Works')).toBeNull();
+    expect(screen.getByText('Orbit Data Works')).toBeTruthy();
     expect(screen.queryByText(/South Congress/i)).toBeNull();
   });
 
@@ -163,10 +163,46 @@ describe('App', () => {
     expect(screen.getByText(/Website Crawl:/i)).toBeTruthy();
   });
 
-  it('can include partial rows when the power-user toggle is enabled', async () => {
+  it('can reveal rejected rows when the rejected toggle is enabled', async () => {
+    const rejectedLeadResponse: SearchResponse = {
+      ...completedResponse,
+      leads: [
+        ...completedResponse.leads,
+        {
+          id: 'lead-3',
+          name: 'Condo Blackbook',
+          mobile: '',
+          email: '',
+          website: 'https://condoblackbook.com',
+          address: '',
+          category: 'Dental Clinics',
+          city: 'Austin, TX',
+          source: 'Google Places',
+          confidence: 42,
+          sourceScore: 40,
+          qualified: false,
+          rejectionReason: 'blocked_website',
+          hasEmail: false,
+          hasPhone: false,
+          hasWebsite: true,
+          verifiedPhone: false,
+          verifiedEmail: false,
+          scrapedAt: '2026-04-21T00:00:00.000Z',
+        },
+      ],
+      meta: {
+        ...completedResponse.meta,
+        progress: {
+          ...completedResponse.meta.progress,
+          blockedCount: 1,
+          discardedCount: 2,
+        },
+      },
+    };
+
     const searchApi: SearchApi = {
-      startSearch: vi.fn().mockResolvedValue(completedResponse),
-      getSearch: vi.fn().mockResolvedValue(completedResponse),
+      startSearch: vi.fn().mockResolvedValue(rejectedLeadResponse),
+      getSearch: vi.fn().mockResolvedValue(rejectedLeadResponse),
     };
     const user = userEvent.setup();
 
@@ -179,12 +215,12 @@ describe('App', () => {
     await screen.findByText('Northstar Labs');
     const table = screen.getByRole('table', { name: /lead results/i });
     expect(within(table).getByText('Northstar Labs')).toBeTruthy();
-    expect(within(table).queryByText('Orbit Data Works')).toBeNull();
-
-    await user.click(screen.getByLabelText(/include partial leads/i));
-
-    expect(within(table).getByText('Northstar Labs')).toBeTruthy();
     expect(within(table).getByText('Orbit Data Works')).toBeTruthy();
-    expect(within(table).getByText(/missing email/i)).toBeTruthy();
+    expect(within(table).queryByText('Condo Blackbook')).toBeNull();
+
+    await user.click(screen.getByLabelText(/show rejected leads/i));
+
+    expect(within(table).getByText('Condo Blackbook')).toBeTruthy();
+    expect(within(table).getByText(/blocked website/i)).toBeTruthy();
   });
 });

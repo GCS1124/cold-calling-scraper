@@ -1,8 +1,14 @@
 import type { SearchRequest, SearchResponse } from '../types/lead';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() ?? '';
+const minimumRequestedCount = 200;
 
 const getApiBase = () => API_BASE_URL || '';
+
+const normalizeRequest = (request: SearchRequest): SearchRequest => ({
+  ...request,
+  count: Math.max(request.count, minimumRequestedCount),
+});
 
 const parseError = async (response: Response) => {
   try {
@@ -29,12 +35,13 @@ export type SearchApi = {
 
 export const searchApi: SearchApi = {
   async startSearch(request) {
+    const normalized = normalizeRequest(request);
     const response = await fetchFromApi('/api/search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(request),
+      body: JSON.stringify(normalized),
     });
 
     return response.json() as Promise<SearchResponse>;

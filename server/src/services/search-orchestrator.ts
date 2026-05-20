@@ -377,7 +377,15 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
               nationwideStateQueries.map((seed) => normalizeLocation(seed)),
             )),
           ]
-        : [location];
+        : [
+            location,
+            ...(location.stateCode
+              ? [await normalizeLocation(location.stateCode)]
+              : []),
+            ...(await Promise.all(
+              nationwideStateQueries.map((seed) => normalizeLocation(seed)),
+            )),
+          ];
 
     for (const regionalLocation of discoveryLocations) {
       if (job.progress.qualifiedCount >= job.request.count) {

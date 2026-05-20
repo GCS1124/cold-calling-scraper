@@ -17,14 +17,14 @@ const sampleResponse = {
       discovered: 0,
       enriched: 0,
       totalCandidates: 0,
-      requestedCount: 50,
+      requestedCount: 200,
       qualifiedCount: 0,
       discardedCount: 0,
       blockedCount: 0,
       duplicatesRemoved: 0,
       currentSource: 'Queued',
       batchesCompleted: 0,
-      estimatedRemaining: 50,
+      estimatedRemaining: 200,
     },
     totals: {
       total: 0,
@@ -108,7 +108,7 @@ describe('/api/search handlers', () => {
         body: {
           companyType: 'Dental Clinics',
           city: 'Austin',
-          count: 50,
+          count: 200,
         },
       },
       response,
@@ -116,6 +116,11 @@ describe('/api/search handlers', () => {
 
     expect(state.statusCode).toBe(200);
     expect(search.startSearch).toHaveBeenCalledOnce();
+    expect(search.startSearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        count: 200,
+      }),
+    );
     expect(state.body).toMatchObject({
       searchId: 'search-1',
       meta: {

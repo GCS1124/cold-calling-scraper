@@ -32,9 +32,9 @@ type VercelSearchServiceDeps = {
 };
 
 const jobTtlMs = 15 * 60 * 1000;
-const discoveryBatchSize = 1;
-const enrichmentBatchSize = 1;
-const perSeedCount = 30;
+const discoveryBatchSize = 2;
+const enrichmentBatchSize = 2;
+const perSeedCount = 100;
 const maxCandidatePool = 3000;
 
 const withNow = () => Date.now();
@@ -55,8 +55,18 @@ const createProgress = (requestedCount: number): SearchProgress => ({
 
 const normalizeLead = (lead: Lead) => enrichLead(lead);
 
-const toSearchSeeds = (location: NormalizedUsLocation) =>
-  location.mode === 'nationwide' ? [...nationwideStateQueries] : [location.label];
+const toSearchSeeds = (location: NormalizedUsLocation) => {
+  if (location.mode === 'nationwide') {
+    return [...nationwideStateQueries];
+  }
+
+  const seeds = [location.label];
+  if (location.stateCode && location.stateCode !== location.label) {
+    seeds.push(location.stateCode);
+  }
+  seeds.push(...nationwideStateQueries);
+  return seeds;
+};
 
 const rankDiscoveryCandidates = (leads: Lead[]) =>
   [...leads].sort((left, right) => {
@@ -157,21 +167,27 @@ const discoverRegionLeads = async (
   }
 
   let osmLeads: Lead[] = [];
-  if (googleLeads.length < Math.ceil(perSeedCount / 2)) {
-    try {
-      osmLeads = await discoverOsmLeads({
-        request: googleRequest,
-        location,
-        profile,
-      });
-    } catch (error) {
-      warnings.push({
-        providerId: 'osm-discovery',
-        providerName: 'OpenStreetMap',
-        message:
-          error instanceof Error ? error.message : 'OpenStreetMap discovery failed',
-      });
-    }
+  try {
+    osmLeads = await discoverOsmLeads({
+      request: googleRequest,
+      location,
+      profile,
+    });
+  } catch (error) {
+    warnings.push({
+      providerId: 'osm-discovery',
+      providerName: 'OpenStreetMap',
+      message:
+        error instanceof Error ? error.message : 'OpenStreetMap discovery failed',
+    });
+  }
+
+  if (!googleLeads.length && !osmLeads.length) {
+    warnings.push({
+      providerId: 'discovery',
+      providerName: 'Discovery',
+      message: `No discovery candidates returned for ${location.label}`,
+    });
   }
 
   return {

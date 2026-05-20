@@ -9,6 +9,13 @@ export type SearchService = {
   getSearch: (searchId: string) => Promise<SearchResponse | null>;
 };
 
+const minimumRequestedCount = 200;
+
+const normalizeRequest = (request: SearchRequest): SearchRequest => ({
+  ...request,
+  count: Math.max(request.count, minimumRequestedCount),
+});
+
 type SearchResponder = {
   status: (code: number) => SearchResponder;
   json: (payload: unknown) => SearchResponder;
@@ -21,7 +28,7 @@ export const handleStartSearch = async (
 ) => {
   try {
     const payload = searchRequestSchema.parse(req.body);
-    const response = await search.startSearch(payload);
+    const response = await search.startSearch(normalizeRequest(payload));
 
     res.status(200).json(response);
   } catch (error) {

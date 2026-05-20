@@ -76,7 +76,7 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
         Results: <span className="font-mono text-blue-700">{value.count}</span>
         <input
           type="range"
-          min={50}
+          min={200}
           max={500}
           step={25}
           value={value.count}

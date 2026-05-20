@@ -20,7 +20,7 @@ type HomePageProps = {
 const initialSearch: SearchRequest = {
   companyType: '',
   city: '',
-  count: 50,
+  count: 200,
 };
 
 export function HomePage({ searchApi }: HomePageProps) {
@@ -35,7 +35,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     hasPhone: false,
     hasWebsite: false,
     source: 'All',
-    includePartials: false,
+    includePartials: true,
     showRejected: false,
   });
   const { items, rememberSearch } = useSearchHistory();
@@ -128,6 +128,7 @@ export function HomePage({ searchApi }: HomePageProps) {
       const response = await searchApi.startSearch(nextSearch);
       rememberSearch({
         ...nextSearch,
+        count: response.meta.progress.requestedCount,
         city: response.meta.locationLabel || nextSearch.city,
       });
 

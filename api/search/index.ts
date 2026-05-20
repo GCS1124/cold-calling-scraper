@@ -2,6 +2,8 @@ import { ZodError } from 'zod';
 import { searchRequestSchema } from '../_lib/search-contract.js';
 import { vercelSearchService } from '../../server/src/services/vercel-search-service.js';
 
+const minimumRequestedCount = 200;
+
 export default async function handler(req: any, res: any) {
   if (req.method === 'GET') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -10,7 +12,10 @@ export default async function handler(req: any, res: any) {
 
   try {
     const payload = searchRequestSchema.parse(req.body);
-    const response = await vercelSearchService.startSearch(payload);
+    const response = await vercelSearchService.startSearch({
+      ...payload,
+      count: Math.max(payload.count, minimumRequestedCount),
+    });
     res.status(200).json(response);
   } catch (error) {
     if (error instanceof ZodError) {
