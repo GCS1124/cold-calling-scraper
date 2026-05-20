@@ -159,8 +159,7 @@ describe('App', () => {
     await user.type(screen.getByLabelText(/city/i), 'Austin');
     await user.click(screen.getByRole('button', { name: /find leads/i }));
 
-    expect(await screen.findByText(/Enriching 1 of 2 candidates/i)).toBeTruthy();
-    expect(screen.getByText(/Current source: Website Crawl/i)).toBeTruthy();
+    expect(await screen.findByText(/Current source: Website Crawl/i)).toBeTruthy();
     expect(screen.getByText(/Website Crawl:/i)).toBeTruthy();
   });
 

@@ -1,10 +1,8 @@
 import type { SearchRequest, SearchResponse } from '../types/lead';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
-const fallbackApiBaseUrls = ['http://127.0.0.1:4000', 'http://localhost:4000'];
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() ?? '';
 
-const getApiBases = () =>
-  API_BASE_URL ? [API_BASE_URL] : ['', ...fallbackApiBaseUrls];
+const getApiBase = () => API_BASE_URL || '';
 
 const parseError = async (response: Response) => {
   try {
@@ -15,40 +13,13 @@ const parseError = async (response: Response) => {
   }
 };
 
-const fetchAcrossBases = async (
-  path: string,
-  init?: RequestInit,
-): Promise<Response> => {
-  let lastError: Error | null = null;
-
-  for (const base of getApiBases()) {
-    const url = `${base}${path}`;
-
-    try {
-      const response = await fetch(url, init);
-      if (!response.ok) {
-        lastError = new Error(await parseError(response));
-        continue;
-      }
-
-      return response;
-    } catch (error) {
-      if (error instanceof TypeError) {
-        lastError = error;
-        continue;
-      }
-
-      throw error;
-    }
+const fetchFromApi = async (path: string, init?: RequestInit): Promise<Response> => {
+  const response = await fetch(`${getApiBase()}${path}`, init);
+  if (!response.ok) {
+    throw new Error(await parseError(response));
   }
 
-  if (lastError instanceof TypeError) {
-    throw new Error(
-      'Lead Finder API is not reachable in dev. Start the app with `npm run dev` from the repo root.',
-    );
-  }
-
-  throw lastError ?? new Error('Failed to fetch US lead results');
+  return response;
 };
 
 export type SearchApi = {
@@ -58,7 +29,7 @@ export type SearchApi = {
 
 export const searchApi: SearchApi = {
   async startSearch(request) {
-    const response = await fetchAcrossBases('/api/search', {
+    const response = await fetchFromApi('/api/search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -70,7 +41,7 @@ export const searchApi: SearchApi = {
   },
 
   async getSearch(searchId) {
-    const response = await fetchAcrossBases(`/api/search/${searchId}`);
+    const response = await fetchFromApi(`/api/search/${searchId}`);
     return response.json() as Promise<SearchResponse>;
   },
 };

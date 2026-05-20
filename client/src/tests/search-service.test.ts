@@ -80,27 +80,21 @@ describe('searchApi', () => {
     expect(globalThis.fetch).toHaveBeenCalledWith('/api/search/search-1', undefined);
   });
 
-  it('falls back to the local API server when the current dev origin does not proxy /api', async () => {
-    const json = vi.fn().mockResolvedValue(successfulPayload);
+  it('surfaces an API error without falling back to localhost', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: vi.fn().mockResolvedValue({ error: 'Not found' }),
+    } as unknown as Response);
 
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        json: vi.fn().mockResolvedValue({ error: 'Not found' }),
-      } as unknown as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        json,
-      } as unknown as Response);
+    await expect(
+      searchApi.startSearch({
+        companyType: 'Dental Clinics',
+        city: 'Austin',
+        count: 50,
+      }),
+    ).rejects.toThrow('Not found');
 
-    await searchApi.startSearch({
-      companyType: 'Dental Clinics',
-      city: 'Austin',
-      count: 50,
-    });
-
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, '/api/search', {
+    expect(globalThis.fetch).toHaveBeenCalledWith('/api/search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -111,21 +105,6 @@ describe('searchApi', () => {
         count: 50,
       }),
     });
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      2,
-      'http://127.0.0.1:4000/api/search',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          companyType: 'Dental Clinics',
-          city: 'Austin',
-          count: 50,
-        }),
-      },
-    );
   });
 
   it('surfaces a helpful error when the API is unreachable', async () => {
@@ -137,8 +116,6 @@ describe('searchApi', () => {
         city: 'Austin',
         count: 50,
       }),
-    ).rejects.toThrow(
-      'Lead Finder API is not reachable in dev. Start the app with `npm run dev` from the repo root.',
-    );
+    ).rejects.toThrow('Failed to fetch');
   });
 });
