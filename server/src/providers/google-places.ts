@@ -1,7 +1,8 @@
 import axios from 'axios';
+import pLimit from 'p-limit';
 
 import type { Lead } from '../types/lead';
-import type { LeadProvider } from './provider';
+import type { LeadProvider, LeadProviderRequest } from './provider';
 
 type GooglePlacesResponse = {
   status?: string;
@@ -27,8 +28,6 @@ type GooglePlaceDetailsResponse = {
   };
 };
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 const toLeadId = (placeId?: string, fallbackIndex?: number) =>
   placeId ? `google-${placeId}` : `google-${fallbackIndex ?? 0}`;
 
@@ -45,7 +44,7 @@ const normalizePhone = (value?: string) => (value?.trim() ?? '').replace(/\s+/g,
 export const googlePlacesProvider: LeadProvider = {
   id: 'google-places',
   name: 'Google Places',
-  async fetchLeads({ query, queryVariants = [], request }) {
+  async fetchLeads({ query, queryVariants = [], request, deadlineMs: requestDeadlineMs }: LeadProviderRequest) {
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
     if (!apiKey) {
       throw new Error('GOOGLE_PLACES_API_KEY is not configured');
@@ -61,12 +60,23 @@ export const googlePlacesProvider: LeadProvider = {
     ].join(',');
 
     const allResults: GooglePlacesResponse['results'] = [];
-    const searchQueries = [...new Set([query, ...queryVariants].map((value) => value.trim()).filter(Boolean))].slice(0, 6);
+    const searchQueries = [...new Set([query, ...queryVariants].map((value) => value.trim()).filter(Boolean))].slice(0, 1);
+    const deadlineMs = requestDeadlineMs ?? Date.now() + 5_000;
+    const limit = pLimit(2);
+    const maxLeadCount = Math.min(request.count, 6);
 
     for (const searchQuery of searchQueries) {
+      if (Date.now() >= deadlineMs) {
+        break;
+      }
+
       let pageToken: string | undefined;
 
-      for (let pageIndex = 0; pageIndex < 3 && allResults.length < request.count; pageIndex += 1) {
+      for (let pageIndex = 0; pageIndex < 1 && allResults.length < maxLeadCount; pageIndex += 1) {
+        if (Date.now() >= deadlineMs) {
+          break;
+        }
+
         const response = await axios.get<GooglePlacesResponse>(
           'https://maps.googleapis.com/maps/api/place/textsearch/json',
           {
@@ -76,7 +86,7 @@ export const googlePlacesProvider: LeadProvider = {
               language: 'en',
               pagetoken: pageToken,
             },
-            timeout: 6000,
+            timeout: 4000,
           },
         );
 
@@ -95,11 +105,10 @@ export const googlePlacesProvider: LeadProvider = {
         allResults.push(...(response.data.results ?? []));
         pageToken = response.data.next_page_token;
 
-        if (!pageToken || allResults.length >= request.count) {
+        if (!pageToken || allResults.length >= maxLeadCount) {
           break;
         }
 
-        await sleep(2000);
       }
     }
 
@@ -107,10 +116,15 @@ export const googlePlacesProvider: LeadProvider = {
       allResults
         .filter((place) => place.place_id)
         .map((place) => [place.place_id as string, place] as const),
-    ).values()].slice(0, request.count);
+    ).values()].slice(0, maxLeadCount);
 
-    const leads = await Promise.all(
-      uniqueResults.map(async (place, index) => {
+    const leads: Array<Lead | null> = await Promise.all(
+      uniqueResults.map((place, index) =>
+        limit(async () => {
+          if (Date.now() >= deadlineMs) {
+            return null;
+          }
+
         const detailsResponse = await axios.get<GooglePlaceDetailsResponse>(
           'https://maps.googleapis.com/maps/api/place/details/json',
           {
@@ -120,7 +134,7 @@ export const googlePlacesProvider: LeadProvider = {
               fields: detailsFields,
               language: 'en',
             },
-            timeout: 6000,
+            timeout: 4000,
           },
         );
 
@@ -155,9 +169,10 @@ export const googlePlacesProvider: LeadProvider = {
           verifiedEmail: false,
           scrapedAt: new Date().toISOString(),
         } satisfies Lead;
-      }),
+        }),
+      ),
     );
 
-    return leads;
+    return leads.filter((lead): lead is Lead => Boolean(lead));
   },
 };

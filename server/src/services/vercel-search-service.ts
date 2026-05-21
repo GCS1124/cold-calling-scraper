@@ -32,8 +32,9 @@ type VercelSearchServiceDeps = {
 };
 
 const jobTtlMs = 15 * 60 * 1000;
-const discoveryBatchSize = 3;
-const perSeedCount = 180;
+const discoveryBatchSize = 1;
+const perSeedCount = 6;
+const maxTickDurationMs = 5_000;
 const maxCandidatePool = 3000;
 
 const withNow = () => Date.now();
@@ -121,6 +122,7 @@ const discoverRegionLeads = async (
   googlePlaces: typeof googlePlacesProvider,
   discoverOsmLeads: typeof discoverUsLeadsFromOsm,
   profile = resolveCategoryProfile(request.companyType),
+  deadlineMs = Date.now() + maxTickDurationMs,
 ) => {
   const googleRequest: SearchRequest = {
     ...request,
@@ -139,6 +141,7 @@ const discoverRegionLeads = async (
       query,
       queryVariants,
       request: googleRequest,
+      deadlineMs,
     });
   } catch (error) {
     warnings.push({
@@ -153,11 +156,13 @@ const discoverRegionLeads = async (
 
   let osmLeads: Lead[] = [];
   try {
-    osmLeads = await discoverOsmLeads({
-      request: googleRequest,
-      location,
-      profile,
-    });
+    if (!googleLeads.length) {
+      osmLeads = await discoverOsmLeads({
+        request: googleRequest,
+        location,
+        profile,
+      });
+    }
   } catch (error) {
     warnings.push({
       providerId: 'osm-discovery',
@@ -218,6 +223,7 @@ const tickJob = async (
         deps.googlePlaces,
         deps.discoverOsmLeads,
         resolveCategoryProfile(job.request.companyType),
+        deps.now() + maxTickDurationMs,
       );
 
       job.providerWarnings.push(...warnings);

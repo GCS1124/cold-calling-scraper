@@ -88,7 +88,7 @@ export const discoverUsLeadsFromOsm = async ({
           'Content-Type': 'text/plain',
           'User-Agent': 'LeadFinderPro/1.0 (US-only discovery)',
         },
-        timeout: 6000,
+        timeout: 2500,
       });
 
       response = result.data;

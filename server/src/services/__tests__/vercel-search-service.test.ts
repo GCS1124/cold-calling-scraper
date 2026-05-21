@@ -227,7 +227,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
     });
 
-    const snapshot = await pollJob(service, 'search-4', 30);
+    const snapshot = await pollJob(service, 'search-4', 70);
 
     expect(googleCalls.length).toBeGreaterThan(1);
     expect(snapshot?.meta.status).toBe('complete');
@@ -258,7 +258,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
     });
 
-    const snapshot = await pollJob(service, 'search-5', 30);
+    const snapshot = await pollJob(service, 'search-5', 70);
 
     expect(snapshot?.meta.status).toBe('complete');
     expect(snapshot?.meta.progress.foundCount).toBeGreaterThan(0);

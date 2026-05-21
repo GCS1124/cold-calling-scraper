@@ -6,6 +6,7 @@ export type LeadProviderRequest = {
   query: string;
   queryVariants?: string[];
   request: SearchRequest;
+  deadlineMs?: number;
 };
 
 export type LeadProvider = {

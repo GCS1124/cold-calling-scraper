@@ -40,6 +40,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   const auth = useAuth();
   const { items, rememberSearch } = useSearchHistory(auth.user?.id);
   const recordedSearchId = useRef<string | null>(null);
+  const isPollingRef = useRef(false);
 
   const visibleLeads = (result?.leads ?? [])
     .filter((lead) => {
@@ -95,12 +96,19 @@ export function HomePage({ searchApi }: HomePageProps) {
       return;
     }
 
+    if (isPollingRef.current) {
+      return;
+    }
+
     const timer = window.setTimeout(async () => {
+      isPollingRef.current = true;
       try {
         const nextResult = await searchApi.getSearch(result.searchId);
         setResult(nextResult);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Search update failed');
+      } finally {
+        isPollingRef.current = false;
       }
     }, 1500);
 
