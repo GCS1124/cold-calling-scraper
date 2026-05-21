@@ -37,8 +37,7 @@ export type SearchProgress = {
   enriched: number;
   totalCandidates: number;
   requestedCount: number;
-  qualifiedCount: number;
-  blockedCount: number;
+  foundCount: number;
   duplicatesRemoved: number;
   currentSource: string;
   batchesCompleted: number;

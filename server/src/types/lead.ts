@@ -12,7 +12,6 @@ export type Lead = {
   sourceScore?: number;
   listingUrl?: string;
   crawlAttempts?: number;
-  qualified: boolean;
   rejectionReason?:
     | 'missing_email'
     | 'missing_phone'

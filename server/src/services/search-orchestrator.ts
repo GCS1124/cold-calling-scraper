@@ -83,13 +83,11 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: s
 const rankLeads = (leads: Lead[]) =>
   [...leads].sort((left, right) => {
     const leftScore =
-      Number(left.qualified) * 6 +
       Number(left.hasEmail) * 4 +
       Number(left.hasPhone) * 4 +
       Number(left.hasWebsite) * 3 +
       (left.sourceScore ?? 0) / 25;
     const rightScore =
-      Number(right.qualified) * 6 +
       Number(right.hasEmail) * 4 +
       Number(right.hasPhone) * 4 +
       Number(right.hasWebsite) * 3 +
@@ -128,7 +126,7 @@ const hasEnrichmentTargets = (job: SearchJob) =>
   job.leads.some(
     (lead) =>
       lead.website &&
-      !lead.qualified &&
+      (!lead.hasEmail || !lead.hasPhone) &&
       lead.rejectionReason !== 'blocked_website' &&
       lead.rejectionReason !== 'blocked_google',
   );
@@ -145,8 +143,7 @@ const createProgress = (requestedCount: number): SearchProgress => ({
   enriched: 0,
   totalCandidates: 0,
   requestedCount,
-  qualifiedCount: 0,
-  blockedCount: 0,
+  foundCount: 0,
   duplicatesRemoved: 0,
   currentSource: 'Queued',
   batchesCompleted: 0,
@@ -184,16 +181,10 @@ const dedupeWithCount = (leads: Lead[]) => {
 };
 
 const refreshProgress = (job: SearchJob) => {
-  const qualifiedCount = job.leads.filter((lead) => lead.qualified).length;
-  const blockedCount = job.leads.filter((lead) =>
-    ['blocked_google', 'blocked_website'].includes(lead.rejectionReason ?? ''),
-  ).length;
-
   job.progress.discovered = job.leads.length;
   job.progress.totalCandidates = job.leads.length;
-  job.progress.qualifiedCount = qualifiedCount;
-  job.progress.blockedCount = blockedCount;
-  job.progress.estimatedRemaining = Math.max(0, job.request.count - qualifiedCount);
+  job.progress.foundCount = job.leads.length;
+  job.progress.estimatedRemaining = Math.max(0, job.request.count - job.leads.length);
 };
 
 const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
@@ -240,7 +231,6 @@ const runRegionalDiscovery = async (
               ? error.message
               : 'Google Maps discovery failed',
         });
-        job.progress.blockedCount += 1;
       }
     })(),
     (async () => {
@@ -292,15 +282,15 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
 
   const runEnrichment = async (job: SearchJob) => {
     const shortlistSize = Math.max(minimumEnrichmentTarget, job.request.count * 2);
-  const targets = rankDiscoveryCandidates(job.leads)
-    .filter(
-      (lead) =>
-        lead.website &&
-        !lead.qualified &&
-        lead.rejectionReason !== 'blocked_website' &&
-        lead.rejectionReason !== 'blocked_google',
-    )
-    .slice(0, shortlistSize);
+    const targets = rankDiscoveryCandidates(job.leads)
+      .filter(
+        (lead) =>
+          lead.website &&
+          (!lead.hasEmail || !lead.hasPhone) &&
+          lead.rejectionReason !== 'blocked_website' &&
+          lead.rejectionReason !== 'blocked_google',
+      )
+      .slice(0, shortlistSize);
     if (!targets.length) {
       return;
     }
@@ -335,7 +325,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         job.expiresAt = now() + jobTtlMs;
       }
 
-      if (job.progress.qualifiedCount >= job.request.count) {
+      if (job.progress.foundCount >= job.request.count) {
         break;
       }
     }
@@ -386,7 +376,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
           ];
 
     for (const regionalLocation of discoveryLocations) {
-      if (job.progress.qualifiedCount >= job.request.count) {
+      if (job.progress.foundCount >= job.request.count) {
         break;
       }
 
@@ -400,11 +390,11 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       );
     }
 
-    job.status = 'qualifying';
-    job.progress.currentSource = 'Qualification';
+    job.status = 'discovering';
+    job.progress.currentSource = 'Google Places';
     refreshProgress(job);
 
-    if (job.progress.qualifiedCount < job.request.count) {
+    if (job.progress.foundCount < job.request.count) {
       try {
         await runEnrichment(job);
       } catch (error) {
@@ -418,15 +408,15 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       }
     }
 
-    if (job.progress.qualifiedCount >= job.request.count) {
+    if (job.progress.foundCount >= job.request.count) {
       job.status = 'complete';
       job.progress.currentSource = 'Complete';
     } else if (hasEnrichmentTargets(job)) {
       job.status = 'enriching';
       job.progress.currentSource = 'Website Crawl';
     } else {
-      job.status = 'qualifying';
-      job.progress.currentSource = 'Qualification';
+      job.status = 'discovering';
+      job.progress.currentSource = 'Google Places';
     }
     refreshProgress(job);
   };

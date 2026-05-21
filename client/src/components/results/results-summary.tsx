@@ -1,11 +1,10 @@
 type ResultsSummaryProps = {
-  qualified: number;
+  found: number;
   requested: number;
   companyType: string;
   city: string;
   missingEmail: number;
   missingPhone: number;
-  blocked: number;
   duplicatesRemoved: number;
 };
 
@@ -21,13 +20,12 @@ function Stat({ label, value }: { label: string; value: number }) {
 }
 
 export function ResultsSummary({
-  qualified,
+  found,
   requested,
   companyType,
   city,
   missingEmail,
   missingPhone,
-  blocked,
   duplicatesRemoved,
 }: ResultsSummaryProps) {
   return (
@@ -37,15 +35,14 @@ export function ResultsSummary({
           Search Summary
         </p>
         <h2 className="mt-3 text-2xl font-semibold text-slate-950">
-          {qualified} qualified leads ready for {companyType || 'your query'} in{' '}
-          {city || 'your city'}
+          {found} leads found for {companyType || 'your query'} in {city || 'your city'}
         </h2>
       </div>
 
       <Stat label="Requested" value={requested} />
+      <Stat label="Found" value={found} />
       <Stat label="Missing Email" value={missingEmail} />
       <Stat label="Missing Phone" value={missingPhone} />
-      <Stat label="Blocked" value={blocked} />
       <Stat label="Duplicates" value={duplicatesRemoved} />
     </section>
   );

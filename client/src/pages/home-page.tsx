@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { AlertTriangle, Download, Sparkles, Zap } from 'lucide-react';
+import { Download, Sparkles, Zap } from 'lucide-react';
 import { startTransition, useDeferredValue, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -27,51 +27,31 @@ export function HomePage({ searchApi }: HomePageProps) {
   const [search, setSearch] = useState<SearchRequest>(initialSearch);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [invalidLeadIds, setInvalidLeadIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [filters, setFilters] = useState({
     hasEmail: false,
     hasPhone: false,
     hasWebsite: false,
-    source: 'All',
-    includePartials: true,
-    showRejected: false,
   });
   const { items, rememberSearch } = useSearchHistory();
-  const searchInFlight = Boolean(
-    result?.meta.status && ['queued', 'discovering', 'enriching', 'qualifying'].includes(result.meta.status),
-  );
 
   const visibleLeads = (result?.leads ?? [])
-    .filter((lead) => !invalidLeadIds.includes(lead.id))
     .filter((lead) => {
-      if (lead.qualified) {
-        return true;
-      }
-
-      const isPartial = lead.hasEmail || lead.hasPhone;
-      if (filters.showRejected) {
-        return true;
-      }
-
-      return (filters.includePartials || searchInFlight) && isPartial;
+      if (filters.hasEmail && !lead.hasEmail) return false;
+      if (filters.hasPhone && !lead.hasPhone) return false;
+      if (filters.hasWebsite && !lead.hasWebsite) return false;
+      return true;
     })
-    .filter((lead) => (filters.hasEmail ? lead.hasEmail : true))
-    .filter((lead) => (filters.hasPhone ? lead.hasPhone : true))
-    .filter((lead) => (filters.hasWebsite ? lead.hasWebsite : true))
-    .filter((lead) => (filters.source === 'All' ? true : lead.source.includes(filters.source)))
     .toSorted((left, right) => right.confidence - left.confidence);
 
   const deferredLeads = useDeferredValue(visibleLeads);
-  const qualifiedVisibleLeads = deferredLeads.filter((lead) => lead.qualified);
   const exportableLeads = selectedIds.length
-    ? qualifiedVisibleLeads.filter((lead) => selectedIds.includes(lead.id))
-    : qualifiedVisibleLeads;
-  const sources = [...new Set((result?.leads ?? []).map((lead) => lead.source))];
+    ? deferredLeads.filter((lead) => selectedIds.includes(lead.id))
+    : deferredLeads;
 
   const summary = {
-    total: qualifiedVisibleLeads.length,
+    total: deferredLeads.length,
     withEmail: deferredLeads.filter((lead) => lead.hasEmail).length,
     withPhone: deferredLeads.filter((lead) => lead.hasPhone).length,
     withWebsite: deferredLeads.filter((lead) => lead.hasWebsite).length,
@@ -81,20 +61,15 @@ export function HomePage({ searchApi }: HomePageProps) {
       ['missing_phone', 'invalid_phone'].includes(lead.rejectionReason ?? ''),
     ).length,
   };
-  const hiddenCandidateCount = (result?.leads ?? []).filter(
-    (lead) => !invalidLeadIds.includes(lead.id) && !lead.qualified,
-  ).length;
   const emptyStateMessage =
-    !result?.leads.length && searchInFlight
-      ? 'Still discovering source candidates. Qualified contacts will appear here as enrichment progresses.'
-      : !qualifiedVisibleLeads.length && hiddenCandidateCount > 0 && !filters.includePartials && !filters.showRejected
-        ? `Discovered ${hiddenCandidateCount} unqualified candidates. Enable "Include partial leads" to preview them while enrichment runs.`
-        : 'No leads match the current filters.';
+    !result?.leads.length && result
+      ? 'Still finding leads.'
+      : 'No leads match the current filters.';
 
   useEffect(() => {
     if (
       !result?.searchId ||
-      !['queued', 'discovering', 'enriching', 'qualifying'].includes(result.meta.status)
+      !['queued', 'discovering', 'enriching'].includes(result.meta.status)
     ) {
       return;
     }
@@ -138,13 +113,6 @@ export function HomePage({ searchApi }: HomePageProps) {
         setInvalidLeadIds([]);
       });
 
-      if (response.meta.providerWarnings.length) {
-        toast.warning(
-          `${response.meta.providerWarnings.length} provider warning${
-            response.meta.providerWarnings.length === 1 ? '' : 's'
-          } returned. Results are partial.`,
-        );
-      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Search failed');
     } finally {
@@ -249,17 +217,16 @@ export function HomePage({ searchApi }: HomePageProps) {
         <ResultsSummary
           city={result?.meta.locationLabel || search.city}
           companyType={search.companyType}
-          qualified={result?.meta.progress.qualifiedCount ?? summary.total}
+          found={result?.meta.progress.foundCount ?? summary.total}
           requested={result?.meta.progress.requestedCount ?? search.count}
           missingEmail={summary.missingEmail}
           missingPhone={summary.missingPhone}
-          blocked={result?.meta.progress.blockedCount ?? 0}
           duplicatesRemoved={result?.meta.progress.duplicatesRemoved ?? 0}
         />
 
         <section className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
           <div className="space-y-6">
-            <FiltersPanel filters={filters} onChange={setFilters} sources={sources} />
+            <FiltersPanel filters={filters} onChange={setFilters} />
 
             <div className="rounded-[24px] border border-slate-200 bg-slate-950 p-5 text-white shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
               <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-blue-200">
@@ -270,7 +237,7 @@ export function HomePage({ searchApi }: HomePageProps) {
               <p className="mt-2 text-sm leading-6 text-slate-300">
                 {selectedIds.length
                   ? 'Selected rows ready for download.'
-                  : 'Qualified leads only are export-ready by default.'}
+                  : 'Leads found are export-ready by default.'}
               </p>
             </div>
           </div>
@@ -283,44 +250,22 @@ export function HomePage({ searchApi }: HomePageProps) {
                 </p>
                 <p className="mt-2 text-sm font-medium text-slate-900">
                   {result.meta.status === 'queued'
-                    ? `Queued ${result.meta.progress.requestedCount} requested leads`
+                    ? `Queued ${result.meta.progress.requestedCount} leads`
                     : result.meta.status === 'discovering'
-                    ? `Discovering businesses in ${result.meta.locationLabel}`
+                    ? `Finding leads in ${result.meta.locationLabel}`
                     : result.meta.status === 'enriching'
-                      ? `Enriching ${result.meta.progress.enriched} of ${result.meta.progress.totalCandidates} candidates`
-                      : result.meta.status === 'qualifying'
-                        ? `Qualifying ${result.meta.progress.qualifiedCount} of ${result.meta.progress.requestedCount} requested leads`
+                      ? 'Adding contact details'
                       : result.meta.status === 'failed'
                         ? 'Search failed'
-                        : 'Complete'}
+                        : 'Search complete'}
                 </p>
                 <p className="mt-1 text-sm text-slate-600">
                   Query: {result.meta.query}
                 </p>
-                <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-3">
-                  <p>Current source: {result.meta.progress.currentSource}</p>
-                  <p>Blocked: {result.meta.progress.blockedCount}</p>
-                  <p>Qualified: {result.meta.progress.qualifiedCount}</p>
-                  <p>Batches: {result.meta.progress.batchesCompleted}</p>
-                  <p>Remaining: {result.meta.progress.estimatedRemaining}</p>
+                <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+                  <p>Found: {result.meta.progress.foundCount}</p>
+                  <p>Requested: {result.meta.progress.requestedCount}</p>
                 </div>
-              </div>
-            ) : null}
-
-            {result?.meta.providerWarnings.length ? (
-              <div className="rounded-[24px] border border-amber-200 bg-amber-50 px-5 py-4 text-amber-950 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Source Warnings
-                </p>
-                <ul className="mt-3 space-y-2 text-sm">
-                  {result.meta.providerWarnings.map((warning, index) => (
-                    <li key={`${warning.providerId}-${index}`}>
-                      <span className="font-semibold">{warning.providerName}:</span>{' '}
-                      {warning.message}
-                    </li>
-                  ))}
-                </ul>
               </div>
             ) : null}
 
@@ -338,9 +283,6 @@ export function HomePage({ searchApi }: HomePageProps) {
                 emptyStateMessage={emptyStateMessage}
                 leads={deferredLeads}
                 onCopyRow={(lead) => void handleCopyRow(lead)}
-                onFlagInvalid={(leadId) =>
-                  setInvalidLeadIds((current) => [...current, leadId])
-                }
                 onSelectAll={toggleSelectAll}
                 onToggleSelect={toggleSelected}
                 selectedIds={selectedIds}
@@ -358,7 +300,7 @@ export function HomePage({ searchApi }: HomePageProps) {
           <p className="mt-1 text-sm text-slate-700">
             {selectedIds.length
               ? `${selectedIds.length} selected rows`
-              : `${qualifiedVisibleLeads.length} qualified visible leads`}
+              : `${deferredLeads.length} leads found`}
           </p>
         </div>
         <button

@@ -58,7 +58,6 @@ const scoreLead = (lead: Lead) => {
   if (lead.verifiedEmail) score += 10;
   if (lead.verifiedPhone) score += 10;
   if (lead.source.includes('Google Maps')) score += 10;
-  if (lead.qualified) score += 10;
 
   return Math.min(score, 100);
 };
@@ -72,29 +71,25 @@ export const enrichLead = (lead: Lead): Lead => {
   const parsedPhone = parsePhoneNumberFromString(mobile, 'US');
   const hasPhone = Boolean(parsedPhone?.isValid() && parsedPhone.country === 'US');
   const hasWebsite = website.length > 0;
-  const qualified = verifiedEmail && hasPhone;
   const preservedBlockedReason =
     lead.rejectionReason === 'blocked_website' || lead.rejectionReason === 'blocked_google'
       ? lead.rejectionReason
       : undefined;
   const rejectionReason = preservedBlockedReason
     ? preservedBlockedReason
-    : qualified
-      ? undefined
-      : !mobile.trim()
-        ? 'missing_phone'
-        : !hasPhone
-          ? 'invalid_phone'
-          : !verifiedEmail
-            ? 'missing_email'
-            : lead.rejectionReason;
+    : !mobile.trim()
+      ? 'missing_phone'
+      : !hasPhone
+        ? 'invalid_phone'
+        : !verifiedEmail
+          ? 'missing_email'
+          : lead.rejectionReason;
 
   const enriched: Lead = {
     ...lead,
     email,
     mobile,
     website,
-    qualified,
     rejectionReason,
     hasEmail,
     hasPhone,

@@ -1,4 +1,4 @@
-import { ExternalLink, Flag, Copy, CheckSquare, Square } from 'lucide-react';
+import { ExternalLink, Copy, CheckSquare, Square } from 'lucide-react';
 
 import type { Lead } from '../../types/lead';
 
@@ -9,7 +9,6 @@ type ResultsTableProps = {
   onToggleSelect: (leadId: string) => void;
   onSelectAll: () => void;
   onCopyRow: (lead: Lead) => void;
-  onFlagInvalid: (leadId: string) => void;
 };
 
 export function ResultsTable({
@@ -19,7 +18,6 @@ export function ResultsTable({
   onToggleSelect,
   onSelectAll,
   onCopyRow,
-  onFlagInvalid,
 }: ResultsTableProps) {
   const allSelected = leads.length > 0 && leads.every((lead) => selectedIds.includes(lead.id));
 
@@ -63,10 +61,7 @@ export function ResultsTable({
               const isSelected = selectedIds.includes(lead.id);
 
               return (
-                <tr
-                  className={`border-t border-slate-100 transition hover:bg-blue-50/40 ${lead.qualified ? '' : 'bg-amber-50/40'}`}
-                  key={lead.id}
-                >
+                <tr className="border-t border-slate-100 transition hover:bg-blue-50/40" key={lead.id}>
                   <td className="px-4 py-4">
                     <button
                       aria-label={`Select ${lead.name}`}
@@ -84,11 +79,6 @@ export function ResultsTable({
                   </td>
                   <td className="px-4 py-4">
                     <div className="font-semibold text-slate-950">{lead.name}</div>
-                    {!lead.qualified && lead.rejectionReason ? (
-                      <div className="mt-1 text-xs text-amber-700">
-                        {lead.rejectionReason.replace(/_/g, ' ')}
-                      </div>
-                    ) : null}
                   </td>
                   <td className="px-4 py-4">{lead.mobile || '—'}</td>
                   <td className="px-4 py-4">{lead.email || '—'}</td>
@@ -131,13 +121,6 @@ export function ResultsTable({
                       >
                         <ExternalLink className="h-4 w-4" />
                       </a>
-                      <button
-                        className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-red-200 hover:text-red-600"
-                        onClick={() => onFlagInvalid(lead.id)}
-                        type="button"
-                      >
-                        <Flag className="h-4 w-4" />
-                      </button>
                     </div>
                   </td>
                 </tr>

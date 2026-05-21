@@ -12,7 +12,6 @@ export type Lead = {
   sourceScore?: number;
   listingUrl?: string;
   crawlAttempts?: number;
-  qualified: boolean;
   rejectionReason?:
     | 'missing_email'
     | 'missing_phone'
@@ -55,8 +54,7 @@ export type SearchResponse = {
       enriched: number;
       totalCandidates: number;
       requestedCount: number;
-      qualifiedCount: number;
-      blockedCount: number;
+      foundCount: number;
       duplicatesRemoved: number;
       currentSource: string;
       batchesCompleted: number;
