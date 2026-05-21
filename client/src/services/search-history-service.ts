@@ -21,6 +21,7 @@ type SearchHistoryRow = {
 
 const HISTORY_SELECT = 'id, company_type, city, count, location_label, created_at';
 const LOCAL_HISTORY_KEY = 'lead-finder-history';
+let remoteHistoryAvailable: boolean | null = null;
 
 const mapRow = (row: SearchHistoryRow): SearchHistoryItem => ({
   id: row.id,
@@ -76,7 +77,7 @@ export const loadSearchHistory = async (
 ): Promise<SearchHistoryItem[]> => {
   const supabase = getSupabaseClient();
 
-  if (!supabase || !userId) {
+  if (!supabase || !userId || remoteHistoryAvailable === false) {
     return readLocalHistory();
   }
 
@@ -88,9 +89,11 @@ export const loadSearchHistory = async (
     .limit(10);
 
   if (error) {
+    remoteHistoryAvailable = false;
     return readLocalHistory();
   }
 
+  remoteHistoryAvailable = true;
   return (data ?? []).map((row) => mapRow(row as SearchHistoryRow));
 };
 
@@ -133,6 +136,7 @@ export const rememberSearchHistory = async (
     .single();
 
   if (error) {
+    remoteHistoryAvailable = false;
     const current = readLocalHistory();
     const next = [localItem, ...current.filter((item) => item.id !== localItem.id)].slice(0, 10);
     writeLocalHistory(next);
@@ -140,6 +144,7 @@ export const rememberSearchHistory = async (
   }
 
   const saved = mapRow(data as SearchHistoryRow);
+  remoteHistoryAvailable = true;
 
   if (isBrowser()) {
     const current = readLocalHistory();

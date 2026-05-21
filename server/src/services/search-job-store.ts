@@ -129,7 +129,37 @@ export const createSearchJobStore = (): SearchJobStore => {
     return memoryStore();
   }
 
-  return postgresStore();
+  const postgres = postgresStore();
+  const memory = memoryStore();
+  let useMemoryFallback = false;
+
+  const run = async <T>(operation: (store: SearchJobStore) => Promise<T>): Promise<T> => {
+    if (useMemoryFallback) {
+      return operation(memory);
+    }
+
+    try {
+      return await operation(postgres);
+    } catch (error) {
+      useMemoryFallback = true;
+      return operation(memory);
+    }
+  };
+
+  return {
+    ensureSchema: async () => {
+      await run((store) => store.ensureSchema());
+    },
+    get: async (searchId: string) => {
+      return run((store) => store.get(searchId));
+    },
+    upsert: async (job: SearchJobRecord) => {
+      await run((store) => store.upsert(job));
+    },
+    deleteExpired: async (now: number) => {
+      await run((store) => store.deleteExpired(now));
+    },
+  };
 };
 
 export const toSearchResponse = (job: SearchJobRecord): SearchResponse => ({
