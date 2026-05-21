@@ -61,7 +61,7 @@ export const googlePlacesProvider: LeadProvider = {
     const allResults: GooglePlacesResponse['results'] = [];
     const searchQueries = [...new Set([query, ...queryVariants].map((value) => value.trim()).filter(Boolean))].slice(0, 1);
     const deadlineMs = requestDeadlineMs ?? Date.now() + 5_000;
-    const maxLeadCount = Math.min(request.count, 6);
+    const maxLeadCount = Math.min(request.count, 10);
 
     for (const searchQuery of searchQueries) {
       if (Date.now() >= deadlineMs) {

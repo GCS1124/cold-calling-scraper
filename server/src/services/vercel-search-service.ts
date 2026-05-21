@@ -32,10 +32,11 @@ type VercelSearchServiceDeps = {
 };
 
 const jobTtlMs = 15 * 60 * 1000;
-const discoveryBatchSize = 1;
-const perSeedCount = 6;
-const maxTickDurationMs = 5_000;
 const maxCandidatePool = 3000;
+
+const getDiscoveryBatchSize = (requestedCount: number) => (requestedCount >= 100 ? 2 : 1);
+const getPerSeedCount = (requestedCount: number) => (requestedCount >= 100 ? 10 : 6);
+const getMaxTickDurationMs = (requestedCount: number) => (requestedCount >= 100 ? 7_000 : 5_000);
 
 const withNow = () => Date.now();
 
@@ -122,8 +123,9 @@ const discoverRegionLeads = async (
   googlePlaces: typeof googlePlacesProvider,
   discoverOsmLeads: typeof discoverUsLeadsFromOsm,
   profile = resolveCategoryProfile(request.companyType),
-  deadlineMs = Date.now() + maxTickDurationMs,
+  deadlineMs = Date.now() + getMaxTickDurationMs(request.count),
 ) => {
+  const perSeedCount = getPerSeedCount(request.count);
   const googleRequest: SearchRequest = {
     ...request,
     city: location.label,
@@ -212,6 +214,8 @@ const tickJob = async (
   if (job.nextSeedIndex < job.searchSeeds.length) {
     job.status = 'discovering';
     job.progress.currentSource = 'Google Places API';
+    const discoveryBatchSize = getDiscoveryBatchSize(job.request.count);
+    const maxTickDurationMs = getMaxTickDurationMs(job.request.count);
 
     let processed = 0;
     while (job.nextSeedIndex < job.searchSeeds.length && processed < discoveryBatchSize) {
