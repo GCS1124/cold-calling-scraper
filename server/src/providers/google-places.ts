@@ -1,5 +1,4 @@
 import axios from 'axios';
-import pLimit from 'p-limit';
 
 import type { Lead } from '../types/lead';
 import type { LeadProvider, LeadProviderRequest } from './provider';
@@ -62,7 +61,6 @@ export const googlePlacesProvider: LeadProvider = {
     const allResults: GooglePlacesResponse['results'] = [];
     const searchQueries = [...new Set([query, ...queryVariants].map((value) => value.trim()).filter(Boolean))].slice(0, 1);
     const deadlineMs = requestDeadlineMs ?? Date.now() + 5_000;
-    const limit = pLimit(2);
     const maxLeadCount = Math.min(request.count, 6);
 
     for (const searchQuery of searchQueries) {
@@ -118,60 +116,58 @@ export const googlePlacesProvider: LeadProvider = {
         .map((place) => [place.place_id as string, place] as const),
     ).values()].slice(0, maxLeadCount);
 
-    const leads: Array<Lead | null> = await Promise.all(
-      uniqueResults.map((place, index) =>
-        limit(async () => {
-          if (Date.now() >= deadlineMs) {
-            return null;
-          }
+    const leads: Array<Lead | null> = [];
+    for (const [index, place] of uniqueResults.entries()) {
+      if (Date.now() >= deadlineMs) {
+        leads.push(null);
+        continue;
+      }
 
-        const detailsResponse = await axios.get<GooglePlaceDetailsResponse>(
-          'https://maps.googleapis.com/maps/api/place/details/json',
-          {
-            params: {
-              key: apiKey,
-              place_id: place.place_id,
-              fields: detailsFields,
-              language: 'en',
-            },
-            timeout: 4000,
+      const detailsResponse = await axios.get<GooglePlaceDetailsResponse>(
+        'https://maps.googleapis.com/maps/api/place/details/json',
+        {
+          params: {
+            key: apiKey,
+            place_id: place.place_id,
+            fields: detailsFields,
+            language: 'en',
           },
+          timeout: 3000,
+        },
+      );
+
+      if (detailsResponse.data.status && detailsResponse.data.status !== 'OK') {
+        throw new Error(
+          detailsResponse.data.error_message
+            ? `Google Places Details: ${detailsResponse.data.error_message}`
+            : `Google Places Details returned ${detailsResponse.data.status}`,
         );
+      }
 
-        if (detailsResponse.data.status && detailsResponse.data.status !== 'OK') {
-          throw new Error(
-            detailsResponse.data.error_message
-              ? `Google Places Details: ${detailsResponse.data.error_message}`
-              : `Google Places Details returned ${detailsResponse.data.status}`,
-          );
-        }
+      const details = detailsResponse.data.result ?? {};
+      const website = normalizeWebsite(details.website);
+      const phone = normalizePhone(details.formatted_phone_number ?? details.international_phone_number);
 
-        const details = detailsResponse.data.result ?? {};
-        const website = normalizeWebsite(details.website);
-        const phone = normalizePhone(details.formatted_phone_number ?? details.international_phone_number);
-
-        return {
-          id: toLeadId(place.place_id, index),
-          name: details.name ?? place.name ?? 'Unknown company',
-          mobile: phone,
-          email: '',
-          website,
-          address: details.formatted_address ?? place.formatted_address ?? '',
-          category: request.companyType,
-          city: request.city,
-          source: 'Google Places',
-          confidence: 68,
-          sourceScore: 95,
-          hasEmail: false,
-          hasPhone: Boolean(phone),
-          hasWebsite: Boolean(website),
-          verifiedPhone: Boolean(phone),
-          verifiedEmail: false,
-          scrapedAt: new Date().toISOString(),
-        } satisfies Lead;
-        }),
-      ),
-    );
+      leads.push({
+        id: toLeadId(place.place_id, index),
+        name: details.name ?? place.name ?? 'Unknown company',
+        mobile: phone,
+        email: '',
+        website,
+        address: details.formatted_address ?? place.formatted_address ?? '',
+        category: request.companyType,
+        city: request.city,
+        source: 'Google Places',
+        confidence: 68,
+        sourceScore: 95,
+        hasEmail: false,
+        hasPhone: Boolean(phone),
+        hasWebsite: Boolean(website),
+        verifiedPhone: Boolean(phone),
+        verifiedEmail: false,
+        scrapedAt: new Date().toISOString(),
+      } satisfies Lead);
+    }
 
     return leads.filter((lead): lead is Lead => Boolean(lead));
   },
