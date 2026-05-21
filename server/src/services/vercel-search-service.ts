@@ -32,8 +32,8 @@ type VercelSearchServiceDeps = {
 };
 
 const jobTtlMs = 15 * 60 * 1000;
-const discoveryBatchSize = 2;
-const enrichmentBatchSize = 2;
+const discoveryBatchSize = 1;
+const enrichmentBatchSize = 1;
 const perSeedCount = 100;
 const maxCandidatePool = 3000;
 

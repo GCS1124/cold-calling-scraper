@@ -61,6 +61,18 @@ const makeLead = (overrides: Partial<Lead> = {}): Lead => ({
 });
 
 describe('createVercelSearchServiceWithDeps', () => {
+  const pollJob = async (
+    service: ReturnType<typeof createVercelSearchServiceWithDeps>,
+    searchId: string,
+    iterations = 60,
+  ) => {
+    let snapshot: Awaited<ReturnType<typeof service.getSearch>> = null;
+    for (let index = 0; index < iterations; index += 1) {
+      snapshot = await service.getSearch(searchId);
+    }
+    return snapshot;
+  };
+
   it('persists a job across service instances', async () => {
     const store = createSearchJobStore();
     const googleCalls: string[] = [];
@@ -225,7 +237,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
     });
 
-    const snapshot = await service.getSearch(response.searchId);
+    const snapshot = await pollJob(service, response.searchId);
 
     expect(snapshot?.leads[0]?.email).toBe('hello@northstarlabs.ai');
     expect(snapshot?.leads[0]?.qualified).toBe(true);
@@ -321,7 +333,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
     });
 
-    const first = await service.getSearch(started.searchId);
+    const first = await pollJob(service, started.searchId, 60);
     const second = await service.getSearch(started.searchId);
 
     expect(enrichWebsiteLead).toHaveBeenCalledTimes(1);
