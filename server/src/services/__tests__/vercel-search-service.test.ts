@@ -38,6 +38,23 @@ const localLocation = {
   warnings: [],
 };
 
+const stateLocation = {
+  mode: 'local' as const,
+  label: 'California',
+  city: 'California',
+  stateCode: 'CA',
+  postalCode: undefined,
+  lat: 36.7783,
+  lon: -119.4179,
+  boundingBox: {
+    south: 32.5,
+    west: -124.4,
+    north: 42.0,
+    east: -114.1,
+  },
+  warnings: [],
+};
+
 const makeLead = (overrides: Partial<Lead> = {}): Lead => ({
   id: 'lead-1',
   name: 'Northstar Labs',
@@ -198,6 +215,42 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.leads[0]?.address).toContain('Austin, TX');
     expect(snapshot?.meta.progress.foundCount).toBeGreaterThanOrEqual(1);
     expect(snapshot?.meta.status).toBe('complete');
+  });
+
+  it('skips a failed regional normalization instead of failing the poll', async () => {
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockImplementation(async (input: string) => {
+        if (input === 'California') return stateLocation;
+        if (input === 'CA') {
+          throw new Error('Request failed with status code 429');
+        }
+        return localLocation;
+      }),
+      googlePlaces: {
+        id: 'google-places',
+        name: 'Google Places',
+        fetchLeads: vi.fn().mockResolvedValue([
+          makeLead({ id: 'lead-state', city: 'California', source: 'Google Places' }),
+        ]),
+      } as never,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-3b',
+      now: () => 1000,
+    });
+
+    const response = await service.startSearch({
+      companyType: 'Cleaning Services',
+      city: 'California',
+      count: 500,
+    });
+
+    const snapshot = await service.getSearch(response.searchId);
+
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.leads.length).toBeGreaterThan(0);
+    expect(snapshot?.meta.status).toBe('discovering');
+    expect(snapshot?.meta.providerWarnings.some((warning) => warning.providerId === 'nominatim')).toBe(true);
   });
 
   it('fans out nationwide searches across multiple state seeds and query variants', async () => {

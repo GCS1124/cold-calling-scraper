@@ -94,6 +94,18 @@ const refreshProgress = (job: SearchJobRecord) => {
   job.progress.estimatedRemaining = Math.max(0, job.request.count - job.leads.length);
 };
 
+const appendWarningOnce = (job: SearchJobRecord, warning: ProviderWarning) => {
+  if (
+    job.providerWarnings.some(
+      (item) => item.providerId === warning.providerId && item.message === warning.message,
+    )
+  ) {
+    return;
+  }
+
+  job.providerWarnings.push(warning);
+};
+
 const dedupeWithCount = (leads: Lead[]) => {
   const deduped = deduplicateLeads(leads);
   return {
@@ -197,18 +209,32 @@ const tickJob = async (
     return job;
   }
 
-  const normalizedLocation = await deps.normalizeLocation(job.request.city);
   if (!job.searchSeeds.length) {
-    job.locationLabel = normalizedLocation.label;
-    job.locationMode = normalizedLocation.mode;
-    job.query =
-      normalizedLocation.mode === 'nationwide'
-        ? `${job.request.companyType} in United States`
-        : buildQuery(job.request.companyType, normalizedLocation);
-    job.searchSeeds = toSearchSeeds(normalizedLocation);
-    job.status = 'discovering';
-    job.progress.currentSource = 'Google Places API';
-    job.providerWarnings.push(...normalizedLocation.warnings);
+    try {
+      const normalizedLocation = await deps.normalizeLocation(job.request.city);
+      job.locationLabel = normalizedLocation.label;
+      job.locationMode = normalizedLocation.mode;
+      job.query =
+        normalizedLocation.mode === 'nationwide'
+          ? `${job.request.companyType} in United States`
+          : buildQuery(job.request.companyType, normalizedLocation);
+      job.searchSeeds = toSearchSeeds(normalizedLocation);
+      job.status = 'discovering';
+      job.progress.currentSource = 'Google Places API';
+      job.providerWarnings.push(...normalizedLocation.warnings);
+    } catch (error) {
+      appendWarningOnce(job, {
+        providerId: 'nominatim',
+        providerName: 'Nominatim',
+        message:
+          error instanceof Error ? error.message : 'US location normalization failed',
+      });
+      job.status = 'discovering';
+      job.progress.currentSource = 'Nominatim';
+      job.updatedAt = withNow();
+      await store.upsert(job);
+      return job;
+    }
   }
 
   if (job.nextSeedIndex < job.searchSeeds.length) {
@@ -220,7 +246,23 @@ const tickJob = async (
     let processed = 0;
     while (job.nextSeedIndex < job.searchSeeds.length && processed < discoveryBatchSize) {
       const seed = job.searchSeeds[job.nextSeedIndex];
-      const regionalLocation = await deps.normalizeLocation(seed);
+      let regionalLocation: NormalizedUsLocation;
+      try {
+        regionalLocation = await deps.normalizeLocation(seed);
+      } catch (error) {
+        appendWarningOnce(job, {
+          providerId: 'nominatim',
+          providerName: 'Nominatim',
+          message:
+            error instanceof Error ? error.message : 'US location normalization failed',
+        });
+        job.nextSeedIndex += 1;
+        job.progress.batchesCompleted += 1;
+        processed += 1;
+        job.expiresAt = withNow() + jobTtlMs;
+        continue;
+      }
+
       const { leads, warnings } = await discoverRegionLeads(
         job.request,
         regionalLocation,
