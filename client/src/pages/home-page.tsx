@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { Download, LoaderCircle, Sparkles, Zap, UserRound } from 'lucide-react';
-import { startTransition, useDeferredValue, useEffect, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 
@@ -98,9 +98,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     const timer = window.setTimeout(async () => {
       try {
         const nextResult = await searchApi.getSearch(result.searchId);
-        startTransition(() => {
-          setResult(nextResult);
-        });
+        setResult(nextResult);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Search update failed');
       }
@@ -124,10 +122,8 @@ export function HomePage({ searchApi }: HomePageProps) {
     try {
       const response = await searchApi.startSearch(nextSearch);
 
-      startTransition(() => {
-        setResult(response);
-        setSelectedIds([]);
-      });
+      setResult(response);
+      setSelectedIds([]);
 
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Search failed');
