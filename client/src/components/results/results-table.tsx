@@ -97,7 +97,11 @@ export function ResultsTable({
                       '—'
                     )}
                   </td>
-                  <td className="px-4 py-4 text-slate-600">{lead.address || '—'}</td>
+                  <td className="px-4 py-4 text-slate-600">
+                    <span className="block max-w-[220px] truncate" title={lead.address || undefined}>
+                      {lead.address || '—'}
+                    </span>
+                  </td>
                   <td className="px-4 py-4">
                     <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
                       {lead.source}

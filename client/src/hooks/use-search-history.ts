@@ -35,6 +35,10 @@ export const useSearchHistory = (userId?: string | null) => {
       locationLabel,
     });
 
+    if (!saved) {
+      return null;
+    }
+
     setItems((current) => {
       const next = [saved, ...current.filter((item) => item.id !== saved.id)];
       return next.slice(0, 10);

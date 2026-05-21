@@ -16,7 +16,7 @@ export function FiltersPanel({ filters, onChange }: FiltersPanelProps) {
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
           Filters
         </p>
-        <h3 className="mt-2 text-lg font-semibold text-slate-950">Tighten the lead pool</h3>
+        <h3 className="mt-2 text-lg font-semibold text-slate-950">Filter results</h3>
       </div>
 
       <div className="space-y-3 text-sm text-slate-700">
@@ -26,7 +26,7 @@ export function FiltersPanel({ filters, onChange }: FiltersPanelProps) {
             onChange={(event) => onChange({ ...filters, hasEmail: event.target.checked })}
             type="checkbox"
           />
-          Has Email
+          Email
         </label>
         <label className="flex items-center gap-3">
           <input
@@ -34,7 +34,7 @@ export function FiltersPanel({ filters, onChange }: FiltersPanelProps) {
             onChange={(event) => onChange({ ...filters, hasPhone: event.target.checked })}
             type="checkbox"
           />
-          Has Phone
+          Phone
         </label>
         <label className="flex items-center gap-3">
           <input
@@ -42,7 +42,7 @@ export function FiltersPanel({ filters, onChange }: FiltersPanelProps) {
             onChange={(event) => onChange({ ...filters, hasWebsite: event.target.checked })}
             type="checkbox"
           />
-          Has Website
+          Website
         </label>
       </div>
     </aside>

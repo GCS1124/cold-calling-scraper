@@ -36,8 +36,8 @@ export function AuthPanel({ auth }: AuthPanelProps) {
   if (!auth.isConfigured) {
     return (
       <div className="rounded-[24px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        Supabase auth is not configured yet. Search history will stay in local storage until
-        the Vercel Marketplace env vars are present.
+        Supabase auth is not configured. Add the Marketplace `SUPABASE_URL` and
+        `SUPABASE_ANON_KEY` env vars to enable sign in and search history.
       </div>
     );
   }

@@ -251,7 +251,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                 : result.meta.status === 'discovering'
                 ? `Finding leads in ${result.meta.locationLabel}`
                 : result.meta.status === 'enriching'
-                  ? 'Adding contact details'
+                  ? 'Collecting details'
                   : result.meta.status === 'failed'
                     ? 'Search failed'
                     : 'Search complete'}
