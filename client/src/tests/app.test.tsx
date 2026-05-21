@@ -74,6 +74,34 @@ const completedResponse: SearchResponse = {
   },
 };
 
+const waitingResponse: SearchResponse = {
+  searchId: 'search-waiting',
+  leads: [],
+  meta: {
+    query: 'Dental Clinics in Austin, TX',
+    locationLabel: 'Austin, TX',
+    status: 'discovering',
+    progress: {
+      discovered: 18,
+      enriched: 0,
+      totalCandidates: 18,
+      requestedCount: 50,
+      foundCount: 18,
+      duplicatesRemoved: 0,
+      currentSource: 'Google Places',
+      batchesCompleted: 1,
+      estimatedRemaining: 32,
+    },
+    totals: {
+      total: 0,
+      withEmail: 0,
+      withPhone: 0,
+      withWebsite: 0,
+    },
+    providerWarnings: [],
+  },
+};
+
 describe('App', () => {
   it('keeps company type and city as typable inputs with suggestion dropdowns', () => {
     const searchApi: SearchApi = {
@@ -137,5 +165,24 @@ describe('App', () => {
     expect(screen.queryByText(/source warnings/i)).toBeNull();
     expect(screen.queryByLabelText(/show rejected leads/i)).toBeNull();
     expect(screen.queryByLabelText(/include partial leads/i)).toBeNull();
+  });
+
+  it('shows a waiting screen while the job is still running', async () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(waitingResponse),
+      getSearch: vi.fn().mockResolvedValue(waitingResponse),
+    };
+    const user = userEvent.setup();
+
+    const { unmount } = render(<App searchApi={searchApi} />);
+
+    await user.type(screen.getByLabelText(/company type/i), 'Dental Clinics');
+    await user.type(screen.getByLabelText(/city/i), 'Austin');
+    await user.click(screen.getByRole('button', { name: /find leads/i }));
+
+    expect(await screen.findByText(/waiting for the search to finish/i)).toBeTruthy();
+    expect(screen.queryByText(/click any company row to verify details before export/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /download excel/i })).toBeNull();
+    unmount();
   });
 });

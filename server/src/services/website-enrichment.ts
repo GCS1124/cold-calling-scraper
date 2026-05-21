@@ -193,17 +193,8 @@ export const enrichLeadFromWebsite = async (
 
   const origin = new URL(website);
   if (socialHosts.has(origin.hostname)) {
-    return {
-      lead,
-      warnings: [
-        {
-          providerId: 'website-crawl',
-          providerName: 'Website Crawl',
-      message: `${origin.hostname} is not used as a primary business website.`,
-      },
-    ],
-  };
-}
+    return { lead, warnings: [] };
+  }
 
   const queue = [{ url: website, depth: 0 }];
   const visited = new Set<string>();
@@ -232,18 +223,14 @@ export const enrichLeadFromWebsite = async (
 
       const contentType = String(response.headers['content-type'] ?? '');
       if (response.status >= 400 || blockedPattern.test(response.data)) {
-        const rejectedLead: Lead = {
-          ...lead,
-          crawlAttempts: visited.size,
-          rejectionReason: lead.rejectionReason ?? 'blocked_website',
+        return {
+          lead: {
+            ...lead,
+            crawlAttempts: visited.size,
+            rejectionReason: lead.rejectionReason ?? 'blocked_website',
+          },
+          warnings: [],
         };
-        lead = rejectedLead;
-        warnings.push({
-          providerId: 'website-crawl',
-          providerName: 'Website Crawl',
-          message: `${origin.hostname} blocked contact crawling at ${current.url}`,
-        });
-        continue;
       }
 
       if (!contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
@@ -265,16 +252,14 @@ export const enrichLeadFromWebsite = async (
         }
       }
     } catch {
-      lead = {
-        ...lead,
-        crawlAttempts: visited.size,
-        rejectionReason: lead.rejectionReason ?? 'blocked_website',
+      return {
+        lead: {
+          ...lead,
+          crawlAttempts: visited.size,
+          rejectionReason: lead.rejectionReason ?? 'blocked_website',
+        },
+        warnings: [],
       };
-      warnings.push({
-        providerId: 'website-crawl',
-        providerName: 'Website Crawl',
-        message: `${origin.hostname} timed out during contact crawling.`,
-      });
     }
   }
 
