@@ -21,6 +21,7 @@ type SearchHistoryRow = {
 
 const HISTORY_SELECT = 'id, company_type, city, count, location_label, created_at';
 const LOCAL_HISTORY_KEY = 'lead-finder-history';
+const REMOTE_HISTORY_DISABLED_KEY = 'lead-finder-history-remote-disabled';
 let remoteHistoryAvailable: boolean | null = null;
 
 const mapRow = (row: SearchHistoryRow): SearchHistoryItem => ({
@@ -33,6 +34,27 @@ const mapRow = (row: SearchHistoryRow): SearchHistoryItem => ({
 });
 
 const isBrowser = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+const isRemoteHistoryDisabled = () => {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  return window.sessionStorage.getItem(REMOTE_HISTORY_DISABLED_KEY) === '1';
+};
+
+const setRemoteHistoryDisabled = (disabled: boolean) => {
+  if (!isBrowser()) {
+    return;
+  }
+
+  if (disabled) {
+    window.sessionStorage.setItem(REMOTE_HISTORY_DISABLED_KEY, '1');
+    return;
+  }
+
+  window.sessionStorage.removeItem(REMOTE_HISTORY_DISABLED_KEY);
+};
 
 const readLocalHistory = (): SearchHistoryItem[] => {
   if (!isBrowser()) {
@@ -77,7 +99,7 @@ export const loadSearchHistory = async (
 ): Promise<SearchHistoryItem[]> => {
   const supabase = getSupabaseClient();
 
-  if (!supabase || !userId || remoteHistoryAvailable === false) {
+  if (!supabase || !userId || remoteHistoryAvailable === false || isRemoteHistoryDisabled()) {
     return readLocalHistory();
   }
 
@@ -90,10 +112,12 @@ export const loadSearchHistory = async (
 
   if (error) {
     remoteHistoryAvailable = false;
+    setRemoteHistoryDisabled(true);
     return readLocalHistory();
   }
 
   remoteHistoryAvailable = true;
+  setRemoteHistoryDisabled(false);
   return (data ?? []).map((row) => mapRow(row as SearchHistoryRow));
 };
 
@@ -137,6 +161,7 @@ export const rememberSearchHistory = async (
 
   if (error) {
     remoteHistoryAvailable = false;
+    setRemoteHistoryDisabled(true);
     const current = readLocalHistory();
     const next = [localItem, ...current.filter((item) => item.id !== localItem.id)].slice(0, 10);
     writeLocalHistory(next);
@@ -145,6 +170,7 @@ export const rememberSearchHistory = async (
 
   const saved = mapRow(data as SearchHistoryRow);
   remoteHistoryAvailable = true;
+  setRemoteHistoryDisabled(false);
 
   if (isBrowser()) {
     const current = readLocalHistory();

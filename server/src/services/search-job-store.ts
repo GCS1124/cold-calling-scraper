@@ -1,4 +1,4 @@
-import { sql } from '@vercel/postgres';
+import { Pool } from 'pg';
 
 import type { Lead } from '../types/lead';
 import type { ProviderWarning, SearchProgress, SearchRequest, SearchResponse, SearchStatus } from '../types/search';
@@ -26,6 +26,41 @@ export type SearchJobStore = {
   get: (searchId: string) => Promise<SearchJobRecord | null>;
   upsert: (job: SearchJobRecord) => Promise<void>;
   deleteExpired: (now: number) => Promise<void>;
+};
+
+const connectionString =
+  process.env.POSTGRES_URL_NON_POOLING?.trim() ||
+  process.env.POSTGRES_URL?.trim() ||
+  '';
+
+const useSsl = Boolean(
+  connectionString &&
+    !/localhost|127\.0\.0\.1|\.local/i.test(connectionString),
+);
+
+let pool: Pool | null = null;
+
+const getPool = () => {
+  if (!connectionString) {
+    return null;
+  }
+
+  if (!pool) {
+    const url = new URL(connectionString);
+    pool = new Pool({
+      host: url.hostname,
+      port: url.port ? Number(url.port) : 5432,
+      user: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password),
+      database: url.pathname.replace(/^\//, ''),
+      max: 1,
+      idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 5_000,
+      ssl: useSsl ? { rejectUnauthorized: false } : undefined,
+    });
+  }
+
+  return pool;
 };
 
 const memoryStore = () => {
@@ -59,7 +94,12 @@ const postgresStore = (): SearchJobStore => {
       return;
     }
 
-    await sql`
+    const client = getPool();
+    if (!client) {
+      throw new Error('Missing POSTGRES_URL or POSTGRES_URL_NON_POOLING');
+    }
+
+    await client.query(`
       create table if not exists lead_finder_jobs (
         search_id text primary key,
         payload jsonb not null,
@@ -67,7 +107,7 @@ const postgresStore = (): SearchJobStore => {
         created_at bigint not null,
         updated_at bigint not null
       )
-    `;
+    `);
 
     schemaReady = true;
   };
@@ -77,12 +117,22 @@ const postgresStore = (): SearchJobStore => {
     get: async (searchId: string) => {
       await ensureSchema();
 
-      const result = await sql`
-        select payload
-        from lead_finder_jobs
-        where search_id = ${searchId}
-          and expires_at > ${Date.now()}
-      `;
+      const client = getPool();
+      if (!client) {
+        throw new Error('Missing POSTGRES_URL or POSTGRES_URL_NON_POOLING');
+      }
+
+      const result = await client.query<{
+        payload: SearchJobRecord | string;
+      }>(
+        `
+          select payload
+          from lead_finder_jobs
+          where search_id = $1
+            and expires_at > $2
+        `,
+        [searchId, Date.now()],
+      );
 
       const payload = result.rows[0]?.payload;
       if (!payload) {
@@ -94,70 +144,70 @@ const postgresStore = (): SearchJobStore => {
     upsert: async (job: SearchJobRecord) => {
       await ensureSchema();
 
-      await sql`
-        insert into lead_finder_jobs (
-          search_id,
-          payload,
-          expires_at,
-          created_at,
-          updated_at
-        ) values (
-          ${job.searchId},
-          ${JSON.stringify(job)}::jsonb,
-          ${job.expiresAt},
-          ${job.createdAt},
-          ${job.updatedAt}
-        )
-        on conflict (search_id) do update set
-          payload = excluded.payload,
-          expires_at = excluded.expires_at,
-          updated_at = excluded.updated_at
-      `;
+      const client = getPool();
+      if (!client) {
+        throw new Error('Missing POSTGRES_URL or POSTGRES_URL_NON_POOLING');
+      }
+
+      await client.query(
+        `
+          insert into lead_finder_jobs (
+            search_id,
+            payload,
+            expires_at,
+            created_at,
+            updated_at
+          ) values (
+            $1,
+            $2::jsonb,
+            $3,
+            $4,
+            $5
+          )
+          on conflict (search_id) do update set
+            payload = excluded.payload,
+            expires_at = excluded.expires_at,
+            updated_at = excluded.updated_at
+        `,
+        [
+          job.searchId,
+          JSON.stringify(job),
+          job.expiresAt,
+          job.createdAt,
+          job.updatedAt,
+        ],
+      );
     },
     deleteExpired: async (now: number) => {
       await ensureSchema();
-      await sql`
-        delete from lead_finder_jobs
-        where expires_at <= ${now}
-      `;
+      const client = getPool();
+      if (!client) {
+        throw new Error('Missing POSTGRES_URL or POSTGRES_URL_NON_POOLING');
+      }
+      await client.query('delete from lead_finder_jobs where expires_at <= $1', [now]);
     },
   };
 };
 
 export const createSearchJobStore = (): SearchJobStore => {
-  if (!process.env.POSTGRES_URL && !process.env.POSTGRES_PRISMA_URL) {
+  if (!connectionString) {
     return memoryStore();
   }
 
   const postgres = postgresStore();
-  const memory = memoryStore();
-  let useMemoryFallback = false;
-
-  const run = async <T>(operation: (store: SearchJobStore) => Promise<T>): Promise<T> => {
-    if (useMemoryFallback) {
-      return operation(memory);
-    }
-
-    try {
-      return await operation(postgres);
-    } catch (error) {
-      useMemoryFallback = true;
-      return operation(memory);
-    }
-  };
 
   return {
     ensureSchema: async () => {
-      await run((store) => store.ensureSchema());
+      await postgres.ensureSchema();
     },
     get: async (searchId: string) => {
-      return run((store) => store.get(searchId));
+      return postgres.get(searchId);
     },
     upsert: async (job: SearchJobRecord) => {
-      await run((store) => store.upsert(job));
+      await postgres.upsert(job);
     },
     deleteExpired: async (now: number) => {
-      await run((store) => store.deleteExpired(now));
+      await postgres.deleteExpired(now);
     },
   };
 };
