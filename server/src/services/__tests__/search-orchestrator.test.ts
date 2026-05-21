@@ -90,7 +90,7 @@ describe('createSearchService', () => {
     expect(failed?.meta.providerWarnings[0]?.message).toContain('No US location match found');
   });
 
-  it('progresses from queued to qualifying after background enrichment when still under target', async () => {
+  it('progresses from queued to discovering while background work continues under target', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 
     const service = createSearchService({

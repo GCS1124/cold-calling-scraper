@@ -110,7 +110,6 @@ export function HomePage({ searchApi }: HomePageProps) {
       startTransition(() => {
         setResult(response);
         setSelectedIds([]);
-        setInvalidLeadIds([]);
       });
 
     } catch (error) {

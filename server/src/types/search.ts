@@ -28,7 +28,6 @@ export type SearchStatus =
   | 'queued'
   | 'discovering'
   | 'enriching'
-  | 'qualifying'
   | 'complete'
   | 'failed';
 
