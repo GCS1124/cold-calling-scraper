@@ -20,7 +20,7 @@ type HomePageProps = {
 const initialSearch: SearchRequest = {
   companyType: '',
   city: '',
-  count: 200,
+  count: 50,
 };
 
 export function HomePage({ searchApi }: HomePageProps) {
@@ -300,7 +300,6 @@ export function HomePage({ searchApi }: HomePageProps) {
                 <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-3">
                   <p>Current source: {result.meta.progress.currentSource}</p>
                   <p>Blocked: {result.meta.progress.blockedCount}</p>
-                  <p>Discarded: {result.meta.progress.discardedCount}</p>
                   <p>Qualified: {result.meta.progress.qualifiedCount}</p>
                   <p>Batches: {result.meta.progress.batchesCompleted}</p>
                   <p>Remaining: {result.meta.progress.estimatedRemaining}</p>

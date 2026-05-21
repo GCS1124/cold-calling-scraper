@@ -59,14 +59,13 @@ const completedResponse: SearchResponse = {
       discovered: 2,
       enriched: 2,
       totalCandidates: 2,
-      requestedCount: 200,
+      requestedCount: 50,
       qualifiedCount: 1,
-      discardedCount: 1,
       blockedCount: 0,
       duplicatesRemoved: 0,
       currentSource: 'Complete',
       batchesCompleted: 2,
-      estimatedRemaining: 199,
+      estimatedRemaining: 49,
     },
     totals: {
       total: 2,
@@ -115,7 +114,7 @@ describe('App', () => {
     expect(searchApi.startSearch).toHaveBeenCalledWith({
       companyType: 'Dental Clinics',
       city: 'Austin',
-      count: 200,
+      count: 50,
     });
 
     expect(await screen.findByText('Northstar Labs')).toBeTruthy();
@@ -195,7 +194,6 @@ describe('App', () => {
         progress: {
           ...completedResponse.meta.progress,
           blockedCount: 1,
-          discardedCount: 2,
         },
       },
     };

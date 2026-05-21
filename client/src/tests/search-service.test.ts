@@ -15,14 +15,13 @@ const successfulPayload = {
         discovered: 0,
         enriched: 0,
         totalCandidates: 0,
-        requestedCount: 200,
+        requestedCount: 50,
         qualifiedCount: 0,
-        discardedCount: 0,
         blockedCount: 0,
         duplicatesRemoved: 0,
         currentSource: 'Queued',
         batchesCompleted: 0,
-        estimatedRemaining: 200,
+        estimatedRemaining: 50,
       },
     totals: {
       total: 0,
@@ -51,7 +50,7 @@ describe('searchApi', () => {
     await searchApi.startSearch({
       companyType: 'Dental Clinics',
       city: 'Austin',
-      count: 200,
+      count: 50,
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith('/api/search', {
@@ -62,7 +61,7 @@ describe('searchApi', () => {
       body: JSON.stringify({
         companyType: 'Dental Clinics',
         city: 'Austin',
-        count: 200,
+        count: 50,
       }),
     });
   });
@@ -90,7 +89,7 @@ describe('searchApi', () => {
       searchApi.startSearch({
         companyType: 'Dental Clinics',
         city: 'Austin',
-        count: 200,
+        count: 50,
       }),
     ).rejects.toThrow('Not found');
 
@@ -102,7 +101,7 @@ describe('searchApi', () => {
       body: JSON.stringify({
         companyType: 'Dental Clinics',
         city: 'Austin',
-        count: 200,
+        count: 50,
       }),
     });
   });
@@ -114,7 +113,7 @@ describe('searchApi', () => {
       searchApi.startSearch({
         companyType: 'Dental Clinics',
         city: 'Austin',
-        count: 200,
+        count: 50,
       }),
     ).rejects.toThrow('Failed to fetch');
   });

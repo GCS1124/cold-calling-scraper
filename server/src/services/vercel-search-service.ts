@@ -45,7 +45,6 @@ const createProgress = (requestedCount: number): SearchProgress => ({
   totalCandidates: 0,
   requestedCount,
   qualifiedCount: 0,
-  discardedCount: 0,
   blockedCount: 0,
   duplicatesRemoved: 0,
   currentSource: 'Queued',
@@ -95,7 +94,6 @@ const refreshProgress = (job: SearchJobRecord) => {
   job.progress.discovered = job.leads.length;
   job.progress.totalCandidates = job.leads.length;
   job.progress.qualifiedCount = qualifiedCount;
-  job.progress.discardedCount = job.leads.filter((lead) => !lead.qualified).length;
   job.progress.blockedCount = blockedCount;
   job.progress.estimatedRemaining = Math.max(0, job.request.count - qualifiedCount);
 };

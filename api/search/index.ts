@@ -2,7 +2,7 @@ import { ZodError } from 'zod';
 import { searchRequestSchema } from '../_lib/search-contract.js';
 import { vercelSearchService } from '../../server/src/services/vercel-search-service.js';
 
-const minimumRequestedCount = 200;
+const minimumRequestedCount = 50;
 
 export default async function handler(req: any, res: any) {
   if (req.method === 'GET') {

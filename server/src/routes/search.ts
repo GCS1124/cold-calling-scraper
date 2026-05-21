@@ -9,7 +9,7 @@ export type SearchService = {
   getSearch: (searchId: string) => Promise<SearchResponse | null>;
 };
 
-const minimumRequestedCount = 200;
+const minimumRequestedCount = 50;
 
 const normalizeRequest = (request: SearchRequest): SearchRequest => ({
   ...request,

@@ -38,7 +38,6 @@ export type SearchProgress = {
   totalCandidates: number;
   requestedCount: number;
   qualifiedCount: number;
-  discardedCount: number;
   blockedCount: number;
   duplicatesRemoved: number;
   currentSource: string;
