@@ -6,13 +6,15 @@ type RecentSearchesProps = {
 };
 
 export function RecentSearches({ items, onApply }: RecentSearchesProps) {
-  if (!items.length) {
+  const safeItems = items.filter((item): item is SearchHistoryItem => Boolean(item));
+
+  if (!safeItems.length) {
     return null;
   }
 
   return (
     <div className="flex flex-wrap gap-2">
-      {items.map((item) => (
+      {safeItems.map((item) => (
         <button
           key={item.id}
           className="rounded-full border border-slate-200 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-blue-200 hover:text-blue-700"

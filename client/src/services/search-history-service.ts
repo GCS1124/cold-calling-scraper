@@ -20,6 +20,7 @@ type SearchHistoryRow = {
 };
 
 const HISTORY_SELECT = 'id, company_type, city, count, location_label, created_at';
+const LOCAL_HISTORY_KEY = 'lead-finder-history';
 
 const mapRow = (row: SearchHistoryRow): SearchHistoryItem => ({
   id: row.id,
@@ -30,13 +31,53 @@ const mapRow = (row: SearchHistoryRow): SearchHistoryItem => ({
   createdAt: row.created_at,
 });
 
+const isBrowser = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+const readLocalHistory = (): SearchHistoryItem[] => {
+  if (!isBrowser()) {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(LOCAL_HISTORY_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as Array<Partial<SearchHistoryItem> | null>;
+    return parsed
+      .filter(
+        (item): item is Partial<SearchHistoryItem> =>
+          Boolean(item && item.id && item.companyType && item.city && item.count),
+      )
+      .map((item) => ({
+        id: String(item.id),
+        companyType: String(item.companyType),
+        city: String(item.city),
+        count: Number(item.count),
+        locationLabel: item.locationLabel ? String(item.locationLabel) : null,
+        createdAt: String(item.createdAt ?? new Date().toISOString()),
+      }));
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalHistory = (items: SearchHistoryItem[]) => {
+  if (!isBrowser()) {
+    return;
+  }
+
+  window.localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(items.slice(0, 10)));
+};
+
 export const loadSearchHistory = async (
   userId?: string | null,
 ): Promise<SearchHistoryItem[]> => {
   const supabase = getSupabaseClient();
 
   if (!supabase || !userId) {
-    return [];
+    return readLocalHistory();
   }
 
   const { data, error } = await supabase
@@ -58,12 +99,23 @@ export const rememberSearchHistory = async (
   options: {
     userId?: string | null;
     locationLabel?: string | null;
-  },
-): Promise<SearchHistoryItem | null> => {
+  } = {},
+): Promise<SearchHistoryItem> => {
   const supabase = getSupabaseClient();
+  const localItem: SearchHistoryItem = {
+    id: crypto.randomUUID(),
+    companyType: search.companyType.trim(),
+    city: search.city.trim(),
+    count: search.count,
+    locationLabel: options.locationLabel?.trim() || null,
+    createdAt: new Date().toISOString(),
+  };
 
   if (!supabase || !options.userId) {
-    return null;
+    const current = readLocalHistory();
+    const next = [localItem, ...current.filter((item) => item.id !== localItem.id)].slice(0, 10);
+    writeLocalHistory(next);
+    return localItem;
   }
 
   const payload = {
@@ -84,5 +136,13 @@ export const rememberSearchHistory = async (
     throw error;
   }
 
-  return mapRow(data as SearchHistoryRow);
+  const saved = mapRow(data as SearchHistoryRow);
+
+  if (isBrowser()) {
+    const current = readLocalHistory();
+    const next = [saved, ...current.filter((item) => item.id !== saved.id)].slice(0, 10);
+    writeLocalHistory(next);
+  }
+
+  return saved;
 };

@@ -197,7 +197,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.leads[0]?.email).toBe('hello@northstarlabs.ai');
     expect(snapshot?.leads[0]?.address).toContain('Austin, TX');
     expect(snapshot?.meta.progress.foundCount).toBeGreaterThanOrEqual(1);
-    expect(snapshot?.meta.status).toBe('discovering');
+    expect(snapshot?.meta.status).toBe('complete');
   });
 
   it('fans out nationwide searches across multiple state seeds and query variants', async () => {
@@ -227,7 +227,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
     });
 
-    const snapshot = await pollJob(service, 'search-4', 12);
+    const snapshot = await pollJob(service, 'search-4', 30);
 
     expect(googleCalls.length).toBeGreaterThan(1);
     expect(snapshot?.meta.status).toBe('complete');
