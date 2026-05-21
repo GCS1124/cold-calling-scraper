@@ -18,7 +18,7 @@ const completedResponse: SearchResponse = {
       address: 'South Congress',
       category: 'Dental Clinics',
       city: 'Austin, TX',
-      source: 'OpenStreetMap, Website Crawl',
+      source: 'OpenStreetMap',
       confidence: 92,
       sourceScore: 80,
       hasEmail: true,
@@ -145,7 +145,7 @@ describe('App', () => {
     expect(await screen.findByText('Northstar Labs')).toBeTruthy();
     expect(screen.getByText(/2 leads found for Dental Clinics in Austin, TX/i)).toBeTruthy();
     expect(screen.getByText('Orbit Data Works')).toBeTruthy();
-    expect(screen.queryByText(/South Congress/i)).toBeNull();
+    expect(screen.getByText(/South Congress/i)).toBeTruthy();
   });
 
   it('renders a simple leads found status without warning clutter', async () => {
@@ -162,7 +162,6 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: /find leads/i }));
 
     expect(await screen.findByText(/2 leads found for Dental Clinics in Austin, TX/i)).toBeTruthy();
-    expect(screen.queryByText(/source warnings/i)).toBeNull();
     expect(screen.queryByLabelText(/show rejected leads/i)).toBeNull();
     expect(screen.queryByLabelText(/include partial leads/i)).toBeNull();
   });

@@ -8,13 +8,13 @@ import { discoverUsLeadsFromOsm } from './osm-discovery';
 import { googlePlacesProvider } from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { nationwideStateQueries } from './us-discovery-regions';
-import { enrichLeadFromWebsite } from './website-enrichment';
 import {
   createSearchJobStore,
   type SearchJobRecord,
   toSearchResponse,
 } from './search-job-store';
 import { resolveCategoryProfile } from './us-category-mapping';
+import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 
 type VercelSearchService = {
   startSearch: (request: SearchRequest) => Promise<SearchResponse>;
@@ -26,15 +26,14 @@ type VercelSearchServiceDeps = {
   googlePlaces?: typeof googlePlacesProvider;
   normalizeLocation?: typeof normalizeUsLocation;
   discoverOsmLeads?: typeof discoverUsLeadsFromOsm;
-  enrichWebsiteLead?: typeof enrichLeadFromWebsite;
+  enrichWebsiteLead?: (lead: Lead) => Promise<unknown>;
   now?: () => number;
   idFactory?: () => string;
 };
 
 const jobTtlMs = 15 * 60 * 1000;
-const discoveryBatchSize = 1;
-const enrichmentBatchSize = 1;
-const perSeedCount = 100;
+const discoveryBatchSize = 3;
+const perSeedCount = 180;
 const maxCandidatePool = 3000;
 
 const withNow = () => Date.now();
@@ -72,12 +71,14 @@ const rankDiscoveryCandidates = (leads: Lead[]) =>
       Number(left.source.includes('Google Places')) * 8 +
       Number(left.hasWebsite) * 5 +
       Number(left.hasPhone) * 5 +
+      Number(Boolean(left.address)) * 2 +
       Number(Boolean(left.website && left.mobile)) * 4 +
       (left.sourceScore ?? 0) / 20;
     const rightSignal =
       Number(right.source.includes('Google Places')) * 8 +
       Number(right.hasWebsite) * 5 +
       Number(right.hasPhone) * 5 +
+      Number(Boolean(right.address)) * 2 +
       Number(Boolean(right.website && right.mobile)) * 4 +
       (right.sourceScore ?? 0) / 20;
 
@@ -90,15 +91,6 @@ const refreshProgress = (job: SearchJobRecord) => {
   job.progress.foundCount = job.leads.length;
   job.progress.estimatedRemaining = Math.max(0, job.request.count - job.leads.length);
 };
-
-const hasEnrichmentTargets = (job: SearchJobRecord) =>
-  job.leads.some(
-    (lead) =>
-      lead.website &&
-      (!lead.hasEmail || !lead.hasPhone) &&
-      lead.rejectionReason !== 'blocked_website' &&
-      lead.rejectionReason !== 'blocked_google',
-  );
 
 const dedupeWithCount = (leads: Lead[]) => {
   const deduped = deduplicateLeads(leads);
@@ -137,6 +129,7 @@ const discoverRegionLeads = async (
   };
 
   const query = buildQuery(request.companyType, location);
+  const queryVariants = buildDiscoveryQueryVariants(request.companyType, location, profile);
   const warnings: ProviderWarning[] = [...profile.warnings, ...location.warnings];
 
   let googleLeads: Lead[] = [];
@@ -144,6 +137,7 @@ const discoverRegionLeads = async (
     googleLeads = await googlePlaces.fetchLeads({
       rawQuery: request.companyType,
       query,
+      queryVariants,
       request: googleRequest,
     });
   } catch (error) {
@@ -187,49 +181,10 @@ const discoverRegionLeads = async (
   };
 };
 
-const enrichMissingEmails = async (
-  job: SearchJobRecord,
-  enrichWebsiteLead: typeof enrichLeadFromWebsite,
-) => {
-  const targets = rankDiscoveryCandidates(job.leads)
-    .filter(
-      (lead) =>
-        lead.website &&
-        !lead.verifiedEmail &&
-        lead.rejectionReason !== 'blocked_website' &&
-        lead.rejectionReason !== 'blocked_google',
-    )
-    .slice(0, enrichmentBatchSize);
-
-  if (!targets.length) {
-    return false;
-  }
-
-  job.progress.currentSource = 'Website Crawl';
-
-  for (const lead of targets) {
-    const result = await enrichWebsiteLead(lead);
-    job.providerWarnings.push(...result.warnings);
-
-    const nextLeads = job.leads.map((current) =>
-      current.id === lead.id ? result.lead : current,
-    );
-    const normalized = enrichLeads(nextLeads).map(normalizeLead);
-    const { leads, duplicatesRemoved } = dedupeWithCount(normalized);
-
-    job.progress.duplicatesRemoved += duplicatesRemoved;
-    job.progress.enriched += 1;
-    job.leads = trimCandidatePool(leads, job.request.count);
-    refreshProgress(job);
-  }
-
-  return true;
-};
-
 const tickJob = async (
   job: SearchJobRecord,
   store: ReturnType<typeof createSearchJobStore>,
-  deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'enrichWebsiteLead' | 'now'>>,
+  deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'now'>>,
 ): Promise<SearchJobRecord> => {
   if (job.status === 'failed' || job.status === 'complete') {
     return job;
@@ -245,13 +200,13 @@ const tickJob = async (
         : buildQuery(job.request.companyType, normalizedLocation);
     job.searchSeeds = toSearchSeeds(normalizedLocation);
     job.status = 'discovering';
-    job.progress.currentSource = 'Google Places';
+    job.progress.currentSource = 'Google Places API';
     job.providerWarnings.push(...normalizedLocation.warnings);
   }
 
   if (job.nextSeedIndex < job.searchSeeds.length) {
     job.status = 'discovering';
-    job.progress.currentSource = 'Google Places';
+    job.progress.currentSource = 'Google Places API';
 
     let processed = 0;
     while (job.nextSeedIndex < job.searchSeeds.length && processed < discoveryBatchSize) {
@@ -280,26 +235,12 @@ const tickJob = async (
 
   job.discoveryComplete = job.nextSeedIndex >= job.searchSeeds.length;
 
-  if (job.progress.foundCount < job.request.count && job.discoveryComplete) {
-    const enriched = await enrichMissingEmails(job, deps.enrichWebsiteLead);
-    if (enriched) {
-      job.progress.batchesCompleted += 1;
-      job.expiresAt = withNow() + jobTtlMs;
-    }
-  }
-
-  if (job.progress.foundCount >= job.request.count) {
+  if (job.progress.foundCount >= job.request.count || job.discoveryComplete) {
     job.status = 'complete';
     job.progress.currentSource = 'Complete';
-  } else if (!job.discoveryComplete) {
-    job.status = 'discovering';
-    job.progress.currentSource = 'Google Places';
-  } else if (hasEnrichmentTargets(job)) {
-    job.status = 'enriching';
-    job.progress.currentSource = 'Website Crawl';
   } else {
     job.status = 'discovering';
-    job.progress.currentSource = 'Google Places';
+    job.progress.currentSource = 'Google Places API';
   }
 
   refreshProgress(job);
@@ -319,7 +260,6 @@ export const createVercelSearchServiceWithDeps = (
   const googlePlaces = deps.googlePlaces ?? googlePlacesProvider;
   const normalizeLocation = deps.normalizeLocation ?? normalizeUsLocation;
   const discoverOsm = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
-  const enrichWebsiteLead = deps.enrichWebsiteLead ?? enrichLeadFromWebsite;
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
 
@@ -366,7 +306,6 @@ export const createVercelSearchServiceWithDeps = (
         googlePlaces,
         normalizeLocation,
         discoverOsmLeads: discoverOsm,
-        enrichWebsiteLead,
         now,
       });
       return toSearchResponse(next);

@@ -31,6 +31,7 @@ const scoreLead = (lead: Lead) => {
   if (lead.website) score += 25;
   if (lead.mobile) score += 25;
   if (lead.email) score += 10;
+  if (lead.address) score += 10;
   if (lead.website && lead.mobile) score += 15;
   return score;
 };
@@ -42,6 +43,26 @@ const normalizeWebsiteCandidate = (value: string) => {
   }
 
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+};
+
+const normalizeEmailCandidate = (value: string) => {
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.includes('@') ? trimmed : '';
+};
+
+const buildAddress = (tags: Record<string, string> | undefined) => {
+  if (!tags) {
+    return '';
+  }
+
+  const street = [tags['addr:housenumber'], tags['addr:street'], tags['addr:unit']]
+    .filter((value) => value?.trim())
+    .join(' ');
+  const locality = [tags['addr:city'], tags['addr:state'], tags['addr:postcode']]
+    .filter((value) => value?.trim())
+    .join(', ');
+
+  return [street, locality].filter(Boolean).join(', ');
 };
 
 export const discoverUsLeadsFromOsm = async ({
@@ -92,23 +113,25 @@ export const discoverUsLeadsFromOsm = async ({
         pickTag(element.tags, ['website', 'contact:website', 'url']),
       );
       const phone = pickTag(element.tags, ['phone', 'contact:phone']);
+      const email = normalizeEmailCandidate(pickTag(element.tags, ['email', 'contact:email']));
+      const address = buildAddress(element.tags);
 
       const lead: Lead = {
         id: `osm-${element.id}`,
         name,
         mobile: phone,
-        email: '',
+        email,
         website,
-        address: '',
+        address,
         category: request.companyType,
         city: location.label,
         source: 'OpenStreetMap',
         confidence: 0,
         sourceScore: 65,
-        hasEmail: false,
-        hasPhone: false,
-        hasWebsite: false,
-        verifiedPhone: false,
+        hasEmail: Boolean(email),
+        hasPhone: Boolean(phone),
+        hasWebsite: Boolean(website),
+        verifiedPhone: Boolean(phone),
         verifiedEmail: false,
         scrapedAt: new Date().toISOString(),
       };
@@ -121,7 +144,7 @@ export const discoverUsLeadsFromOsm = async ({
 
   const strongCandidates = leads.filter((lead) => lead.website || lead.mobile);
   const fallbackCandidates = leads.filter((lead) => !lead.website && !lead.mobile);
-  const targetCount = Math.max(request.count * 2, 80);
+  const targetCount = Math.max(request.count * 4, 120);
   const shortlist = [...strongCandidates, ...fallbackCandidates].slice(0, targetCount);
 
   return shortlist;

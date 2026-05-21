@@ -52,6 +52,7 @@ const extractPhones = (value: string) =>
 const parseJsonLdContacts = (html: string) => {
   const emails = new Set<string>();
   const phones = new Set<string>();
+  const addresses = new Set<string>();
 
   const scriptPattern = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
   for (const match of html.matchAll(scriptPattern)) {
@@ -75,6 +76,22 @@ const parseJsonLdContacts = (html: string) => {
               phones.add(phone);
             }
           }
+          const jsonLdAddress = entry?.address;
+          if (typeof jsonLdAddress === 'string' && jsonLdAddress.trim()) {
+            addresses.add(jsonLdAddress.trim());
+          } else if (jsonLdAddress && typeof jsonLdAddress === 'object') {
+            const parts = [
+              jsonLdAddress.streetAddress,
+              jsonLdAddress.addressLocality,
+              jsonLdAddress.addressRegion,
+              jsonLdAddress.postalCode,
+            ]
+              .map((part) => part?.trim())
+              .filter(Boolean);
+            if (parts.length) {
+              addresses.add(parts.join(', '));
+            }
+          }
         }
       }
     } catch {
@@ -82,7 +99,7 @@ const parseJsonLdContacts = (html: string) => {
     }
   }
 
-  return { emails: [...emails], phones: [...phones] };
+  return { emails: [...emails], phones: [...phones], addresses: [...addresses] };
 };
 
 const sameHost = (base: URL, candidate: URL) =>
@@ -103,6 +120,7 @@ export const extractContactDetailsFromHtml = (html: string) => {
     .join(' ');
   const emails = new Set<string>();
   const phones = new Set<string>();
+  const addresses = new Set<string>();
 
   $('a[href^="mailto:"]').each((_index, element) => {
     const value = ($(element).attr('href') ?? '').replace(/^mailto:/i, '').trim().toLowerCase();
@@ -117,6 +135,15 @@ export const extractContactDetailsFromHtml = (html: string) => {
       phones.add(value);
     }
   });
+
+  $('address, [itemprop="streetAddress"], [itemprop="addressLocality"], [itemprop="addressRegion"], [itemprop="postalCode"]').each(
+    (_index, element) => {
+      const value = $(element).text().replace(/\s+/g, ' ').trim();
+      if (value) {
+        addresses.add(value);
+      }
+    },
+  );
 
   for (const email of text.match(emailPattern) ?? []) {
     emails.add(email.toLowerCase());
@@ -133,10 +160,14 @@ export const extractContactDetailsFromHtml = (html: string) => {
   for (const phone of jsonLd.phones) {
     phones.add(phone);
   }
+  for (const address of jsonLd.addresses) {
+    addresses.add(address);
+  }
 
   return {
     emails: [...emails],
     phones: [...phones],
+    addresses: [...addresses],
   };
 };
 
@@ -200,6 +231,7 @@ export const enrichLeadFromWebsite = async (
   const visited = new Set<string>();
   const emails = new Set<string>();
   const phones = new Set<string>();
+  const addresses = new Set<string>();
   const warnings: ProviderWarning[] = [];
 
   while (queue.length && visited.size < maxPages) {
@@ -245,6 +277,7 @@ export const enrichLeadFromWebsite = async (
       const extracted = extractContactDetailsFromHtml(response.data);
       extracted.emails.forEach((email) => emails.add(email));
       extracted.phones.forEach((phone) => phones.add(phone));
+      extracted.addresses.forEach((address) => addresses.add(address));
 
       for (const link of getInternalLinks(response.data, new URL(current.url), origin)) {
         if (!visited.has(link) && queue.length + visited.size < maxPages) {
@@ -266,8 +299,11 @@ export const enrichLeadFromWebsite = async (
   const domainHint = origin.hostname.replace(/^www\./, '');
   const email = selectBestEmail([...emails], domainHint) || lead.email || '';
   const phone = [...phones][0] || lead.mobile || '';
+  const address = [...addresses][0] || lead.address || '';
   const improved = Boolean(
-    (email && email !== lead.email) || (phone && phone !== lead.mobile),
+    (email && email !== lead.email) ||
+      (phone && phone !== lead.mobile) ||
+      (address && address !== lead.address),
   );
 
   return {
@@ -275,6 +311,7 @@ export const enrichLeadFromWebsite = async (
       ...lead,
       email,
       mobile: phone,
+      address,
       website,
       crawlAttempts: visited.size,
       source: improved && !lead.source.includes('Website Crawl') ? `${lead.source}, Website Crawl` : lead.source,

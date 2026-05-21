@@ -58,6 +58,9 @@ const extractListingCandidates = async (page: import('playwright').Page) =>
     return [...unique.values()];
   });
 
+const uniqueValues = (values: string[]) =>
+  [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+
 const scrapeListingDetails = async (
   browser: import('playwright').Browser,
   candidate: GoogleMapsCandidate,
@@ -154,9 +157,11 @@ const scrapeListingDetails = async (
 export const discoverUsLeadsFromGoogleMaps = async ({
   request,
   location,
+  queryVariants = [],
 }: {
   request: SearchRequest;
   location: NormalizedUsLocation;
+  queryVariants?: string[];
 }): Promise<Lead[]> => {
   const browser = await chromium.launch({
     headless: true,
@@ -169,50 +174,60 @@ export const discoverUsLeadsFromGoogleMaps = async ({
 
   try {
     const maxResults = Math.min(Math.max(Math.ceil(request.count * 0.8), 60), 120);
-    const query = `${request.companyType} in ${location.label}`;
-    await page.goto(`https://www.google.com/maps/search/${encodeURIComponent(query)}`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    });
-
-    const acceptButton = page.locator('button:has-text("Accept all")').first();
-    if (await acceptButton.isVisible().catch(() => false)) {
-      await acceptButton.click().catch(() => undefined);
-    }
-
-    await page.waitForTimeout(1500);
-
-    const body = (await page.textContent('body')) ?? '';
-    if (blockedPattern.test(body) || /\/sorry\//i.test(page.url())) {
-      throw new Error('Google Maps blocked the request with a CAPTCHA or traffic challenge');
-    }
-
-    const feed = page.locator('[role="feed"]').first();
     const candidates = new Map<string, GoogleMapsCandidate>();
-    let stagnantRounds = 0;
+    const queries = uniqueValues([
+      `${request.companyType} in ${location.label}`,
+      ...queryVariants,
+    ]).slice(0, 5);
 
-    while (candidates.size < maxResults && stagnantRounds < 4) {
-      const before = candidates.size;
-      for (const candidate of await extractListingCandidates(page)) {
-        if (!candidates.has(candidate.listingUrl)) {
-          candidates.set(candidate.listingUrl, candidate);
+    for (const query of queries) {
+      if (candidates.size >= maxResults) {
+        break;
+      }
+
+      await page.goto(`https://www.google.com/maps/search/${encodeURIComponent(query)}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
+
+      const acceptButton = page.locator('button:has-text("Accept all")').first();
+      if (await acceptButton.isVisible().catch(() => false)) {
+        await acceptButton.click().catch(() => undefined);
+      }
+
+      await page.waitForTimeout(1500);
+
+      const body = (await page.textContent('body')) ?? '';
+      if (blockedPattern.test(body) || /\/sorry\//i.test(page.url())) {
+        break;
+      }
+
+      const feed = page.locator('[role="feed"]').first();
+      let stagnantRounds = 0;
+
+      while (candidates.size < maxResults && stagnantRounds < 3) {
+        const before = candidates.size;
+        for (const candidate of await extractListingCandidates(page)) {
+          if (!candidates.has(candidate.listingUrl)) {
+            candidates.set(candidate.listingUrl, candidate);
+          }
         }
-      }
 
-      if (candidates.size === before) {
-        stagnantRounds += 1;
-      } else {
-        stagnantRounds = 0;
-      }
+        if (candidates.size === before) {
+          stagnantRounds += 1;
+        } else {
+          stagnantRounds = 0;
+        }
 
-      if ((await feed.count()) > 0) {
-        await feed.evaluate((node) => {
-          node.scrollBy(0, node.clientHeight * 1.5);
-        });
-      } else {
-        await page.mouse.wheel(0, 3000);
+        if ((await feed.count()) > 0) {
+          await feed.evaluate((node) => {
+            node.scrollBy(0, node.clientHeight * 1.75);
+          });
+        } else {
+          await page.mouse.wheel(0, 3500);
+        }
+        await page.waitForTimeout(700);
       }
-      await page.waitForTimeout(800);
     }
 
     const listingCandidates = [...candidates.values()].slice(0, maxResults);

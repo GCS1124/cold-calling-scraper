@@ -98,18 +98,6 @@ describe('createSearchService', () => {
       normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
       discoverGoogleLeads: vi.fn().mockResolvedValue([]),
       discoverOsmLeads: vi.fn().mockResolvedValue([sampleLead]),
-      enrichLead: vi.fn().mockResolvedValue({
-        lead: {
-          ...sampleLead,
-          email: 'hello@latticedental.com',
-          source: 'OpenStreetMap, Website Crawl',
-          hasEmail: true,
-          verifiedEmail: true,
-          rejectionReason: undefined,
-          confidence: 92,
-        },
-        warnings: [],
-      }),
       schedule: (task) => {
         backgroundTask = task;
       },
@@ -131,11 +119,11 @@ describe('createSearchService', () => {
     await task();
     const completed = await service.getSearch('search-2');
 
-    expect(completed?.meta.status).toBe('discovering');
+    expect(completed?.meta.status).toBe('complete');
     expect(completed?.meta.locationLabel).toBe('Austin, TX');
-    expect(completed?.meta.progress.enriched).toBe(1);
     expect(completed?.meta.progress.foundCount).toBe(1);
-    expect(completed?.leads[0]?.email).toBe('hello@latticedental.com');
+    expect(completed?.meta.progress.enriched).toBe(0);
+    expect(completed?.leads[0]?.name).toBe('Lattice Dental');
   });
 
   it('keeps category warnings while keeping the job open until the target is met', async () => {
@@ -174,7 +162,7 @@ describe('createSearchService', () => {
     await task();
     const result = await service.getSearch('search-3');
 
-    expect(result?.meta.status).toBe('discovering');
+    expect(result?.meta.status).toBe('complete');
     expect(result?.leads).toHaveLength(1);
     expect(result?.meta.providerWarnings).toEqual([
       expect.objectContaining({
@@ -234,9 +222,8 @@ describe('createSearchService', () => {
     await task();
     const completed = await service.getSearch('search-4');
 
-    expect(completed?.meta.status).toBe('enriching');
+    expect(completed?.meta.status).toBe('complete');
     expect(completed?.meta.locationLabel).toBe('United States');
-    expect(completed?.meta.progress.currentSource).toBe('Website Crawl');
     expect(googleCalls.length).toBeGreaterThan(1);
     expect(osmCalls.length).toBeGreaterThan(1);
     expect(completed?.leads.length).toBeGreaterThanOrEqual(1);

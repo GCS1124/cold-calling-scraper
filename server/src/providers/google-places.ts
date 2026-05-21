@@ -45,7 +45,7 @@ const normalizePhone = (value?: string) => (value?.trim() ?? '').replace(/\s+/g,
 export const googlePlacesProvider: LeadProvider = {
   id: 'google-places',
   name: 'Google Places',
-  async fetchLeads({ query, request }) {
+  async fetchLeads({ query, queryVariants = [], request }) {
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
     if (!apiKey) {
       throw new Error('GOOGLE_PLACES_API_KEY is not configured');
@@ -61,42 +61,46 @@ export const googlePlacesProvider: LeadProvider = {
     ].join(',');
 
     const allResults: GooglePlacesResponse['results'] = [];
-    let pageToken: string | undefined;
+    const searchQueries = [...new Set([query, ...queryVariants].map((value) => value.trim()).filter(Boolean))].slice(0, 6);
 
-    for (let pageIndex = 0; pageIndex < 3 && allResults.length < request.count; pageIndex += 1) {
-      const response = await axios.get<GooglePlacesResponse>(
-        'https://maps.googleapis.com/maps/api/place/textsearch/json',
-        {
-          params: {
-            key: apiKey,
-            query,
-            language: 'en',
-            pagetoken: pageToken,
+    for (const searchQuery of searchQueries) {
+      let pageToken: string | undefined;
+
+      for (let pageIndex = 0; pageIndex < 3 && allResults.length < request.count; pageIndex += 1) {
+        const response = await axios.get<GooglePlacesResponse>(
+          'https://maps.googleapis.com/maps/api/place/textsearch/json',
+          {
+            params: {
+              key: apiKey,
+              query: searchQuery,
+              language: 'en',
+              pagetoken: pageToken,
+            },
+            timeout: 6000,
           },
-          timeout: 6000,
-        },
-      );
-
-      if (response.data.status === 'ZERO_RESULTS') {
-        break;
-      }
-
-      if (response.data.status && response.data.status !== 'OK') {
-        throw new Error(
-          response.data.error_message
-            ? `Google Places: ${response.data.error_message}`
-            : `Google Places returned ${response.data.status}`,
         );
+
+        if (response.data.status === 'ZERO_RESULTS') {
+          break;
+        }
+
+        if (response.data.status && response.data.status !== 'OK') {
+          throw new Error(
+            response.data.error_message
+              ? `Google Places: ${response.data.error_message}`
+              : `Google Places returned ${response.data.status}`,
+          );
+        }
+
+        allResults.push(...(response.data.results ?? []));
+        pageToken = response.data.next_page_token;
+
+        if (!pageToken || allResults.length >= request.count) {
+          break;
+        }
+
+        await sleep(2000);
       }
-
-      allResults.push(...(response.data.results ?? []));
-      pageToken = response.data.next_page_token;
-
-      if (!pageToken || allResults.length >= request.count) {
-        break;
-      }
-
-      await sleep(2000);
     }
 
     const uniqueResults = [...new Map(

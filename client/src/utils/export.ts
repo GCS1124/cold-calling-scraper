@@ -7,6 +7,7 @@ export const exportColumns = [
   'mobile',
   'email',
   'website',
+  'address',
   'source',
 ] as const;
 
@@ -15,6 +16,7 @@ export const defaultExportColumns = [
   'mobile',
   'email',
   'website',
+  'address',
 ] as const;
 
 export type ExportColumn = (typeof exportColumns)[number];

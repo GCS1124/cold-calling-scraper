@@ -1,53 +1,46 @@
 import { useEffect, useState } from 'react';
 
 import type { SearchRequest } from '../types/lead';
+import {
+  loadSearchHistory,
+  rememberSearchHistory,
+  type SearchHistoryItem,
+} from '../services/search-history-service';
 
-const storageKey = 'lead-finder-history:v1';
+export type { SearchHistoryItem } from '../services/search-history-service';
 
-export type SearchHistoryItem = SearchRequest & {
-  id: string;
-  createdAt: string;
-};
-
-const readHistory = () => {
-  if (typeof window === 'undefined') {
-    return [] as SearchHistoryItem[];
-  }
-
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    return raw ? (JSON.parse(raw) as SearchHistoryItem[]) : [];
-  } catch {
-    return [];
-  }
-};
-
-export const useSearchHistory = () => {
-  const [items, setItems] = useState<SearchHistoryItem[]>(() => readHistory());
+export const useSearchHistory = (userId?: string | null) => {
+  const [items, setItems] = useState<SearchHistoryItem[]>([]);
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(items));
-  }, [items]);
+    let active = true;
 
-  const rememberSearch = (search: SearchRequest) => {
-    setItems((current) => {
-      const deduped = current.filter(
-        (item) =>
-          !(
-            item.companyType.toLowerCase() === search.companyType.toLowerCase() &&
-            item.city.toLowerCase() === search.city.toLowerCase()
-          ),
-      );
+    const sync = async () => {
+      const nextItems = await loadSearchHistory(userId);
+      if (active) {
+        setItems(nextItems);
+      }
+    };
 
-      return [
-        {
-          ...search,
-          id: `${search.companyType}-${search.city}`.toLowerCase().replace(/\s+/g, '-'),
-          createdAt: new Date().toISOString(),
-        },
-        ...deduped,
-      ].slice(0, 10);
+    void sync();
+
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  const rememberSearch = async (search: SearchRequest, locationLabel?: string | null) => {
+    const saved = await rememberSearchHistory(search, {
+      userId,
+      locationLabel,
     });
+
+    setItems((current) => {
+      const next = [saved, ...current.filter((item) => item.id !== saved.id)];
+      return next.slice(0, 10);
+    });
+
+    return saved;
   };
 
   return {

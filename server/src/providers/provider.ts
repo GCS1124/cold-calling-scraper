@@ -4,6 +4,7 @@ import type { SearchRequest } from '../types/search';
 export type LeadProviderRequest = {
   rawQuery: string;
   query: string;
+  queryVariants?: string[];
   request: SearchRequest;
 };
 

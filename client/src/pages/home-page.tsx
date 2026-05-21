@@ -1,14 +1,16 @@
 import { motion } from 'framer-motion';
 import { Download, LoaderCircle, Sparkles, Zap } from 'lucide-react';
-import { startTransition, useDeferredValue, useEffect, useState } from 'react';
+import { startTransition, useDeferredValue, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
+import { AuthPanel } from '../components/auth/auth-panel';
 import { ExportModal } from '../components/export/export-modal';
 import { FiltersPanel } from '../components/results/filters-panel';
 import { ResultsSummary } from '../components/results/results-summary';
 import { ResultsTable } from '../components/results/results-table';
 import { RecentSearches } from '../components/search/recent-searches';
 import { SearchForm } from '../components/search/search-form';
+import { useAuth } from '../hooks/use-auth';
 import { useSearchHistory } from '../hooks/use-search-history';
 import type { SearchApi } from '../services/search-service';
 import type { Lead, SearchRequest, SearchResponse } from '../types/lead';
@@ -29,12 +31,15 @@ export function HomePage({ searchApi }: HomePageProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [submittedSearch, setSubmittedSearch] = useState<SearchRequest | null>(null);
   const [filters, setFilters] = useState({
     hasEmail: false,
     hasPhone: false,
     hasWebsite: false,
   });
-  const { items, rememberSearch } = useSearchHistory();
+  const auth = useAuth();
+  const { items, rememberSearch } = useSearchHistory(auth.user?.id);
+  const recordedSearchId = useRef<string | null>(null);
 
   const visibleLeads = (result?.leads ?? [])
     .filter((lead) => {
@@ -70,6 +75,19 @@ export function HomePage({ searchApi }: HomePageProps) {
       : 'No leads match the current filters.';
 
   useEffect(() => {
+    if (!result || result.meta.status !== 'complete' || !submittedSearch) {
+      return;
+    }
+
+    if (recordedSearchId.current === result.searchId) {
+      return;
+    }
+
+    recordedSearchId.current = result.searchId;
+    void rememberSearch(submittedSearch, result.meta.locationLabel);
+  }, [rememberSearch, result, submittedSearch]);
+
+  useEffect(() => {
     if (
       !result?.searchId ||
       !['queued', 'discovering', 'enriching'].includes(result.meta.status)
@@ -101,14 +119,10 @@ export function HomePage({ searchApi }: HomePageProps) {
     const nextSearch = override ?? search;
 
     setLoading(true);
+    setSubmittedSearch(nextSearch);
 
     try {
       const response = await searchApi.startSearch(nextSearch);
-      rememberSearch({
-        ...nextSearch,
-        count: response.meta.progress.requestedCount,
-        city: response.meta.locationLabel || nextSearch.city,
-      });
 
       startTransition(() => {
         setResult(response);
@@ -138,7 +152,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   };
 
   const handleCopyRow = async (lead: Lead) => {
-    const value = [lead.name, lead.mobile, lead.email, lead.website, lead.source].join(',');
+    const value = [lead.name, lead.mobile, lead.email, lead.website, lead.address, lead.source].join(',');
     await navigator.clipboard.writeText(value);
     toast.success('Lead copied as CSV');
   };
@@ -164,9 +178,8 @@ export function HomePage({ searchApi }: HomePageProps) {
             </h1>
 
             <p className="mt-5 max-w-lg text-base leading-7 text-slate-600 md:text-lg">
-              Search US businesses by category and metro area, blend live APIs with
-              open mapping discovery and direct website crawling, then export a clean
-              outbound list without leaving the browser.
+              Search US businesses by category and metro area using structured APIs and
+              mapping data, then export a clean outbound list without leaving the browser.
             </p>
 
             <div className="mt-8 grid max-w-xl gap-3 sm:grid-cols-2">
@@ -196,8 +209,9 @@ export function HomePage({ searchApi }: HomePageProps) {
             initial={{ opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.45, delay: 0.08 }}
           >
-            <SearchForm loading={loading} onChange={setSearch} onSubmit={() => handleSearch()} value={search} />
-            <div className="mt-4">
+            <div className="space-y-4">
+              <AuthPanel auth={auth} />
+              <SearchForm loading={loading} onChange={setSearch} onSubmit={() => handleSearch()} value={search} />
               <RecentSearches
                 items={items}
                 onApply={(item) => {

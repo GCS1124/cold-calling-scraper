@@ -55,9 +55,12 @@ const scoreLead = (lead: Lead) => {
   if (lead.hasEmail) score += 15;
   if (lead.hasPhone) score += 15;
   if (lead.hasWebsite) score += 15;
+  if (lead.address) score += 5;
   if (lead.verifiedEmail) score += 10;
   if (lead.verifiedPhone) score += 10;
+  if (lead.source.includes('Google Places')) score += 10;
   if (lead.source.includes('Google Maps')) score += 10;
+  if (lead.source.includes('OpenStreetMap')) score += 5;
 
   return Math.min(score, 100);
 };
@@ -98,13 +101,11 @@ export const enrichLead = (lead: Lead): Lead => {
     verifiedPhone: hasPhone,
     sourceScore:
       lead.sourceScore ??
-      (lead.source.includes('Google Maps')
+      (lead.source.includes('Google Places') || lead.source.includes('Google Maps')
         ? 90
         : lead.source.includes('OpenStreetMap')
           ? 65
-          : lead.source.includes('Website Crawl')
-            ? 75
-            : 50),
+          : 50),
   };
 
   return {

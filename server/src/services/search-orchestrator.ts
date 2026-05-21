@@ -1,7 +1,5 @@
 import { randomUUID } from 'node:crypto';
 
-import pLimit from 'p-limit';
-
 import type { Lead } from '../types/lead';
 import type {
   ProviderWarning,
@@ -12,12 +10,12 @@ import type {
 } from '../types/search';
 import { deduplicateLeads } from './lead-deduplication';
 import { enrichLeads } from './lead-validation';
-import { discoverUsLeadsFromGoogleMaps } from './google-maps-discovery';
+import { googlePlacesProvider } from '../providers/google-places';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
 import { nationwideStateQueries } from './us-discovery-regions';
+import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
-import { enrichLeadFromWebsite } from './website-enrichment';
 
 type SearchJob = {
   searchId: string;
@@ -38,28 +36,26 @@ type SearchService = {
 
 type SearchDeps = {
   normalizeLocation?: (rawLocation: string) => Promise<NormalizedUsLocation>;
-  discoverGoogleLeads?: (args: {
+  enrichLead?: (lead: Lead) => Lead | Promise<Lead>;
+  discoverGoogleLeads?: typeof googlePlacesProvider | ((args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
-  }) => Promise<Lead[]>;
+    queryVariants: string[];
+  }) => Promise<Lead[]>);
   discoverOsmLeads?: (args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
     profile: ReturnType<typeof resolveCategoryProfile>;
   }) => Promise<Lead[]>;
-  enrichLead?: (lead: Lead) => Promise<{ lead: Lead; warnings: ProviderWarning[] }>;
   schedule?: (task: () => Promise<void>) => void;
   now?: () => number;
   idFactory?: () => string;
 };
 
 const jobTtlMs = 15 * 60 * 1000;
-const enrichmentBatchSize = 25;
-const enrichmentConcurrency = pLimit(3);
 const googleDiscoveryTimeoutMs = 20000;
 const osmDiscoveryTimeoutMs = 20000;
 const maxCandidatePool = 3000;
-const minimumEnrichmentTarget = 60;
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: string) => {
   let timer: NodeJS.Timeout | undefined;
@@ -80,38 +76,22 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: s
   }
 };
 
-const rankLeads = (leads: Lead[]) =>
-  [...leads].sort((left, right) => {
-    const leftScore =
-      Number(left.hasEmail) * 4 +
-      Number(left.hasPhone) * 4 +
-      Number(left.hasWebsite) * 3 +
-      (left.sourceScore ?? 0) / 25;
-    const rightScore =
-      Number(right.hasEmail) * 4 +
-      Number(right.hasPhone) * 4 +
-      Number(right.hasWebsite) * 3 +
-      (right.sourceScore ?? 0) / 25;
-
-    return (
-      rightScore - leftScore ||
-      right.confidence - left.confidence ||
-      left.name.localeCompare(right.name)
-    );
-  });
-
 const rankDiscoveryCandidates = (leads: Lead[]) =>
   [...leads].sort((left, right) => {
     const leftSignal =
+      Number(left.source.includes('Google Places')) * 6 +
       Number(left.source.includes('Google Maps')) * 6 +
       Number(left.hasWebsite) * 5 +
       Number(left.hasPhone) * 5 +
+      Number(Boolean(left.address)) * 2 +
       Number(Boolean(left.website && left.mobile)) * 4 +
       (left.sourceScore ?? 0) / 20;
     const rightSignal =
+      Number(right.source.includes('Google Places')) * 6 +
       Number(right.source.includes('Google Maps')) * 6 +
       Number(right.hasWebsite) * 5 +
       Number(right.hasPhone) * 5 +
+      Number(Boolean(right.address)) * 2 +
       Number(Boolean(right.website && right.mobile)) * 4 +
       (right.sourceScore ?? 0) / 20;
 
@@ -121,15 +101,6 @@ const rankDiscoveryCandidates = (leads: Lead[]) =>
       left.name.localeCompare(right.name)
     );
   });
-
-const hasEnrichmentTargets = (job: SearchJob) =>
-  job.leads.some(
-    (lead) =>
-      lead.website &&
-      (!lead.hasEmail || !lead.hasPhone) &&
-      lead.rejectionReason !== 'blocked_website' &&
-      lead.rejectionReason !== 'blocked_google',
-  );
 
 const computeTotals = (leads: Lead[]) => ({
   total: leads.length,
@@ -207,29 +178,42 @@ const runRegionalDiscovery = async (
   discoverOsmLeads: NonNullable<SearchDeps['discoverOsmLeads']>,
 ) => {
   job.progress.currentSource =
-    location.mode === 'nationwide' ? 'Nationwide Discovery' : 'Hybrid Discovery';
+    location.mode === 'nationwide' ? 'Nationwide Discovery' : 'Google Places API';
+  const queryVariants = buildDiscoveryQueryVariants(request.companyType, location, profile);
 
   await Promise.all([
     (async () => {
       try {
         const googleLeads = await withTimeout(
-          discoverGoogleLeads({
-            request,
-            location,
-          }),
+          typeof discoverGoogleLeads === 'function'
+            ? discoverGoogleLeads({
+                request,
+                location,
+                queryVariants,
+              })
+            : discoverGoogleLeads.fetchLeads({
+                rawQuery: request.companyType,
+                query: `${request.companyType} in ${location.label}`,
+                queryVariants,
+                request: {
+                  ...request,
+                  city: location.label,
+                  count: Math.max(request.count, 100),
+                },
+              }),
           googleDiscoveryTimeoutMs,
-          'Google Maps discovery timed out before the batch completed',
+          'Google Places discovery timed out before the batch completed',
         );
         upsertLeads(job, googleLeads);
         job.progress.batchesCompleted += 1;
       } catch (error) {
         job.providerWarnings.push({
-          providerId: 'google-maps',
-          providerName: 'Google Maps',
+          providerId: 'google-places',
+          providerName: 'Google Places',
           message:
             error instanceof Error
               ? error.message
-              : 'Google Maps discovery failed',
+              : 'Google Places discovery failed',
         });
       }
     })(),
@@ -261,9 +245,8 @@ const runRegionalDiscovery = async (
 export const createSearchService = (deps: SearchDeps = {}): SearchService => {
   const jobs = new Map<string, SearchJob>();
   const normalizeLocation = deps.normalizeLocation ?? normalizeUsLocation;
-  const discoverGoogleLeads = deps.discoverGoogleLeads ?? discoverUsLeadsFromGoogleMaps;
+  const discoverGoogleLeads = deps.discoverGoogleLeads ?? googlePlacesProvider;
   const discoverOsmLeads = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
-  const enrichLead = deps.enrichLead ?? enrichLeadFromWebsite;
   const now = deps.now ?? Date.now;
   const idFactory = deps.idFactory ?? randomUUID;
   const schedule =
@@ -278,57 +261,6 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     job.status = 'failed';
     job.providerWarnings.push(warning);
     refreshProgress(job);
-  };
-
-  const runEnrichment = async (job: SearchJob) => {
-    const shortlistSize = Math.max(minimumEnrichmentTarget, job.request.count * 2);
-    const targets = rankDiscoveryCandidates(job.leads)
-      .filter(
-        (lead) =>
-          lead.website &&
-          (!lead.hasEmail || !lead.hasPhone) &&
-          lead.rejectionReason !== 'blocked_website' &&
-          lead.rejectionReason !== 'blocked_google',
-      )
-      .slice(0, shortlistSize);
-    if (!targets.length) {
-      return;
-    }
-
-    job.status = 'enriching';
-    job.progress.currentSource = 'Website Crawl';
-
-    for (let index = 0; index < targets.length; index += enrichmentBatchSize) {
-      const batch = targets.slice(index, index + enrichmentBatchSize);
-      const results = await Promise.all(
-        batch.map((lead) =>
-          enrichmentConcurrency(async () => {
-            const result = await enrichLead(lead);
-            return { lead, result };
-          }),
-        ),
-      );
-
-      job.progress.batchesCompleted += 1;
-      job.progress.currentSource = 'Website Crawl';
-      job.progress.enriched += results.length;
-
-      for (const { lead, result } of results) {
-        job.providerWarnings.push(...result.warnings);
-        const nextLeads = job.leads.map((current) =>
-          current.id === lead.id ? result.lead : current,
-        );
-        const { leads, duplicatesRemoved } = dedupeWithCount(enrichLeads(nextLeads));
-        job.progress.duplicatesRemoved += duplicatesRemoved;
-        job.leads = trimCandidatePool(leads, job.request.count);
-        refreshProgress(job);
-        job.expiresAt = now() + jobTtlMs;
-      }
-
-      if (job.progress.foundCount >= job.request.count) {
-        break;
-      }
-    }
   };
 
   const processJob = async (job: SearchJob) => {
@@ -390,33 +322,14 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       );
     }
 
-    job.status = 'discovering';
-    job.progress.currentSource = 'Google Places';
     refreshProgress(job);
-
-    if (job.progress.foundCount < job.request.count) {
-      try {
-        await runEnrichment(job);
-      } catch (error) {
-        markFailed(job, {
-          providerId: 'website-crawl',
-          providerName: 'Website Crawl',
-          message:
-            error instanceof Error ? error.message : 'Website enrichment failed',
-        });
-        return;
-      }
-    }
 
     if (job.progress.foundCount >= job.request.count) {
       job.status = 'complete';
       job.progress.currentSource = 'Complete';
-    } else if (hasEnrichmentTargets(job)) {
-      job.status = 'enriching';
-      job.progress.currentSource = 'Website Crawl';
     } else {
-      job.status = 'discovering';
-      job.progress.currentSource = 'Google Places';
+      job.status = 'complete';
+      job.progress.currentSource = 'Complete';
     }
     refreshProgress(job);
   };

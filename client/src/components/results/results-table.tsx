@@ -52,6 +52,7 @@ export function ResultsTable({
               <th className="px-4 py-3">Phone</th>
               <th className="px-4 py-3">Email</th>
               <th className="px-4 py-3">Website</th>
+              <th className="px-4 py-3">Address</th>
               <th className="px-4 py-3">Source</th>
               <th className="px-4 py-3">Actions</th>
             </tr>
@@ -96,6 +97,7 @@ export function ResultsTable({
                       '—'
                     )}
                   </td>
+                  <td className="px-4 py-4 text-slate-600">{lead.address || '—'}</td>
                   <td className="px-4 py-4">
                     <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
                       {lead.source}
@@ -128,7 +130,7 @@ export function ResultsTable({
             })}
             {!leads.length ? (
               <tr>
-                <td className="px-4 py-10 text-center text-sm text-slate-500" colSpan={7}>
+                <td className="px-4 py-10 text-center text-sm text-slate-500" colSpan={8}>
                   {emptyStateMessage}
                 </td>
               </tr>

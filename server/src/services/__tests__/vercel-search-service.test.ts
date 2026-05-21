@@ -92,16 +92,6 @@ describe('createVercelSearchServiceWithDeps', () => {
       }),
       googlePlaces,
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      enrichWebsiteLead: vi.fn().mockImplementation(async (lead: Lead) => ({
-        lead: {
-          ...lead,
-          email: 'hello@northstarlabs.ai',
-          hasEmail: true,
-          verifiedEmail: true,
-          source: `${lead.source}, Website Crawl`,
-        },
-        warnings: [],
-      })),
       idFactory: () => 'search-1',
       now: () => 1000,
     });
@@ -124,16 +114,6 @@ describe('createVercelSearchServiceWithDeps', () => {
       }),
       googlePlaces,
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      enrichWebsiteLead: vi.fn().mockImplementation(async (lead: Lead) => ({
-        lead: {
-          ...lead,
-          email: 'hello@northstarlabs.ai',
-          hasEmail: true,
-          verifiedEmail: true,
-          source: `${lead.source}, Website Crawl`,
-        },
-        warnings: [],
-      })),
       now: () => 2000,
     });
 
@@ -162,14 +142,6 @@ describe('createVercelSearchServiceWithDeps', () => {
         ]),
       } as never,
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      enrichWebsiteLead: vi.fn().mockResolvedValue({
-        lead: makeLead({
-          mobile: '+1 512 555 0101',
-          hasPhone: true,
-          verifiedPhone: true,
-        }),
-        warnings: [],
-      }),
       idFactory: () => 'search-2',
       now: () => 1000,
     });
@@ -188,41 +160,28 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.leads[0]?.hasWebsite).toBe(true);
   });
 
-  it('enriches only missing email fields and keeps the job moving', async () => {
+  it('keeps structured email and address data from OSM without crawlers', async () => {
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
       normalizeLocation: vi.fn().mockResolvedValue(localLocation),
       googlePlaces: {
         id: 'google-places',
         name: 'Google Places',
-        fetchLeads: vi.fn().mockResolvedValue([
-          makeLead({
-            id: 'lead-enrich',
-            mobile: '+1 512 555 0101',
-            email: '',
-            website: 'northstarlabs.ai',
-            hasEmail: false,
-            hasPhone: true,
-            hasWebsite: true,
-            verifiedPhone: true,
-            verifiedEmail: false,
-          }),
-        ]),
+        fetchLeads: vi.fn().mockResolvedValue([]),
       } as never,
-      discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      enrichWebsiteLead: vi.fn().mockResolvedValue({
-        lead: makeLead({
+      discoverOsmLeads: vi.fn().mockResolvedValue([
+        makeLead({
           id: 'lead-enrich',
           mobile: '+1 512 555 0101',
           email: 'hello@northstarlabs.ai',
+          address: '123 Main St, Austin, TX 78701',
           website: 'https://northstarlabs.ai',
           hasEmail: true,
           hasPhone: true,
           hasWebsite: true,
           verifiedEmail: true,
         }),
-        warnings: [],
-      }),
+      ]),
       idFactory: () => 'search-3',
       now: () => 1000,
     });
@@ -236,10 +195,12 @@ describe('createVercelSearchServiceWithDeps', () => {
     const snapshot = await pollJob(service, response.searchId);
 
     expect(snapshot?.leads[0]?.email).toBe('hello@northstarlabs.ai');
+    expect(snapshot?.leads[0]?.address).toContain('Austin, TX');
     expect(snapshot?.meta.progress.foundCount).toBeGreaterThanOrEqual(1);
+    expect(snapshot?.meta.status).toBe('discovering');
   });
 
-  it('fans out nationwide searches across multiple state seeds', async () => {
+  it('fans out nationwide searches across multiple state seeds and query variants', async () => {
     const googleCalls: string[] = [];
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
@@ -250,13 +211,12 @@ describe('createVercelSearchServiceWithDeps', () => {
       googlePlaces: {
         id: 'google-places',
         name: 'Google Places',
-        fetchLeads: vi.fn().mockImplementation(async ({ query }) => {
-          googleCalls.push(query);
+        fetchLeads: vi.fn().mockImplementation(async ({ query, queryVariants = [] }) => {
+          googleCalls.push(query, ...queryVariants);
           return [makeLead({ id: `lead-${googleCalls.length}` })];
         }),
       } as never,
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      enrichWebsiteLead: vi.fn(),
       idFactory: () => 'search-4',
       now: () => 1000,
     });
@@ -267,72 +227,41 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
     });
 
-    await service.getSearch('search-4');
-    await service.getSearch('search-4');
+    const snapshot = await pollJob(service, 'search-4', 12);
 
     expect(googleCalls.length).toBeGreaterThan(1);
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.meta.progress.foundCount).toBeGreaterThanOrEqual(1);
   });
 
-  it('does not retry blocked website crawls or surface them in the response', async () => {
-    const enrichWebsiteLead = vi
-      .fn()
-      .mockResolvedValue({
-        lead: makeLead({
-          id: 'lead-blocked',
-          website: 'condoblackbook.com',
-          mobile: '',
-          email: '',
-          hasEmail: false,
-          hasPhone: false,
-          hasWebsite: true,
-          verifiedEmail: false,
-          rejectionReason: 'blocked_website',
-        }),
-        warnings: [
-          {
-            providerId: 'website-crawl',
-            providerName: 'Website Crawl',
-            message: 'condoblackbook.com blocked contact crawling at https://condoblackbook.com/',
-          },
-        ],
-      });
-
+  it('completes when structured sources are exhausted even if the target is not met', async () => {
+    const googleCalls: string[] = [];
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
       normalizeLocation: vi.fn().mockResolvedValue(localLocation),
       googlePlaces: {
         id: 'google-places',
         name: 'Google Places',
-        fetchLeads: vi.fn().mockResolvedValue([
-          makeLead({
-            id: 'lead-blocked',
-            website: 'condoblackbook.com',
-            mobile: '',
-            email: '',
-            hasEmail: false,
-            hasPhone: false,
-            hasWebsite: true,
-            verifiedEmail: false,
-          }),
-        ]),
+        fetchLeads: vi.fn().mockImplementation(async ({ query, queryVariants = [] }) => {
+          googleCalls.push(query, ...queryVariants);
+          return [makeLead({ id: `lead-${googleCalls.length}` })];
+        }),
       } as never,
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      enrichWebsiteLead,
       idFactory: () => 'search-5',
       now: () => 1000,
     });
 
-    const started = await service.startSearch({
+    await service.startSearch({
       companyType: 'Medical Clinics',
       city: 'Miami, FL',
       count: 50,
     });
 
-    const first = await pollJob(service, started.searchId, 60);
-    const second = await service.getSearch(started.searchId);
+    const snapshot = await pollJob(service, 'search-5', 30);
 
-    expect(enrichWebsiteLead).toHaveBeenCalledTimes(1);
-    expect(first?.meta.providerWarnings).toEqual([]);
-    expect(second?.meta.providerWarnings).toEqual([]);
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.meta.progress.foundCount).toBeGreaterThan(0);
+    expect(googleCalls.length).toBeGreaterThan(1);
   });
 });

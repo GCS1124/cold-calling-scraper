@@ -19,7 +19,7 @@ export function RecentSearches({ items, onApply }: RecentSearchesProps) {
           onClick={() => onApply(item)}
           type="button"
         >
-          {item.companyType} · {item.city}
+          {item.companyType} · {item.locationLabel ?? item.city}
         </button>
       ))}
     </div>
