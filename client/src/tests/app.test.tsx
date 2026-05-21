@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 
 import App from '../App';
 import type { SearchApi } from '../services/search-service';
@@ -103,13 +104,33 @@ const waitingResponse: SearchResponse = {
 };
 
 describe('App', () => {
-  it('keeps company type and city as typable inputs with suggestion dropdowns', () => {
+  it('shows the auth landing page at the base path', () => {
     const searchApi: SearchApi = {
       startSearch: vi.fn(),
       getSearch: vi.fn(),
     };
 
-    const { container } = render(<App searchApi={searchApi} />);
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <App searchApi={searchApi} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/sign in, create an account/i)).toBeTruthy();
+    expect(screen.getByRole('link', { name: /go to search/i })).toBeTruthy();
+  });
+
+  it('keeps company type and city as typable inputs with suggestion dropdowns on the search route', () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn(),
+    };
+
+    const { container } = render(
+      <MemoryRouter initialEntries={['/search']}>
+        <App searchApi={searchApi} />
+      </MemoryRouter>,
+    );
 
     const companyTypeInput = screen.getByLabelText(/company type/i);
     const cityInput = screen.getByLabelText(/city/i);
@@ -129,7 +150,11 @@ describe('App', () => {
     };
     const user = userEvent.setup();
 
-    render(<App searchApi={searchApi} />);
+    render(
+      <MemoryRouter initialEntries={['/search']}>
+        <App searchApi={searchApi} />
+      </MemoryRouter>,
+    );
 
     await user.type(screen.getByLabelText(/company type/i), 'Dental Clinics');
     await user.type(screen.getByLabelText(/city/i), 'Austin');
@@ -155,7 +180,11 @@ describe('App', () => {
     };
     const user = userEvent.setup();
 
-    render(<App searchApi={searchApi} />);
+    render(
+      <MemoryRouter initialEntries={['/search']}>
+        <App searchApi={searchApi} />
+      </MemoryRouter>,
+    );
 
     await user.type(screen.getByLabelText(/company type/i), 'Dental Clinics');
     await user.type(screen.getByLabelText(/city/i), 'Austin');
@@ -173,7 +202,11 @@ describe('App', () => {
     };
     const user = userEvent.setup();
 
-    const { unmount } = render(<App searchApi={searchApi} />);
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/search']}>
+        <App searchApi={searchApi} />
+      </MemoryRouter>,
+    );
 
     await user.type(screen.getByLabelText(/company type/i), 'Dental Clinics');
     await user.type(screen.getByLabelText(/city/i), 'Austin');

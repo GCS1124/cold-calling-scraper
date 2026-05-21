@@ -88,7 +88,7 @@ export const loadSearchHistory = async (
     .limit(10);
 
   if (error) {
-    throw error;
+    return readLocalHistory();
   }
 
   return (data ?? []).map((row) => mapRow(row as SearchHistoryRow));
@@ -133,7 +133,10 @@ export const rememberSearchHistory = async (
     .single();
 
   if (error) {
-    throw error;
+    const current = readLocalHistory();
+    const next = [localItem, ...current.filter((item) => item.id !== localItem.id)].slice(0, 10);
+    writeLocalHistory(next);
+    return localItem;
   }
 
   const saved = mapRow(data as SearchHistoryRow);

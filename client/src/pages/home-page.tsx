@@ -1,9 +1,9 @@
 import { motion } from 'framer-motion';
-import { Download, LoaderCircle, Sparkles, Zap } from 'lucide-react';
+import { Download, LoaderCircle, Sparkles, Zap, UserRound } from 'lucide-react';
 import { startTransition, useDeferredValue, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { Link } from 'react-router-dom';
 
-import { AuthPanel } from '../components/auth/auth-panel';
 import { ExportModal } from '../components/export/export-modal';
 import { FiltersPanel } from '../components/results/filters-panel';
 import { ResultsSummary } from '../components/results/results-summary';
@@ -182,26 +182,6 @@ export function HomePage({ searchApi }: HomePageProps) {
               mapping data, then export a clean outbound list without leaving the browser.
             </p>
 
-            <div className="mt-8 grid max-w-xl gap-3 sm:grid-cols-2">
-              <div className="rounded-[22px] border border-white/70 bg-white/72 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  Visual Thesis
-                </p>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Editorial first viewport, quiet data surfaces, and a US-market search
-                  workflow built for speed.
-                </p>
-              </div>
-              <div className="rounded-[22px] border border-white/70 bg-white/72 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  Interaction Thesis
-                </p>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Search-first motion, quick table scanning, and export readiness for US
-                  lead lists without clutter.
-                </p>
-              </div>
-            </div>
           </motion.div>
 
           <motion.div
@@ -210,7 +190,15 @@ export function HomePage({ searchApi }: HomePageProps) {
             transition={{ duration: 0.45, delay: 0.08 }}
           >
             <div className="space-y-4">
-              <AuthPanel auth={auth} />
+              <div className="flex justify-end">
+                <Link
+                  className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
+                  to="/"
+                >
+                  <UserRound className="h-4 w-4" />
+                  Account
+                </Link>
+              </div>
               <SearchForm loading={loading} onChange={setSearch} onSubmit={() => handleSearch()} value={search} />
               <RecentSearches
                 items={items}
