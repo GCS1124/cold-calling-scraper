@@ -83,7 +83,7 @@ export const enrichLead = (lead: Lead): Lead => {
         ? 'invalid_phone'
         : !verifiedEmail
           ? 'missing_email'
-          : lead.rejectionReason;
+          : undefined;
 
   const enriched: Lead = {
     ...lead,

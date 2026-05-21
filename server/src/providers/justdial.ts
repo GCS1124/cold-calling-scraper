@@ -49,7 +49,6 @@ export const justDialProvider: LeadProvider = {
           city: request.city,
           source: 'JustDial',
           confidence: 52,
-          qualified: false,
           hasEmail: false,
           hasPhone: false,
           hasWebsite: false,

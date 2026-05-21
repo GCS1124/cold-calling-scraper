@@ -36,7 +36,7 @@ export function ExportModal({ leads, open, onClose }: ExportModalProps) {
               Download {leads.length} lead{leads.length === 1 ? '' : 's'}
             </h3>
             <p className="mt-2 text-sm text-slate-500">
-              Export defaults to qualified leads with both a valid US phone and email.
+              Export the current leads with the columns you choose.
             </p>
           </div>
           <button onClick={onClose} type="button">

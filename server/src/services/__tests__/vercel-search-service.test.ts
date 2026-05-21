@@ -50,7 +50,6 @@ const makeLead = (overrides: Partial<Lead> = {}): Lead => ({
   source: 'Google Places',
   confidence: 68,
   sourceScore: 95,
-  qualified: false,
   hasEmail: false,
   hasPhone: true,
   hasWebsite: true,
@@ -97,7 +96,6 @@ describe('createVercelSearchServiceWithDeps', () => {
         lead: {
           ...lead,
           email: 'hello@northstarlabs.ai',
-          qualified: true,
           hasEmail: true,
           verifiedEmail: true,
           source: `${lead.source}, Website Crawl`,
@@ -130,7 +128,6 @@ describe('createVercelSearchServiceWithDeps', () => {
         lead: {
           ...lead,
           email: 'hello@northstarlabs.ai',
-          qualified: true,
           hasEmail: true,
           verifiedEmail: true,
           source: `${lead.source}, Website Crawl`,
@@ -222,7 +219,6 @@ describe('createVercelSearchServiceWithDeps', () => {
           hasEmail: true,
           hasPhone: true,
           hasWebsite: true,
-          qualified: true,
           verifiedEmail: true,
         }),
         warnings: [],
@@ -240,8 +236,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     const snapshot = await pollJob(service, response.searchId);
 
     expect(snapshot?.leads[0]?.email).toBe('hello@northstarlabs.ai');
-    expect(snapshot?.leads[0]?.qualified).toBe(true);
-    expect(snapshot?.meta.progress.qualifiedCount).toBeGreaterThanOrEqual(1);
+    expect(snapshot?.meta.progress.foundCount).toBeGreaterThanOrEqual(1);
   });
 
   it('fans out nationwide searches across multiple state seeds', async () => {

@@ -105,7 +105,6 @@ export const discoverUsLeadsFromOsm = async ({
         source: 'OpenStreetMap',
         confidence: 0,
         sourceScore: 65,
-        qualified: false,
         hasEmail: false,
         hasPhone: false,
         hasWebsite: false,

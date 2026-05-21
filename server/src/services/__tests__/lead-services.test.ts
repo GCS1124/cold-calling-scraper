@@ -17,7 +17,6 @@ describe('enrichLead', () => {
       city: 'Austin, TX',
       source: 'OpenStreetMap',
       confidence: 0,
-      qualified: false,
       hasEmail: false,
       hasPhone: false,
       hasWebsite: false,
@@ -50,7 +49,6 @@ describe('enrichLead', () => {
       city: 'Austin, TX',
       source: 'Website Crawl',
       confidence: 80,
-      qualified: false,
       hasEmail: false,
       hasPhone: false,
       hasWebsite: false,
@@ -63,7 +61,6 @@ describe('enrichLead', () => {
 
     expect(enriched.hasEmail).toBe(true);
     expect(enriched.verifiedEmail).toBe(false);
-    expect(enriched.qualified).toBe(false);
     expect(enriched.rejectionReason).toBe('missing_email');
   });
 });
@@ -82,7 +79,6 @@ describe('deduplicateLeads', () => {
         city: 'Austin, TX',
         source: 'OpenStreetMap',
         confidence: 65,
-        qualified: false,
         hasEmail: false,
         hasPhone: false,
         hasWebsite: true,
@@ -101,7 +97,6 @@ describe('deduplicateLeads', () => {
         city: 'Austin, TX',
         source: 'Website Crawl',
         confidence: 72,
-        qualified: false,
         hasEmail: true,
         hasPhone: true,
         hasWebsite: false,

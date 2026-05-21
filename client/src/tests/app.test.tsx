@@ -21,7 +21,6 @@ const completedResponse: SearchResponse = {
       source: 'OpenStreetMap, Website Crawl',
       confidence: 92,
       sourceScore: 80,
-      qualified: true,
       hasEmail: true,
       hasPhone: true,
       hasWebsite: true,
@@ -41,7 +40,6 @@ const completedResponse: SearchResponse = {
       source: 'OpenStreetMap',
       confidence: 74,
       sourceScore: 65,
-      qualified: false,
       rejectionReason: 'missing_email',
       hasEmail: false,
       hasPhone: true,
@@ -60,8 +58,7 @@ const completedResponse: SearchResponse = {
       enriched: 2,
       totalCandidates: 2,
       requestedCount: 50,
-      qualifiedCount: 1,
-      blockedCount: 0,
+      foundCount: 2,
       duplicatesRemoved: 0,
       currentSource: 'Complete',
       batchesCompleted: 2,
@@ -97,7 +94,7 @@ describe('App', () => {
     expect(container.querySelector('#city-options option[value="California"]')).not.toBeNull();
   });
 
-  it('submits a search and renders qualified leads by default', async () => {
+  it('submits a search and renders leads found by default', async () => {
     const searchApi: SearchApi = {
       startSearch: vi.fn().mockResolvedValue(completedResponse),
       getSearch: vi.fn().mockResolvedValue(completedResponse),
@@ -118,36 +115,14 @@ describe('App', () => {
     });
 
     expect(await screen.findByText('Northstar Labs')).toBeTruthy();
-    expect(
-      screen.getByText(/1 qualified leads ready for Dental Clinics in Austin, TX/i),
-    ).toBeTruthy();
+    expect(screen.getByText(/2 leads found for Dental Clinics in Austin, TX/i)).toBeTruthy();
     expect(screen.getByText('Orbit Data Works')).toBeTruthy();
     expect(screen.queryByText(/South Congress/i)).toBeNull();
   });
 
-  it('renders inline provider warnings and bulk status details', async () => {
-    const response: SearchResponse = {
-      ...completedResponse,
-      meta: {
-        ...completedResponse.meta,
-        status: 'enriching',
-        progress: {
-          ...completedResponse.meta.progress,
-          enriched: 1,
-          currentSource: 'Website Crawl',
-        },
-        providerWarnings: [
-          {
-            providerId: 'website-crawl',
-            providerName: 'Website Crawl',
-            message: 'orbitdataworks.com blocked contact crawling at https://orbitdataworks.com/contact',
-          },
-        ],
-      },
-    };
-
+  it('renders a simple leads found status without warning clutter', async () => {
     const searchApi: SearchApi = {
-      startSearch: vi.fn().mockResolvedValue(response),
+      startSearch: vi.fn().mockResolvedValue(completedResponse),
       getSearch: vi.fn().mockResolvedValue(completedResponse),
     };
     const user = userEvent.setup();
@@ -158,67 +133,9 @@ describe('App', () => {
     await user.type(screen.getByLabelText(/city/i), 'Austin');
     await user.click(screen.getByRole('button', { name: /find leads/i }));
 
-    expect(await screen.findByText(/Current source: Website Crawl/i)).toBeTruthy();
-    expect(screen.getByText(/Website Crawl:/i)).toBeTruthy();
-  });
-
-  it('can reveal rejected rows when the rejected toggle is enabled', async () => {
-    const rejectedLeadResponse: SearchResponse = {
-      ...completedResponse,
-      leads: [
-        ...completedResponse.leads,
-        {
-          id: 'lead-3',
-          name: 'Condo Blackbook',
-          mobile: '',
-          email: '',
-          website: 'https://condoblackbook.com',
-          address: '',
-          category: 'Dental Clinics',
-          city: 'Austin, TX',
-          source: 'Google Places',
-          confidence: 42,
-          sourceScore: 40,
-          qualified: false,
-          rejectionReason: 'blocked_website',
-          hasEmail: false,
-          hasPhone: false,
-          hasWebsite: true,
-          verifiedPhone: false,
-          verifiedEmail: false,
-          scrapedAt: '2026-04-21T00:00:00.000Z',
-        },
-      ],
-      meta: {
-        ...completedResponse.meta,
-        progress: {
-          ...completedResponse.meta.progress,
-          blockedCount: 1,
-        },
-      },
-    };
-
-    const searchApi: SearchApi = {
-      startSearch: vi.fn().mockResolvedValue(rejectedLeadResponse),
-      getSearch: vi.fn().mockResolvedValue(rejectedLeadResponse),
-    };
-    const user = userEvent.setup();
-
-    render(<App searchApi={searchApi} />);
-
-    await user.type(screen.getByLabelText(/company type/i), 'Dental Clinics');
-    await user.type(screen.getByLabelText(/city/i), 'Austin');
-    await user.click(screen.getByRole('button', { name: /find leads/i }));
-
-    await screen.findByText('Northstar Labs');
-    const table = screen.getByRole('table', { name: /lead results/i });
-    expect(within(table).getByText('Northstar Labs')).toBeTruthy();
-    expect(within(table).getByText('Orbit Data Works')).toBeTruthy();
-    expect(within(table).queryByText('Condo Blackbook')).toBeNull();
-
-    await user.click(screen.getByLabelText(/show rejected leads/i));
-
-    expect(within(table).getByText('Condo Blackbook')).toBeTruthy();
-    expect(within(table).getByText(/blocked website/i)).toBeTruthy();
+    expect(await screen.findByText(/2 leads found for Dental Clinics in Austin, TX/i)).toBeTruthy();
+    expect(screen.queryByText(/source warnings/i)).toBeNull();
+    expect(screen.queryByLabelText(/show rejected leads/i)).toBeNull();
+    expect(screen.queryByLabelText(/include partial leads/i)).toBeNull();
   });
 });

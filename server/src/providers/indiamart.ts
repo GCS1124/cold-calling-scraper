@@ -46,7 +46,6 @@ export const indiaMartProvider: LeadProvider = {
           city: request.city,
           source: 'IndiaMART',
           confidence: 55,
-          qualified: false,
           hasEmail: false,
           hasPhone: false,
           hasWebsite: false,

@@ -44,8 +44,7 @@ const createProgress = (requestedCount: number): SearchProgress => ({
   enriched: 0,
   totalCandidates: 0,
   requestedCount,
-  qualifiedCount: 0,
-  blockedCount: 0,
+  foundCount: 0,
   duplicatesRemoved: 0,
   currentSource: 'Queued',
   batchesCompleted: 0,
@@ -86,23 +85,17 @@ const rankDiscoveryCandidates = (leads: Lead[]) =>
   });
 
 const refreshProgress = (job: SearchJobRecord) => {
-  const qualifiedCount = job.leads.filter((lead) => lead.qualified).length;
-  const blockedCount = job.leads.filter((lead) =>
-    ['blocked_google', 'blocked_website'].includes(lead.rejectionReason ?? ''),
-  ).length;
-
   job.progress.discovered = job.leads.length;
   job.progress.totalCandidates = job.leads.length;
-  job.progress.qualifiedCount = qualifiedCount;
-  job.progress.blockedCount = blockedCount;
-  job.progress.estimatedRemaining = Math.max(0, job.request.count - qualifiedCount);
+  job.progress.foundCount = job.leads.length;
+  job.progress.estimatedRemaining = Math.max(0, job.request.count - job.leads.length);
 };
 
 const hasEnrichmentTargets = (job: SearchJobRecord) =>
   job.leads.some(
     (lead) =>
       lead.website &&
-      !lead.verifiedEmail &&
+      (!lead.hasEmail || !lead.hasPhone) &&
       lead.rejectionReason !== 'blocked_website' &&
       lead.rejectionReason !== 'blocked_google',
   );
@@ -279,7 +272,7 @@ const tickJob = async (
       processed += 1;
       job.expiresAt = withNow() + jobTtlMs;
 
-      if (job.progress.qualifiedCount >= job.request.count) {
+      if (job.progress.foundCount >= job.request.count) {
         break;
       }
     }
@@ -287,7 +280,7 @@ const tickJob = async (
 
   job.discoveryComplete = job.nextSeedIndex >= job.searchSeeds.length;
 
-  if (job.progress.qualifiedCount < job.request.count && job.discoveryComplete) {
+  if (job.progress.foundCount < job.request.count && job.discoveryComplete) {
     const enriched = await enrichMissingEmails(job, deps.enrichWebsiteLead);
     if (enriched) {
       job.progress.batchesCompleted += 1;
@@ -295,7 +288,7 @@ const tickJob = async (
     }
   }
 
-  if (job.progress.qualifiedCount >= job.request.count) {
+  if (job.progress.foundCount >= job.request.count) {
     job.status = 'complete';
     job.progress.currentSource = 'Complete';
   } else if (!job.discoveryComplete) {
@@ -305,8 +298,8 @@ const tickJob = async (
     job.status = 'enriching';
     job.progress.currentSource = 'Website Crawl';
   } else {
-    job.status = 'qualifying';
-    job.progress.currentSource = 'Qualification';
+    job.status = 'discovering';
+    job.progress.currentSource = 'Google Places';
   }
 
   refreshProgress(job);

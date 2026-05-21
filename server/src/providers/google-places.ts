@@ -144,7 +144,6 @@ export const googlePlacesProvider: LeadProvider = {
           source: 'Google Places',
           confidence: 68,
           sourceScore: 95,
-          qualified: false,
           hasEmail: false,
           hasPhone: Boolean(phone),
           hasWebsite: Boolean(website),

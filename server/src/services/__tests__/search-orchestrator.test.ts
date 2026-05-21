@@ -15,7 +15,6 @@ const sampleLead: Lead = {
   source: 'OpenStreetMap',
   confidence: 70,
   sourceScore: 65,
-  qualified: false,
   rejectionReason: 'missing_email',
   hasEmail: false,
   hasPhone: true,
@@ -106,7 +105,6 @@ describe('createSearchService', () => {
           source: 'OpenStreetMap, Website Crawl',
           hasEmail: true,
           verifiedEmail: true,
-          qualified: true,
           rejectionReason: undefined,
           confidence: 92,
         },
@@ -133,12 +131,11 @@ describe('createSearchService', () => {
     await task();
     const completed = await service.getSearch('search-2');
 
-    expect(completed?.meta.status).toBe('qualifying');
+    expect(completed?.meta.status).toBe('discovering');
     expect(completed?.meta.locationLabel).toBe('Austin, TX');
     expect(completed?.meta.progress.enriched).toBe(1);
-    expect(completed?.meta.progress.qualifiedCount).toBe(1);
+    expect(completed?.meta.progress.foundCount).toBe(1);
     expect(completed?.leads[0]?.email).toBe('hello@latticedental.com');
-    expect(completed?.leads[0]?.qualified).toBe(true);
   });
 
   it('keeps category warnings while keeping the job open until the target is met', async () => {
@@ -154,7 +151,6 @@ describe('createSearchService', () => {
           website: '',
           hasWebsite: false,
           confidence: 52,
-          qualified: false,
           rejectionReason: 'missing_email',
         },
       ]),
@@ -178,7 +174,7 @@ describe('createSearchService', () => {
     await task();
     const result = await service.getSearch('search-3');
 
-    expect(result?.meta.status).toBe('qualifying');
+    expect(result?.meta.status).toBe('discovering');
     expect(result?.leads).toHaveLength(1);
     expect(result?.meta.providerWarnings).toEqual([
       expect.objectContaining({

@@ -60,7 +60,6 @@ export const yelpProvider: LeadProvider = {
           city: request.city,
           source: 'Yelp',
           confidence: 56,
-          qualified: false,
           hasEmail: false,
           hasPhone: false,
           hasWebsite: false,

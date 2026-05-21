@@ -6,7 +6,6 @@ type Filters = {
 
 type FiltersPanelProps = {
   filters: Filters;
-  sources: string[];
   onChange: (next: Filters) => void;
 };
 

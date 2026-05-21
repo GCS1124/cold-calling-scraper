@@ -60,7 +60,6 @@ export const yellowPagesProvider: LeadProvider = {
           city: request.city,
           source: 'Yellow Pages',
           confidence: 60,
-          qualified: false,
           hasEmail: false,
           hasPhone: false,
           hasWebsite: false,
