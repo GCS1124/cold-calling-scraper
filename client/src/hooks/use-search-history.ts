@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import type { SearchRequest } from '../types/lead';
 import {
+  loadSearchHistoryDetails,
   loadSearchHistory,
   rememberSearchHistory,
   type SearchHistoryItem,
@@ -29,10 +30,19 @@ export const useSearchHistory = (userId?: string | null) => {
     };
   }, [userId]);
 
-  const rememberSearch = async (search: SearchRequest, locationLabel?: string | null) => {
+  const rememberSearch = async (
+    search: SearchRequest,
+    options?: {
+      locationLabel?: string | null;
+      searchId?: string | null;
+      leads?: SearchHistoryItem['leads'];
+    },
+  ) => {
     const saved = await rememberSearchHistory(search, {
       userId,
-      locationLabel,
+      locationLabel: options?.locationLabel,
+      searchId: options?.searchId,
+      leads: options?.leads,
     });
 
     setItems((current) => {
@@ -47,4 +57,27 @@ export const useSearchHistory = (userId?: string | null) => {
     items,
     rememberSearch,
   };
+};
+
+export const useSearchHistoryDetails = (userId?: string | null) => {
+  const [items, setItems] = useState<SearchHistoryItem[]>([]);
+
+  useEffect(() => {
+    let active = true;
+
+    const sync = async () => {
+      const nextItems = await loadSearchHistoryDetails(userId);
+      if (active) {
+        setItems(nextItems);
+      }
+    };
+
+    void sync();
+
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  return { items, setItems };
 };

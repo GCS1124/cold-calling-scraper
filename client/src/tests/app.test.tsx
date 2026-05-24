@@ -217,4 +217,53 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: /download excel/i })).toBeNull();
     unmount();
   });
+
+  it('shows the history page with downloadable saved searches', async () => {
+    window.localStorage.setItem(
+      'lead-finder-history',
+      JSON.stringify([
+        {
+          id: 'history-1',
+          searchId: 'search-1',
+          companyType: 'Dental Clinics',
+          city: 'Austin, TX',
+          count: 50,
+          locationLabel: 'Austin, TX',
+          leadCount: 1,
+          leads: [
+            {
+              id: 'lead-1',
+              name: 'Northstar Labs',
+              mobile: '+1 512 555 0121',
+              email: 'hello@northstarlabs.ai',
+              website: 'https://northstarlabs.ai',
+              address: 'South Congress',
+              category: 'Dental Clinics',
+              city: 'Austin, TX',
+              source: 'OpenStreetMap',
+              confidence: 92,
+              hasEmail: true,
+              hasPhone: true,
+              hasWebsite: true,
+              verifiedPhone: true,
+              verifiedEmail: true,
+              scrapedAt: '2026-04-21T00:00:00.000Z',
+            },
+          ],
+          createdAt: '2026-04-21T00:00:00.000Z',
+        },
+      ]),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/history']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/earlier searches, ready to reopen and download/i)).toBeTruthy();
+    expect(screen.getAllByText('Dental Clinics').length).toBeGreaterThan(0);
+    expect(screen.getByText('Northstar Labs')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /download/i })).toBeTruthy();
+  });
 });

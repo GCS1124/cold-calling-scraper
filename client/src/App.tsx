@@ -2,6 +2,7 @@ import { Toaster } from 'sonner';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { AuthPage } from './pages/auth-page';
+import { HistoryPage } from './pages/history-page';
 import { HomePage } from './pages/home-page';
 import { searchApi, type SearchApi } from './services/search-service';
 
@@ -15,6 +16,7 @@ export default function App({ searchApi: appSearchApi = searchApi }: AppProps) {
       <Routes>
         <Route element={<AuthPage />} path="/" />
         <Route element={<HomePage searchApi={appSearchApi} />} path="/search" />
+        <Route element={<HistoryPage />} path="/history" />
         <Route element={<Navigate replace to="/" />} path="*" />
       </Routes>
       <Toaster position="top-right" richColors />

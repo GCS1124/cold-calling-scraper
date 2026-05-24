@@ -1,4 +1,4 @@
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { ArrowRight, Clock3, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { AuthPanel } from '../components/auth/auth-panel';
@@ -29,13 +29,22 @@ export function AuthPage() {
             </p>
           </div>
 
-          <Link
-            className="inline-flex h-11 items-center gap-2 rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
-            to="/search"
-          >
-            Go to search
-            <ArrowRight className="h-4 w-4" />
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
+              to="/history"
+            >
+              <Clock3 className="h-4 w-4" />
+              History
+            </Link>
+            <Link
+              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
+              to="/search"
+            >
+              Go to search
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
         </div>
 
         <div className="mt-8 grid gap-4 lg:grid-cols-[1fr_0.9fr]">

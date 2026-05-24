@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Download, LoaderCircle, Sparkles, Zap, UserRound } from 'lucide-react';
+import { Clock3, Download, LoaderCircle, Sparkles, UserRound, Zap } from 'lucide-react';
 import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
@@ -85,7 +85,11 @@ export function HomePage({ searchApi }: HomePageProps) {
     }
 
     recordedSearchId.current = result.searchId;
-    void rememberSearch(submittedSearch, result.meta.locationLabel);
+    void rememberSearch(submittedSearch, {
+      locationLabel: result.meta.locationLabel,
+      searchId: result.searchId,
+      leads: result.leads,
+    });
   }, [rememberSearch, result, submittedSearch]);
 
   useEffect(() => {
@@ -195,13 +199,22 @@ export function HomePage({ searchApi }: HomePageProps) {
           >
             <div className="space-y-4">
               <div className="flex justify-end">
-                <Link
-                  className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
-                  to="/"
-                >
-                  <UserRound className="h-4 w-4" />
-                  Account
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Link
+                    className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
+                    to="/history"
+                  >
+                    <Clock3 className="h-4 w-4" />
+                    History
+                  </Link>
+                  <Link
+                    className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
+                    to="/"
+                  >
+                    <UserRound className="h-4 w-4" />
+                    Account
+                  </Link>
+                </div>
               </div>
               <SearchForm loading={loading} onChange={setSearch} onSubmit={() => handleSearch()} value={search} />
               <RecentSearches

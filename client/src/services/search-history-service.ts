@@ -1,37 +1,71 @@
 import { getSupabaseClient } from '../lib/supabase';
+import type { Lead } from '../types/lead';
 import type { SearchRequest } from '../types/lead';
 
 export type SearchHistoryItem = {
   id: string;
+  searchId: string | null;
   companyType: string;
   city: string;
   count: number;
   locationLabel: string | null;
+  leadCount: number;
+  leads: Lead[];
   createdAt: string;
 };
 
 type SearchHistoryRow = {
   id: string;
+  search_id: string | null;
   company_type: string;
   city: string;
   count: number;
   location_label: string | null;
+  lead_count: number | null;
+  leads: Lead[] | string | null;
   created_at: string;
 };
 
-const HISTORY_SELECT = 'id, company_type, city, count, location_label, created_at';
+const HISTORY_SELECT_SUMMARY =
+  'id, search_id, company_type, city, count, location_label, lead_count, created_at';
+const HISTORY_SELECT_DETAILS =
+  'id, search_id, company_type, city, count, location_label, lead_count, leads, created_at';
 const LOCAL_HISTORY_KEY = 'lead-finder-history';
 const REMOTE_HISTORY_DISABLED_KEY = 'lead-finder-history-remote-disabled';
 let remoteHistoryAvailable: boolean | null = null;
 
-const mapRow = (row: SearchHistoryRow): SearchHistoryItem => ({
-  id: row.id,
-  companyType: row.company_type,
-  city: row.city,
-  count: row.count,
-  locationLabel: row.location_label,
-  createdAt: row.created_at,
-});
+const parseLeads = (value: SearchHistoryRow['leads']): Lead[] => {
+  if (!value) {
+    return [];
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return Array.isArray(parsed) ? (parsed as Lead[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return Array.isArray(value) ? value : [];
+};
+
+const mapRow = (row: SearchHistoryRow): SearchHistoryItem => {
+  const leads = parseLeads(row.leads);
+
+  return {
+    id: row.id,
+    searchId: row.search_id,
+    companyType: row.company_type,
+    city: row.city,
+    count: row.count,
+    locationLabel: row.location_label,
+    leadCount: row.lead_count ?? leads.length,
+    leads,
+    createdAt: row.created_at,
+  };
+};
 
 const isBrowser = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
@@ -75,10 +109,13 @@ const readLocalHistory = (): SearchHistoryItem[] => {
       )
       .map((item) => ({
         id: String(item.id),
+        searchId: item.searchId ? String(item.searchId) : null,
         companyType: String(item.companyType),
         city: String(item.city),
         count: Number(item.count),
         locationLabel: item.locationLabel ? String(item.locationLabel) : null,
+        leadCount: Number(item.leadCount ?? item.leads?.length ?? 0),
+        leads: Array.isArray(item.leads) ? (item.leads as Lead[]) : [],
         createdAt: String(item.createdAt ?? new Date().toISOString()),
       }));
   } catch {
@@ -105,7 +142,37 @@ export const loadSearchHistory = async (
 
   const { data, error } = await supabase
     .from('search_history')
-    .select(HISTORY_SELECT)
+    .select(HISTORY_SELECT_SUMMARY)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  if (error) {
+    remoteHistoryAvailable = false;
+    setRemoteHistoryDisabled(true);
+    return readLocalHistory();
+  }
+
+  remoteHistoryAvailable = true;
+  setRemoteHistoryDisabled(false);
+  return (data ?? []).map((row) => ({
+    ...mapRow(row as SearchHistoryRow),
+    leads: [],
+  }));
+};
+
+export const loadSearchHistoryDetails = async (
+  userId?: string | null,
+): Promise<SearchHistoryItem[]> => {
+  const supabase = getSupabaseClient();
+
+  if (!supabase || !userId || remoteHistoryAvailable === false || isRemoteHistoryDisabled()) {
+    return readLocalHistory();
+  }
+
+  const { data, error } = await supabase
+    .from('search_history')
+    .select(HISTORY_SELECT_DETAILS)
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(10);
@@ -126,15 +193,20 @@ export const rememberSearchHistory = async (
   options: {
     userId?: string | null;
     locationLabel?: string | null;
+    searchId?: string | null;
+    leads?: Lead[];
   } = {},
 ): Promise<SearchHistoryItem> => {
   const supabase = getSupabaseClient();
   const localItem: SearchHistoryItem = {
     id: crypto.randomUUID(),
+    searchId: options.searchId ?? null,
     companyType: search.companyType.trim(),
     city: search.city.trim(),
     count: search.count,
     locationLabel: options.locationLabel?.trim() || null,
+    leadCount: options.leads?.length ?? 0,
+    leads: options.leads ?? [],
     createdAt: new Date().toISOString(),
   };
 
@@ -147,16 +219,19 @@ export const rememberSearchHistory = async (
 
   const payload = {
     user_id: options.userId,
+    search_id: options.searchId ?? null,
     company_type: search.companyType.trim(),
     city: search.city.trim(),
     count: search.count,
     location_label: options.locationLabel?.trim() || null,
+    lead_count: options.leads?.length ?? 0,
+    leads: options.leads ?? [],
   };
 
   const { data, error } = await supabase
     .from('search_history')
     .insert(payload)
-    .select(HISTORY_SELECT)
+    .select(HISTORY_SELECT_DETAILS)
     .single();
 
   if (error) {

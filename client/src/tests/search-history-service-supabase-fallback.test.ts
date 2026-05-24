@@ -43,16 +43,37 @@ describe('search-history-service supabase fallback', () => {
         city: 'California',
         count: 50,
       },
-      { userId: 'user-1', locationLabel: 'California' },
+      {
+        userId: 'user-1',
+        locationLabel: 'California',
+        leads: [
+          {
+            id: 'lead-1',
+            name: 'Roof Right Now',
+            category: 'Roofing Contractors',
+            city: 'California',
+            source: 'Google Places',
+            confidence: 90,
+            hasEmail: true,
+            hasPhone: true,
+            hasWebsite: true,
+            verifiedPhone: true,
+            verifiedEmail: true,
+            scrapedAt: '2026-04-21T00:00:00.000Z',
+          },
+        ] as never,
+      },
     );
 
     expect(saved.companyType).toBe('Roofing Contractors');
     expect(saved.city).toBe('California');
+    expect(saved.leadCount).toBe(1);
 
     const items = await loadSearchHistory('user-1');
 
     expect(items).toHaveLength(1);
     expect(items[0]?.companyType).toBe('Roofing Contractors');
     expect(items[0]?.city).toBe('California');
+    expect(items[0]?.leadCount).toBe(1);
   });
 });
