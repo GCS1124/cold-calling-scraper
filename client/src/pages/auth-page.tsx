@@ -47,7 +47,7 @@ export function AuthPage() {
           </div>
 
           {/* Reduced spacing here */}
-          <div className="relative mt-26 flex items-center justify-between rounded-3xl border border-white/10 bg-white/[0.06] p-4 xl:mt-20">
+          <div className="relative mt-20 flex items-center justify-between rounded-3xl border border-white/10 bg-white/[0.06] p-4 xl:mt-10">
             <div>
               <p className="text-sm font-semibold text-white">
                 Ready to search?
