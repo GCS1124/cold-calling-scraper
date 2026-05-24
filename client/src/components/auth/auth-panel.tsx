@@ -56,7 +56,7 @@ export function AuthPanel({ auth }: AuthPanelProps) {
           </div>
 
           <button
-            className="inline-flex w-100 h-10 items-center gap-2 rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+            className="inline-flex w-60 h-10 items-center gap-2 rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
             disabled={busy}
             onClick={async () => {
               setBusy(true);
