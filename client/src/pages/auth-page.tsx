@@ -1,7 +1,6 @@
 import {
   ArrowRight,
   Clock3,
-  ShieldCheck,
   Sparkles,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
