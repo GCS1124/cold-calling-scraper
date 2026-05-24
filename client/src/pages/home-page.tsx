@@ -318,10 +318,6 @@ export function HomePage({ searchApi }: HomePageProps) {
                   Find qualified local leads faster.
                 </h1>
 
-                <p className="mt-6 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
-                  Search businesses by category and city, enrich the results, filter by contact
-                  quality, and export a clean outbound list from one workspace.
-                </p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">
