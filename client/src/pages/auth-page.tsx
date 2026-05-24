@@ -110,15 +110,6 @@ export function AuthPage() {
                   <Sparkles className="h-3.5 w-3.5" />
                   Account access
                 </p>
-
-                <h1 className="mt-5 text-4xl font-black leading-tight tracking-[-0.05em] text-slate-950 sm:text-5xl">
-                  Save your searches.
-                </h1>
-
-                <p className="mt-4 text-base leading-7 text-slate-600">
-                  Sign in to keep your search history synced, or continue with local history when
-                  Supabase is not configured.
-                </p>
               </div>
 
               {/* Auth Card */}
@@ -132,9 +123,6 @@ export function AuthPage() {
                     Welcome back
                   </h2>
 
-                  <p className="mt-2 text-sm leading-6 text-slate-500">
-                    Sign in or create an account to manage saved searches and history.
-                  </p>
                 </div>
 
                 <AuthPanel auth={auth} />

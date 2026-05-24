@@ -52,7 +52,6 @@ export function AuthPanel({ auth }: AuthPanelProps) {
               Account
             </p>
             <p className="mt-2 text-sm font-semibold text-slate-950">{auth.user.email}</p>
-            <p className="mt-1 text-sm text-slate-600">Earlier searches are saved to this account.</p>
           </div>
 
           <button
@@ -92,11 +91,6 @@ export function AuthPanel({ auth }: AuthPanelProps) {
           <h3 className="mt-2 text-base font-semibold text-slate-950">
             {mode === 'sign-in' ? 'Sign in' : 'Create account'}
           </h3>
-          <p className="mt-1 text-sm text-slate-600">
-            {mode === 'sign-in'
-              ? 'Use Supabase to save earlier searches per account.'
-              : 'Create an account to sync search history across sessions.'}
-          </p>
         </div>
 
         <button
