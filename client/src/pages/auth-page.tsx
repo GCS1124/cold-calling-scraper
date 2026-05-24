@@ -49,25 +49,6 @@ export function AuthPage() {
 
         <div className="mt-8 grid gap-4 lg:grid-cols-[1fr_0.9fr]">
           <AuthPanel auth={auth} />
-
-          <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
-              Earlier searches
-            </p>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              Signed-in users get Supabase-backed history. Signed-out users keep a local fallback
-              so the list still works.
-            </p>
-
-            <div className="mt-4">
-              <RecentSearches items={items} onApply={() => undefined} />
-              {!items.length ? (
-                <p className="mt-3 text-sm text-slate-500">
-                  No saved searches yet. Run a search first, then come back here.
-                </p>
-              ) : null}
-            </div>
-          </div>
         </div>
       </section>
     </main>

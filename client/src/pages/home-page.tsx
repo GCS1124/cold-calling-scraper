@@ -217,18 +217,6 @@ export function HomePage({ searchApi }: HomePageProps) {
                 </div>
               </div>
               <SearchForm loading={loading} onChange={setSearch} onSubmit={() => handleSearch()} value={search} />
-              <RecentSearches
-                items={items}
-                onApply={(item) => {
-                  const nextSearch = {
-                    companyType: item.companyType,
-                    city: item.city,
-                    count: item.count,
-                  };
-                  setSearch(nextSearch);
-                  void handleSearch(nextSearch);
-                }}
-              />
             </div>
           </motion.div>
         </div>
