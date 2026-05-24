@@ -1,4 +1,4 @@
-import { ChevronDown, LoaderCircle, Search } from 'lucide-react';
+import { LoaderCircle, Search } from 'lucide-react';
 import type { FormEvent } from 'react';
 
 import { cityOptions, companyTypeOptions } from '../../data/search-options';

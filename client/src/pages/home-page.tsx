@@ -1,6 +1,5 @@
 import { motion } from 'framer-motion';
 import {
-  ArrowRight,
   CheckCircle2,
   Clock3,
   Download,
