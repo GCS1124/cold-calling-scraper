@@ -60,7 +60,7 @@ export function AuthPage() {
             </div>
 
             <Link
-              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700"
+              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-blue px-4 text-sm font-bold text-white transition hover:bg-blue"
               to="/search"
             >
               Search
