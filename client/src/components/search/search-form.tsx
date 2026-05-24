@@ -37,7 +37,6 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
               })
             }
           />
-          <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         </div>
       </label>
 
@@ -56,7 +55,6 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
               })
             }
           />
-          <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         </div>
       </label>
 

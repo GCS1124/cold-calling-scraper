@@ -1,8 +1,21 @@
 import { motion } from 'framer-motion';
-import { Clock3, Download, LoaderCircle, Sparkles, UserRound, Zap } from 'lucide-react';
-import { useDeferredValue, useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import {
+  ArrowRight,
+  CheckCircle2,
+  Clock3,
+  Download,
+  Filter,
+  LoaderCircle,
+  MapPin,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  UserRound,
+  Zap,
+} from 'lucide-react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 
 import { ExportModal } from '../components/export/export-modal';
 import { FiltersPanel } from '../components/results/filters-panel';
@@ -24,6 +37,13 @@ const initialSearch: SearchRequest = {
   count: 50,
 };
 
+const pollingStatuses = ['queued', 'discovering', 'enriching'];
+
+function toCsvField(value: string | number | null | undefined) {
+  const text = String(value ?? '');
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
 export function HomePage({ searchApi }: HomePageProps) {
   const [search, setSearch] = useState<SearchRequest>(initialSearch);
   const [result, setResult] = useState<SearchResponse | null>(null);
@@ -36,42 +56,100 @@ export function HomePage({ searchApi }: HomePageProps) {
     hasPhone: false,
     hasWebsite: false,
   });
+
   const auth = useAuth();
   const { rememberSearch } = useSearchHistory(auth.user?.id);
   const recordedSearchId = useRef<string | null>(null);
   const isPollingRef = useRef(false);
 
-  const visibleLeads = (result?.leads ?? [])
-    .filter((lead) => {
-      if (filters.hasEmail && !lead.hasEmail) return false;
-      if (filters.hasPhone && !lead.hasPhone) return false;
-      if (filters.hasWebsite && !lead.hasWebsite) return false;
-      return true;
-    })
-    .toSorted((left, right) => right.confidence - left.confidence);
+  const visibleLeads = useMemo(() => {
+    return (result?.leads ?? [])
+      .filter((lead) => {
+        if (filters.hasEmail && !lead.hasEmail) return false;
+        if (filters.hasPhone && !lead.hasPhone) return false;
+        if (filters.hasWebsite && !lead.hasWebsite) return false;
+        return true;
+      })
+      .sort((left, right) => right.confidence - left.confidence);
+  }, [filters.hasEmail, filters.hasPhone, filters.hasWebsite, result?.leads]);
 
   const deferredLeads = useDeferredValue(visibleLeads);
-  const exportableLeads = selectedIds.length
-    ? visibleLeads.filter((lead) => selectedIds.includes(lead.id))
-    : visibleLeads;
+
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  const exportableLeads = useMemo(() => {
+    if (!selectedIds.length) return visibleLeads;
+    return visibleLeads.filter((lead) => selectedIdSet.has(lead.id));
+  }, [selectedIdSet, selectedIds.length, visibleLeads]);
+
   const isWaiting = Boolean(
     result && !['complete', 'failed'].includes(result.meta.status),
   );
 
-  const summary = {
-    total: deferredLeads.length,
-    withEmail: deferredLeads.filter((lead) => lead.hasEmail).length,
-    withPhone: deferredLeads.filter((lead) => lead.hasPhone).length,
-    withWebsite: deferredLeads.filter((lead) => lead.hasWebsite).length,
-    missingEmail: (result?.leads ?? []).filter((lead) => lead.rejectionReason === 'missing_email')
-      .length,
-    missingPhone: (result?.leads ?? []).filter((lead) =>
-      ['missing_phone', 'invalid_phone'].includes(lead.rejectionReason ?? ''),
-    ).length,
-  };
+  const summary = useMemo(() => {
+    const allLeads = result?.leads ?? [];
+
+    return {
+      total: deferredLeads.length,
+      withEmail: deferredLeads.filter((lead) => lead.hasEmail).length,
+      withPhone: deferredLeads.filter((lead) => lead.hasPhone).length,
+      withWebsite: deferredLeads.filter((lead) => lead.hasWebsite).length,
+      missingEmail: allLeads.filter((lead) => lead.rejectionReason === 'missing_email').length,
+      missingPhone: allLeads.filter((lead) =>
+        ['missing_phone', 'invalid_phone'].includes(lead.rejectionReason ?? ''),
+      ).length,
+    };
+  }, [deferredLeads, result?.leads]);
+
+  const progressBasis = result
+    ? Math.max(
+        result.meta.progress.discovered ?? 0,
+        result.meta.progress.enriched ?? 0,
+        result.meta.progress.foundCount ?? 0,
+      )
+    : 0;
+
+  const requestedCount = result?.meta.progress.requestedCount ?? search.count;
+
+  const progressPercent = result
+    ? Math.min(
+        100,
+        Math.max(
+          isWaiting ? 12 : 0,
+          Math.round((progressBasis / Math.max(1, requestedCount)) * 100),
+        ),
+      )
+    : 0;
+
+  const statusTitle = result
+    ? result.meta.status === 'queued'
+      ? `Queued ${result.meta.progress.requestedCount} leads`
+      : result.meta.status === 'discovering'
+        ? `Finding leads in ${result.meta.locationLabel}`
+        : result.meta.status === 'enriching'
+          ? 'Collecting contact details'
+          : result.meta.status === 'failed'
+            ? 'Search failed'
+            : 'Search complete'
+    : '';
+
+  const statusDescription = result
+    ? result.meta.status === 'queued'
+      ? 'Your search is waiting to begin.'
+      : result.meta.status === 'discovering'
+        ? 'Scanning matching businesses and removing duplicates.'
+        : result.meta.status === 'enriching'
+          ? 'Adding emails, phone numbers, websites, and source details.'
+          : result.meta.status === 'failed'
+            ? 'The search could not be completed. Adjust the query and try again.'
+            : 'Your leads are ready to review, filter, copy, and export.'
+    : '';
+
   const emptyStateMessage =
-    !result?.leads.length && result
-      ? 'Still finding leads.'
+    result && result.leads.length === 0
+      ? result.meta.status === 'complete'
+        ? 'No leads were found for this search. Try a broader company type or nearby city.'
+        : 'Still finding leads.'
       : 'No leads match the current filters.';
 
   useEffect(() => {
@@ -84,6 +162,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     }
 
     recordedSearchId.current = result.searchId;
+
     void rememberSearch(submittedSearch, {
       locationLabel: result.meta.locationLabel,
       searchId: result.searchId,
@@ -92,10 +171,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   }, [rememberSearch, result, submittedSearch]);
 
   useEffect(() => {
-    if (
-      !result?.searchId ||
-      !['queued', 'discovering', 'enriching'].includes(result.meta.status)
-    ) {
+    if (!result?.searchId || !pollingStatuses.includes(result.meta.status)) {
       return;
     }
 
@@ -105,6 +181,7 @@ export function HomePage({ searchApi }: HomePageProps) {
 
     const timer = window.setTimeout(async () => {
       isPollingRef.current = true;
+
       try {
         const nextResult = await searchApi.getSearch(result.searchId);
         setResult(nextResult);
@@ -129,13 +206,13 @@ export function HomePage({ searchApi }: HomePageProps) {
 
     setLoading(true);
     setSubmittedSearch(nextSearch);
+    setSelectedIds([]);
+    setResult(null);
+    recordedSearchId.current = null;
 
     try {
       const response = await searchApi.startSearch(nextSearch);
-
       setResult(response);
-      setSelectedIds([]);
-
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Search failed');
     } finally {
@@ -153,153 +230,394 @@ export function HomePage({ searchApi }: HomePageProps) {
 
   const toggleSelectAll = () => {
     const visibleIds = deferredLeads.map((lead) => lead.id);
-    const allVisibleSelected = visibleIds.every((id) => selectedIds.includes(id));
 
+    if (!visibleIds.length) {
+      setSelectedIds([]);
+      return;
+    }
+
+    const allVisibleSelected = visibleIds.every((id) => selectedIdSet.has(id));
     setSelectedIds(allVisibleSelected ? [] : visibleIds);
   };
 
   const handleCopyRow = async (lead: Lead) => {
-    const value = [lead.name, lead.mobile, lead.email, lead.website, lead.address, lead.source].join(',');
+    const value = [
+      lead.name,
+      lead.mobile,
+      lead.email,
+      lead.website,
+      lead.address,
+      lead.source,
+    ]
+      .map(toCsvField)
+      .join(',');
+
     await navigator.clipboard.writeText(value);
     toast.success('Lead copied as CSV');
   };
 
   return (
     <>
-      <section className="relative overflow-hidden px-4 pb-12 pt-6 md:px-8 md:pt-8">
-        <div className="absolute inset-x-8 top-0 h-[420px] rounded-[40px] bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.18),_transparent_42%),radial-gradient(circle_at_80%_20%,_rgba(15,118,110,0.16),_transparent_30%),linear-gradient(135deg,_rgba(255,255,255,0.95),_rgba(239,246,255,0.88))]" />
-        <div className="relative mx-auto grid max-w-7xl gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
+      <div className="relative min-h-screen overflow-hidden bg-slate-50 text-slate-950">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-32 top-[-10rem] h-96 w-96 rounded-full bg-blue-200/60 blur-3xl" />
+          <div className="absolute right-[-8rem] top-20 h-96 w-96 rounded-full bg-cyan-200/60 blur-3xl" />
+          <div className="absolute bottom-[-14rem] left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-indigo-100 blur-3xl" />
+        </div>
+
+        <header className="relative mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-5 md:px-8">
+          <Link
+            className="inline-flex items-center gap-3 text-sm font-black tracking-tight text-slate-950"
+            to="/search"
+          >
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-lg shadow-slate-900/15">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            Lead Finder Pro
+          </Link>
+
+          <nav className="flex items-center gap-2">
+            <Link
+              className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+              to="/history"
+            >
+              <Clock3 className="h-4 w-4" />
+              <span className="hidden sm:inline">History</span>
+            </Link>
+
+            <Link
+              className="inline-flex h-10 items-center gap-2 rounded-2xl bg-slate-950 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              to="/"
+            >
+              <UserRound className="h-4 w-4" />
+              <span className="hidden sm:inline">Account</span>
+            </Link>
+          </nav>
+        </header>
+
+        <section className="relative mx-auto grid max-w-7xl gap-6 px-4 pb-8 pt-3 md:px-8 lg:grid-cols-[minmax(0,1fr)_460px] lg:items-stretch">
           <motion.div
             animate={{ opacity: 1, y: 0 }}
-            className="pt-6"
+            className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950 p-6 text-white shadow-[0_30px_100px_rgba(15,23,42,0.22)] md:p-8 lg:p-10"
             initial={{ opacity: 0, y: 18 }}
             transition={{ duration: 0.45 }}
           >
-            <p className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-blue-700 shadow-[0_10px_35px_rgba(37,99,235,0.12)]">
-              <Sparkles className="h-3.5 w-3.5" />
-              Lead Finder Pro
-            </p>
+            <div className="pointer-events-none absolute inset-0">
+              <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-blue-500/30 blur-3xl" />
+              <div className="absolute bottom-[-8rem] left-[-6rem] h-80 w-80 rounded-full bg-cyan-400/20 blur-3xl" />
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(96,165,250,0.18),transparent_35%),linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)] bg-[size:auto,36px_36px,36px_36px]" />
+            </div>
 
-            <h1 className="mt-6 max-w-xl text-[clamp(3rem,7vw,5.6rem)] font-extrabold leading-[0.92] tracking-[-0.06em] text-slate-950">
-              Find leads in seconds.
-            </h1>
+            <div className="relative flex h-full flex-col justify-between gap-10">
+              <div>
+                <p className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-blue-100">
+                  <Zap className="h-3.5 w-3.5" />
+                  Lead Finder Pro
+                </p>
 
-            <p className="mt-5 max-w-lg text-base leading-7 text-slate-600 md:text-lg">
-              Search US businesses by category and metro area using structured APIs and
-              mapping data, then export a clean outbound list without leaving the browser.
-            </p>
+                <h1 className="mt-8 max-w-3xl text-5xl font-black leading-[0.92] tracking-[-0.06em] sm:text-6xl xl:text-7xl">
+                  Find qualified local leads faster.
+                </h1>
 
+                <p className="mt-6 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
+                  Search businesses by category and city, enrich the results, filter by contact
+                  quality, and export a clean outbound list from one workspace.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-400/15 text-blue-200">
+                    <Search className="h-5 w-5" />
+                  </div>
+                  <p className="mt-4 text-sm font-bold text-white">Structured search</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-400">
+                    Category and location-based discovery.
+                  </p>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-400/15 text-cyan-200">
+                    <ShieldCheck className="h-5 w-5" />
+                  </div>
+                  <p className="mt-4 text-sm font-bold text-white">Quality filters</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-400">
+                    Focus on email, phone, and website coverage.
+                  </p>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-400/15 text-indigo-200">
+                    <Download className="h-5 w-5" />
+                  </div>
+                  <p className="mt-4 text-sm font-bold text-white">Excel export</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-400">
+                    Download selected or visible rows.
+                  </p>
+                </div>
+              </div>
+            </div>
           </motion.div>
 
           <motion.div
             animate={{ opacity: 1, scale: 1 }}
+            className="rounded-[2rem] border border-white/70 bg-white/90 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] backdrop-blur-xl sm:p-5"
             initial={{ opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.45, delay: 0.08 }}
           >
-            <div className="space-y-4">
-              <div className="flex justify-end">
-                <div className="flex items-center gap-2">
-                  <Link
-                    className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
-                    to="/history"
+            <div className="mb-5 flex items-start justify-between gap-4 px-1 pt-1">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-blue-700">
+                  New search
+                </p>
+                <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] text-slate-950">
+                  Build your lead list
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Enter a business type, city, and lead count.
+                </p>
+              </div>
+
+              <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700 sm:flex">
+                <MapPin className="h-6 w-6" />
+              </div>
+            </div>
+
+            <SearchForm
+              loading={loading}
+              onChange={setSearch}
+              onSubmit={() => handleSearch()}
+              value={search}
+            />
+          </motion.div>
+        </section>
+
+        <main className="relative mx-auto flex max-w-7xl flex-col gap-6 px-4 pb-28 md:px-8">
+          {result ? (
+            <ResultsSummary
+              city={result.meta.locationLabel || search.city}
+              companyType={submittedSearch?.companyType || search.companyType}
+              found={result.meta.progress.foundCount ?? summary.total}
+              requested={result.meta.progress.requestedCount ?? search.count}
+              missingEmail={summary.missingEmail}
+              missingPhone={summary.missingPhone}
+              duplicatesRemoved={result.meta.progress.duplicatesRemoved ?? 0}
+            />
+          ) : (
+            <section className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-[1.75rem] border border-slate-200 bg-white/90 p-5 shadow-[0_20px_70px_rgba(15,23,42,0.08)] backdrop-blur">
+                <p className="text-sm font-bold text-slate-950">Start with a city</p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Search a specific metro area for more useful local results.
+                </p>
+              </div>
+
+              <div className="rounded-[1.75rem] border border-slate-200 bg-white/90 p-5 shadow-[0_20px_70px_rgba(15,23,42,0.08)] backdrop-blur">
+                <p className="text-sm font-bold text-slate-950">Filter by contact quality</p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Narrow results to leads with emails, phone numbers, or websites.
+                </p>
+              </div>
+
+              <div className="rounded-[1.75rem] border border-slate-200 bg-white/90 p-5 shadow-[0_20px_70px_rgba(15,23,42,0.08)] backdrop-blur">
+                <p className="text-sm font-bold text-slate-950">Export only what matters</p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Select specific rows or export every visible lead.
+                </p>
+              </div>
+            </section>
+          )}
+
+          {result ? (
+            <section
+              className={`rounded-[1.75rem] border p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] ${
+                result.meta.status === 'failed'
+                  ? 'border-red-200 bg-red-50/90'
+                  : result.meta.status === 'complete'
+                    ? 'border-emerald-200 bg-emerald-50/70'
+                    : 'border-blue-200 bg-white/90'
+              }`}
+            >
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-start gap-4">
+                  <div
+                    className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${
+                      result.meta.status === 'failed'
+                        ? 'bg-red-100 text-red-700'
+                        : result.meta.status === 'complete'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-blue-100 text-blue-700'
+                    }`}
                   >
-                    <Clock3 className="h-4 w-4" />
-                    History
-                  </Link>
-                  <Link
-                    className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
-                    to="/"
-                  >
-                    <UserRound className="h-4 w-4" />
-                    Account
-                  </Link>
+                    {isWaiting ? (
+                      <LoaderCircle className="h-6 w-6 animate-spin" />
+                    ) : result.meta.status === 'complete' ? (
+                      <CheckCircle2 className="h-6 w-6" />
+                    ) : (
+                      <Search className="h-6 w-6" />
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">
+                      Search status
+                    </p>
+                    <h2 className="mt-2 text-xl font-black tracking-[-0.03em] text-slate-950">
+                      {statusTitle}
+                    </h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">{statusDescription}</p>
+                    <p className="mt-2 text-sm font-medium text-slate-800">
+                      Query: {result.meta.query}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:min-w-[420px]">
+                  <div className="rounded-2xl bg-white/80 p-3">
+                    <p className="text-xs font-semibold text-slate-500">Found</p>
+                    <p className="mt-1 text-xl font-black text-slate-950">
+                      {result.meta.progress.foundCount}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-white/80 p-3">
+                    <p className="text-xs font-semibold text-slate-500">Requested</p>
+                    <p className="mt-1 text-xl font-black text-slate-950">
+                      {result.meta.progress.requestedCount}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-white/80 p-3">
+                    <p className="text-xs font-semibold text-slate-500">Visible</p>
+                    <p className="mt-1 text-xl font-black text-slate-950">{visibleLeads.length}</p>
+                  </div>
+
+                  <div className="rounded-2xl bg-white/80 p-3">
+                    <p className="text-xs font-semibold text-slate-500">Selected</p>
+                    <p className="mt-1 text-xl font-black text-slate-950">{selectedIds.length}</p>
+                  </div>
                 </div>
               </div>
-              <SearchForm loading={loading} onChange={setSearch} onSubmit={() => handleSearch()} value={search} />
-            </div>
-          </motion.div>
-        </div>
-      </section>
 
-      <main className="mx-auto flex max-w-7xl flex-col gap-6 px-4 pb-28 md:px-8">
-        <ResultsSummary
-          city={result?.meta.locationLabel || search.city}
-          companyType={search.companyType}
-          found={result?.meta.progress.foundCount ?? summary.total}
-          requested={result?.meta.progress.requestedCount ?? search.count}
-          missingEmail={summary.missingEmail}
-          missingPhone={summary.missingPhone}
-          duplicatesRemoved={result?.meta.progress.duplicatesRemoved ?? 0}
-        />
+              {isWaiting ? (
+                <div className="mt-5">
+                  <div className="mb-2 flex items-center justify-between text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                    <span>Progress</span>
+                    <span>{progressPercent}%</span>
+                  </div>
 
-        {result ? (
-          <div className="rounded-[24px] border border-slate-200 bg-white px-5 py-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
-              Search Status
-            </p>
-            <p className="mt-2 text-sm font-medium text-slate-900">
-              {result.meta.status === 'queued'
-                ? `Queued ${result.meta.progress.requestedCount} leads`
-                : result.meta.status === 'discovering'
-                ? `Finding leads in ${result.meta.locationLabel}`
-                : result.meta.status === 'enriching'
-                  ? 'Collecting details'
-                  : result.meta.status === 'failed'
-                    ? 'Search failed'
-                    : 'Search complete'}
-            </p>
-            <p className="mt-1 text-sm text-slate-600">Query: {result.meta.query}</p>
-            <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
-              <p>Found: {result.meta.progress.foundCount}</p>
-              <p>Requested: {result.meta.progress.requestedCount}</p>
-            </div>
-          </div>
-        ) : null}
+                  <div className="h-2 overflow-hidden rounded-full bg-white">
+                    <div
+                      className="h-full rounded-full bg-blue-600 transition-all duration-500"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
-        {loading ? (
-          <div className="grid gap-4">
-            {[0, 1, 2].map((item) => (
-              <div
-                className="h-24 animate-pulse rounded-[24px] border border-slate-200 bg-white"
-                key={item}
-              />
-            ))}
-          </div>
-        ) : isWaiting ? (
-          <div className="rounded-[28px] border border-slate-200 bg-white p-8 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-            <div className="flex items-center gap-3 text-slate-900">
-              <LoaderCircle className="h-5 w-5 animate-spin text-blue-600" />
-              <p className="text-lg font-semibold">Finding leads</p>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              Waiting for the search to finish. Results and export will appear here when the
-              job completes.
-            </p>
-            <div className="mt-6 h-2 overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full w-1/2 animate-pulse rounded-full bg-blue-600" />
-            </div>
-          </div>
-        ) : (
-          <section className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-            <div className="space-y-6">
-              <FiltersPanel filters={filters} onChange={setFilters} />
-
-              <div className="rounded-[24px] border border-slate-200 bg-slate-950 p-5 text-white shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
-                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-blue-200">
-                  <Zap className="h-3.5 w-3.5" />
-                  Export Queue
-                </p>
-                <p className="mt-4 text-3xl font-semibold">{visibleLeads.length}</p>
-                <p className="mt-2 text-sm leading-6 text-slate-300">
-                  {selectedIds.length
-                    ? 'Selected rows ready for download.'
-                    : 'Leads found are export-ready by default.'}
-                </p>
+          {loading ? (
+            <section className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
+              <div className="space-y-4">
+                <div className="h-64 animate-pulse rounded-[1.75rem] border border-slate-200 bg-white/80" />
+                <div className="h-40 animate-pulse rounded-[1.75rem] border border-slate-200 bg-white/80" />
               </div>
-            </div>
 
-            <div className="space-y-4">
-              {result ? (
+              <div className="space-y-4">
+                {[0, 1, 2, 3].map((item) => (
+                  <div
+                    className="h-24 animate-pulse rounded-[1.75rem] border border-slate-200 bg-white/80"
+                    key={item}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : isWaiting ? (
+            <section className="rounded-[2rem] border border-slate-200 bg-white/90 p-8 text-center shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+                <LoaderCircle className="h-7 w-7 animate-spin" />
+              </div>
+
+              <h2 className="mt-5 text-2xl font-black tracking-[-0.04em] text-slate-950">
+                Finding your leads
+              </h2>
+
+              <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-600">
+                Results will appear here when the search finishes. You can keep this page open while
+                the job runs.
+              </p>
+            </section>
+          ) : result?.meta.status === 'failed' ? (
+            <section className="rounded-[2rem] border border-red-200 bg-red-50 p-8 text-center shadow-[0_24px_80px_rgba(127,29,29,0.08)]">
+              <h2 className="text-2xl font-black tracking-[-0.04em] text-red-950">
+                Search could not be completed
+              </h2>
+
+              <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-red-700">
+                Try a broader company type, a different city, or a smaller lead count.
+              </p>
+            </section>
+          ) : result ? (
+            <section className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
+              <aside className="space-y-6 lg:sticky lg:top-6 lg:self-start">
+                <FiltersPanel filters={filters} onChange={setFilters} />
+
+                <div className="overflow-hidden rounded-[1.75rem] border border-slate-900 bg-slate-950 p-5 text-white shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
+                  <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-blue-200">
+                    <Zap className="h-3.5 w-3.5" />
+                    Export queue
+                  </p>
+
+                  <p className="mt-5 text-4xl font-black tracking-[-0.05em]">
+                    {selectedIds.length || visibleLeads.length}
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    {selectedIds.length
+                      ? 'Selected rows are ready for download.'
+                      : 'Visible leads are export-ready by default.'}
+                  </p>
+
+                  <div className="mt-5 grid gap-2 text-sm">
+                    <div className="flex items-center justify-between rounded-2xl bg-white/10 px-3 py-2">
+                      <span className="text-slate-300">With email</span>
+                      <span className="font-bold text-white">{summary.withEmail}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-2xl bg-white/10 px-3 py-2">
+                      <span className="text-slate-300">With phone</span>
+                      <span className="font-bold text-white">{summary.withPhone}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-2xl bg-white/10 px-3 py-2">
+                      <span className="text-slate-300">With website</span>
+                      <span className="font-bold text-white">{summary.withWebsite}</span>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+
+              <div className="rounded-[2rem] border border-slate-200 bg-white/90 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur sm:p-5">
+                <div className="mb-5 flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
+                      <Filter className="h-3.5 w-3.5" />
+                      Results
+                    </p>
+
+                    <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] text-slate-950">
+                      {visibleLeads.length} visible leads
+                    </h2>
+                  </div>
+
+                  <p className="rounded-2xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-600">
+                    {selectedIds.length
+                      ? `${selectedIds.length} selected`
+                      : 'No rows selected'}
+                  </p>
+                </div>
+
                 <ResultsTable
                   emptyStateMessage={emptyStateMessage}
                   leads={deferredLeads}
@@ -308,26 +626,42 @@ export function HomePage({ searchApi }: HomePageProps) {
                   onToggleSelect={toggleSelected}
                   selectedIds={selectedIds}
                 />
-              ) : null}
-            </div>
-          </section>
-        )}
-      </main>
+              </div>
+            </section>
+          ) : (
+            <section className="rounded-[2rem] border border-dashed border-slate-300 bg-white/70 p-10 text-center backdrop-blur">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+                <Search className="h-7 w-7" />
+              </div>
 
-      {!isWaiting && result ? (
-        <div className="sticky bottom-4 z-40 mx-auto flex w-[min(100%-2rem,1120px)] items-center justify-between gap-4 rounded-[24px] border border-slate-200 bg-white/92 px-5 py-4 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur">
+              <h2 className="mt-5 text-2xl font-black tracking-[-0.04em] text-slate-950">
+                Run a search to see results
+              </h2>
+
+              <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-500">
+                Your leads, filters, contact coverage, and export tools will appear here.
+              </p>
+            </section>
+          )}
+        </main>
+      </div>
+
+      {result?.meta.status === 'complete' ? (
+        <div className="sticky bottom-4 z-40 mx-auto flex w-[min(100%-2rem,1120px)] items-center justify-between gap-4 rounded-[1.5rem] border border-slate-200 bg-white/95 px-5 py-4 shadow-[0_24px_80px_rgba(15,23,42,0.16)] backdrop-blur-xl">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
               Ready to export
             </p>
-            <p className="mt-1 text-sm text-slate-700">
+            <p className="mt-1 text-sm font-medium text-slate-700">
               {selectedIds.length
                 ? `${selectedIds.length} selected rows`
-                : `${visibleLeads.length} leads found`}
+                : `${visibleLeads.length} visible leads`}
             </p>
           </div>
+
           <button
-            className="inline-flex h-12 items-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white transition hover:bg-emerald-700"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+            disabled={!exportableLeads.length}
             onClick={() => setShowExport(true)}
             type="button"
           >
@@ -337,7 +671,11 @@ export function HomePage({ searchApi }: HomePageProps) {
         </div>
       ) : null}
 
-      <ExportModal leads={exportableLeads} onClose={() => setShowExport(false)} open={showExport} />
+      <ExportModal
+        leads={exportableLeads}
+        onClose={() => setShowExport(false)}
+        open={showExport}
+      />
     </>
   );
 }
