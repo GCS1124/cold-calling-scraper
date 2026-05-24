@@ -2,13 +2,10 @@ import { ArrowRight, Clock3, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { AuthPanel } from '../components/auth/auth-panel';
-import { RecentSearches } from '../components/search/recent-searches';
 import { useAuth } from '../hooks/use-auth';
-import { useSearchHistory } from '../hooks/use-search-history';
 
 export function AuthPage() {
   const auth = useAuth();
-  const { items } = useSearchHistory(auth.user?.id);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-8 px-4 py-8 md:px-8 md:py-12">

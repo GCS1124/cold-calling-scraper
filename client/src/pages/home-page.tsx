@@ -8,7 +8,6 @@ import { ExportModal } from '../components/export/export-modal';
 import { FiltersPanel } from '../components/results/filters-panel';
 import { ResultsSummary } from '../components/results/results-summary';
 import { ResultsTable } from '../components/results/results-table';
-import { RecentSearches } from '../components/search/recent-searches';
 import { SearchForm } from '../components/search/search-form';
 import { useAuth } from '../hooks/use-auth';
 import { useSearchHistory } from '../hooks/use-search-history';
@@ -38,7 +37,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     hasWebsite: false,
   });
   const auth = useAuth();
-  const { items, rememberSearch } = useSearchHistory(auth.user?.id);
+  const { rememberSearch } = useSearchHistory(auth.user?.id);
   const recordedSearchId = useRef<string | null>(null);
   const isPollingRef = useRef(false);
 
