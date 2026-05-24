@@ -20,7 +20,7 @@ export function AuthPage() {
         <div className="absolute bottom-[-12rem] left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-cyan-100 blur-3xl" />
       </div>
 
-      <section className="relative mx-auto grid h-[720px] w-full max-w-6xl overflow-hidden rounded-[2rem] border border-white/70 bg-white/80 shadow-[0_30px_100px_rgba(15,23,42,0.14)] backdrop-blur-xl lg:grid-cols-[1.05fr_0.95fr]">  
+      <section className="relative mx-auto grid h-[620px] w-full max-w-6xl overflow-hidden rounded-[2rem] border border-white/70 bg-white/80 shadow-[0_30px_100px_rgba(15,23,42,0.14)] backdrop-blur-xl lg:grid-cols-[1.05fr_0.95fr]">  
         {/* Left Panel */}
         <div className="relative hidden flex-col overflow-hidden bg-slate-950 p-10 text-white lg:flex">
           <div className="pointer-events-none absolute inset-0">
