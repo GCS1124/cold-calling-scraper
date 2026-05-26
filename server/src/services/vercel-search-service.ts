@@ -8,6 +8,7 @@ import { discoverUsLeadsFromOsm } from './osm-discovery';
 import { googlePlacesProvider } from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { nationwideStateQueries } from './us-discovery-regions';
+import { timezoneStateQueries } from './us-timezones';
 import {
   createSearchJobStore,
   type SearchJobRecord,
@@ -57,6 +58,10 @@ const normalizeLead = (lead: Lead) => enrichLead(lead);
 const toSearchSeeds = (location: NormalizedUsLocation) => {
   if (location.mode === 'nationwide') {
     return [...nationwideStateQueries];
+  }
+
+  if (location.mode === 'timezone' && location.timeZoneCode) {
+    return [...timezoneStateQueries[location.timeZoneCode]];
   }
 
   const seeds = [location.label];

@@ -1,7 +1,7 @@
 import { LoaderCircle, Search } from 'lucide-react';
 import type { FormEvent } from 'react';
 
-import { cityOptions, companyTypeOptions } from '../../data/search-options';
+import { companyTypeOptions, timeZoneOptions } from '../../data/search-options';
 import type { SearchRequest } from '../../types/lead';
 
 type SearchFormProps = {
@@ -41,12 +41,12 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
       </label>
 
       <label className="flex flex-col gap-2 text-sm font-semibold text-slate-900">
-        City
+        Time Zone
         <div className="relative">
           <input
             className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 pr-11 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
-            list="city-options"
-            placeholder="Austin, TX · California · USA"
+            list="time-zone-options"
+            placeholder="EST, CST, MST, PST, Nationwide"
             value={value.city}
             onChange={(event) =>
               onChange({
@@ -64,8 +64,8 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
         ))}
       </datalist>
 
-      <datalist id="city-options">
-        {cityOptions.map((option) => (
+      <datalist id="time-zone-options">
+        {timeZoneOptions.map((option) => (
           <option key={option} value={option} />
         ))}
       </datalist>

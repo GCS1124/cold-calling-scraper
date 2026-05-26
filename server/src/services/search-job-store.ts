@@ -8,7 +8,7 @@ export type SearchJobRecord = {
   request: SearchRequest;
   query: string;
   locationLabel: string;
-  locationMode: 'local' | 'nationwide';
+  locationMode: 'local' | 'nationwide' | 'timezone';
   status: SearchStatus;
   progress: SearchProgress;
   leads: Lead[];

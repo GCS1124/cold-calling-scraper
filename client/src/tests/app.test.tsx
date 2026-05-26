@@ -51,8 +51,8 @@ const completedResponse: SearchResponse = {
     },
   ],
   meta: {
-    query: 'Dental Clinics in Austin, TX',
-    locationLabel: 'Austin, TX',
+    query: 'Dental Clinics in Eastern Time',
+    locationLabel: 'Eastern Time',
       status: 'complete',
     progress: {
       discovered: 2,
@@ -79,8 +79,8 @@ const waitingResponse: SearchResponse = {
   searchId: 'search-waiting',
   leads: [],
   meta: {
-    query: 'Dental Clinics in Austin, TX',
-    locationLabel: 'Austin, TX',
+    query: 'Dental Clinics in Eastern Time',
+    locationLabel: 'Eastern Time',
     status: 'discovering',
     progress: {
       discovered: 18,
@@ -104,7 +104,7 @@ const waitingResponse: SearchResponse = {
 };
 
 describe('App', () => {
-  it('shows the auth landing page at the base path', () => {
+  it('shows the auth landing page at the base path', async () => {
     const searchApi: SearchApi = {
       startSearch: vi.fn(),
       getSearch: vi.fn(),
@@ -116,11 +116,13 @@ describe('App', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/sign in, create an account/i)).toBeTruthy();
-    expect(screen.getByRole('link', { name: /go to search/i })).toBeTruthy();
+    expect(
+      await screen.findByText(/your searches, saved exactly where you left them/i),
+    ).toBeTruthy();
+    expect((await screen.findAllByRole('link', { name: /^search$/i })).length).toBeGreaterThan(0);
   });
 
-  it('keeps company type and city as typable inputs with suggestion dropdowns on the search route', () => {
+  it('keeps company type and time zone as typable inputs with suggestion dropdowns on the search route', () => {
     const searchApi: SearchApi = {
       startSearch: vi.fn(),
       getSearch: vi.fn(),
@@ -133,14 +135,14 @@ describe('App', () => {
     );
 
     const companyTypeInput = screen.getByLabelText(/company type/i);
-    const cityInput = screen.getByLabelText(/city/i);
+    const timeZoneInput = screen.getByLabelText(/time zone/i);
 
     expect(companyTypeInput.getAttribute('list')).toBe('company-type-options');
-    expect(cityInput.getAttribute('list')).toBe('city-options');
+    expect(timeZoneInput.getAttribute('list')).toBe('time-zone-options');
     expect(screen.getByRole('combobox', { name: /company type/i })).toBeTruthy();
-    expect(screen.getByRole('combobox', { name: /city/i })).toBeTruthy();
-    expect(container.querySelector('#city-options option[value="USA"]')).not.toBeNull();
-    expect(container.querySelector('#city-options option[value="California"]')).not.toBeNull();
+    expect(screen.getByRole('combobox', { name: /time zone/i })).toBeTruthy();
+    expect(container.querySelector('#time-zone-options option[value="EST"]')).not.toBeNull();
+    expect(container.querySelector('#time-zone-options option[value="PST"]')).not.toBeNull();
   });
 
   it('submits a search and renders leads found by default', async () => {
@@ -157,18 +159,18 @@ describe('App', () => {
     );
 
     await user.type(screen.getByLabelText(/company type/i), 'Dental Clinics');
-    await user.type(screen.getByLabelText(/city/i), 'Austin');
+    await user.type(screen.getByLabelText(/time zone/i), 'EST');
     await user.click(screen.getByRole('button', { name: /find leads/i }));
 
     await waitFor(() => expect(searchApi.startSearch).toHaveBeenCalledOnce());
     expect(searchApi.startSearch).toHaveBeenCalledWith({
       companyType: 'Dental Clinics',
-      city: 'Austin',
+      city: 'EST',
       count: 50,
     });
 
     expect(await screen.findByText('Northstar Labs')).toBeTruthy();
-    expect(screen.getByText(/2 leads found for Dental Clinics in Austin, TX/i)).toBeTruthy();
+    expect(screen.getByText(/2 leads found for Dental Clinics in Eastern Time/i)).toBeTruthy();
     expect(screen.getByText('Orbit Data Works')).toBeTruthy();
     expect(screen.getByText(/South Congress/i)).toBeTruthy();
   });
@@ -187,10 +189,10 @@ describe('App', () => {
     );
 
     await user.type(screen.getByLabelText(/company type/i), 'Dental Clinics');
-    await user.type(screen.getByLabelText(/city/i), 'Austin');
+    await user.type(screen.getByLabelText(/time zone/i), 'EST');
     await user.click(screen.getByRole('button', { name: /find leads/i }));
 
-    expect(await screen.findByText(/2 leads found for Dental Clinics in Austin, TX/i)).toBeTruthy();
+    expect(await screen.findByText(/2 leads found for Dental Clinics in Eastern Time/i)).toBeTruthy();
     expect(screen.queryByLabelText(/show rejected leads/i)).toBeNull();
     expect(screen.queryByLabelText(/include partial leads/i)).toBeNull();
   });
@@ -209,10 +211,13 @@ describe('App', () => {
     );
 
     await user.type(screen.getByLabelText(/company type/i), 'Dental Clinics');
-    await user.type(screen.getByLabelText(/city/i), 'Austin');
+    await user.type(screen.getByLabelText(/time zone/i), 'EST');
     await user.click(screen.getByRole('button', { name: /find leads/i }));
 
-    expect(await screen.findByText(/waiting for the search to finish/i)).toBeTruthy();
+    expect(await screen.findByText(/finding your leads/i)).toBeTruthy();
+    expect(
+      screen.getByText(/results will appear here when the search finishes/i),
+    ).toBeTruthy();
     expect(screen.queryByText(/click any company row to verify details before export/i)).toBeNull();
     expect(screen.queryByRole('button', { name: /download excel/i })).toBeNull();
     unmount();
@@ -261,7 +266,7 @@ describe('App', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText(/earlier searches, ready to reopen and download/i)).toBeTruthy();
+    expect(await screen.findByText(/reopen, review, and export past searches/i)).toBeTruthy();
     expect(screen.getAllByText('Dental Clinics').length).toBeGreaterThan(0);
     expect(screen.getByText('Northstar Labs')).toBeTruthy();
     expect(screen.getByRole('button', { name: /download/i })).toBeTruthy();

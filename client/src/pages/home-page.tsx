@@ -147,7 +147,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   const emptyStateMessage =
     result && result.leads.length === 0
       ? result.meta.status === 'complete'
-        ? 'No leads were found for this search. Try a broader company type or nearby city.'
+        ? 'No leads were found for this search. Try a broader company type or different time zone.'
         : 'Still finding leads.'
       : 'No leads match the current filters.';
 
@@ -369,7 +369,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                   Build your lead list
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Enter a business type, city, and lead count.
+                  Enter a business type, time zone, and lead count.
                 </p>
               </div>
 
@@ -401,9 +401,9 @@ export function HomePage({ searchApi }: HomePageProps) {
           ) : (
             <section className="grid gap-4 md:grid-cols-3">
               <div className="rounded-[1.75rem] border border-slate-200 bg-white/90 p-5 shadow-[0_20px_70px_rgba(15,23,42,0.08)] backdrop-blur">
-                <p className="text-sm font-bold text-slate-950">Start with a city</p>
+                <p className="text-sm font-bold text-slate-950">Start with a time zone</p>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Search a specific metro area for more useful local results.
+                  Search by US time zone to cover a wider regional lead pool.
                 </p>
               </div>
 
@@ -550,7 +550,7 @@ export function HomePage({ searchApi }: HomePageProps) {
               </h2>
 
               <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-red-700">
-                Try a broader company type, a different city, or a smaller lead count.
+                Try a broader company type, a different time zone, or a smaller lead count.
               </p>
             </section>
           ) : result ? (

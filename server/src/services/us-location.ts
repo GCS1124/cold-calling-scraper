@@ -1,5 +1,9 @@
 import type { ProviderWarning } from '../types/search';
 import { httpClient } from '../utils/http-client';
+import {
+  normalizeUsTimeZoneQuery,
+  type UsTimeZoneCode,
+} from './us-timezones';
 
 type NominatimResult = {
   lat: string;
@@ -77,10 +81,11 @@ const stateCodes: Record<string, string> = {
 };
 
 export type NormalizedUsLocation = {
-  mode: 'local' | 'nationwide';
+  mode: 'local' | 'nationwide' | 'timezone';
   label: string;
   city: string;
   stateCode: string;
+  timeZoneCode?: UsTimeZoneCode;
   postalCode?: string;
   lat: number;
   lon: number;
@@ -124,6 +129,45 @@ const nationwideAliases = new Set([
   'entire us',
   'entire usa',
 ]);
+
+const timeZoneBoundingBoxes: Record<UsTimeZoneCode, NormalizedUsLocation['boundingBox']> = {
+  ET: {
+    south: 24.3963,
+    west: -92.0,
+    north: 47.4597,
+    east: -66.9346,
+  },
+  CT: {
+    south: 25.8371,
+    west: -104.0,
+    north: 49.0,
+    east: -82.0,
+  },
+  MT: {
+    south: 31.3322,
+    west: -115.0,
+    north: 49.0,
+    east: -102.0,
+  },
+  PT: {
+    south: 32.5343,
+    west: -124.8489,
+    north: 49.0,
+    east: -114.1315,
+  },
+  AKT: {
+    south: 51.2,
+    west: -179.1489,
+    north: 71.5,
+    east: -129.9795,
+  },
+  HAT: {
+    south: 18.87,
+    west: -160.25,
+    north: 22.29,
+    east: -154.82,
+  },
+};
 
 const nationwideBoundingBox = {
   south: 24.3963,
@@ -229,6 +273,22 @@ const isAcceptableMatch = (rawLocation: string, result: NominatimResult) => {
 export const normalizeUsLocation = async (
   rawLocation: string,
 ): Promise<NormalizedUsLocation> => {
+  const timeZone = normalizeUsTimeZoneQuery(rawLocation);
+  if (timeZone) {
+    return {
+      mode: 'timezone',
+      label: timeZone.label,
+      city: timeZone.label,
+      stateCode: '',
+      timeZoneCode: timeZone.code,
+      postalCode: undefined,
+      lat: 39.8283,
+      lon: -98.5795,
+      boundingBox: timeZoneBoundingBoxes[timeZone.code],
+      warnings: [],
+    };
+  }
+
   if (isNationwideQuery(rawLocation)) {
     return {
       mode: 'nationwide',

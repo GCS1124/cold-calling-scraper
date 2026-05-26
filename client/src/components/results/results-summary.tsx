@@ -35,7 +35,7 @@ export function ResultsSummary({
           Search Summary
         </p>
         <h2 className="mt-3 text-2xl font-semibold text-slate-950">
-          {found} leads found for {companyType || 'your query'} in {city || 'your city'}
+          {found} leads found for {companyType || 'your query'} in {city || 'your time zone'}
         </h2>
       </div>
 

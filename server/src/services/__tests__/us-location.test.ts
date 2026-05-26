@@ -22,6 +22,16 @@ describe('normalizeUsLocation', () => {
     expect(mockedHttpClient.get).not.toHaveBeenCalled();
   });
 
+  it('normalizes a US time zone query to a canonical zone label', async () => {
+    const result = await normalizeUsLocation('EST');
+
+    expect(result.mode).toBe('timezone');
+    expect(result.label).toBe('Eastern Time');
+    expect(result.timeZoneCode).toBe('ET');
+    expect(result.stateCode).toBe('');
+    expect(mockedHttpClient.get).not.toHaveBeenCalled();
+  });
+
   it('normalizes a US city/state query to a canonical label', async () => {
     mockedHttpClient.get.mockResolvedValueOnce({
       data: [
