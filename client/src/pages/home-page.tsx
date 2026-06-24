@@ -24,16 +24,15 @@ import { SearchForm } from '../components/search/search-form';
 import { useAuth } from '../hooks/use-auth';
 import { useSearchHistory } from '../hooks/use-search-history';
 import type { SearchApi } from '../services/search-service';
-import type { Lead, SearchRequest, SearchResponse } from '../types/lead';
+import {
+  buildSearchRequestFromDraft,
+  createSearchDraft,
+  formatLocationLabel,
+} from '../utils/search-location';
+import type { Lead, SearchDraft, SearchRequest, SearchResponse } from '../types/lead';
 
 type HomePageProps = {
   searchApi: SearchApi;
-};
-
-const initialSearch: SearchRequest = {
-  companyType: '',
-  city: '',
-  count: 50,
 };
 
 const pollingStatuses = ['queued', 'discovering', 'enriching'];
@@ -44,7 +43,7 @@ function toCsvField(value: string | number | null | undefined) {
 }
 
 export function HomePage({ searchApi }: HomePageProps) {
-  const [search, setSearch] = useState<SearchRequest>(initialSearch);
+  const [search, setSearch] = useState<SearchDraft>(() => createSearchDraft());
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -147,7 +146,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   const emptyStateMessage =
     result && result.leads.length === 0
       ? result.meta.status === 'complete'
-        ? 'No leads were found for this search. Try a broader company type or different time zone.'
+        ? 'No leads were found for this search. Try a broader company type or different location.'
         : 'Still finding leads.'
       : 'No leads match the current filters.';
 
@@ -201,7 +200,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   ]);
 
   const handleSearch = async (override?: SearchRequest) => {
-    const nextSearch = override ?? search;
+    const nextSearch = override ?? buildSearchRequestFromDraft(search);
 
     setLoading(true);
     setSubmittedSearch(nextSearch);
@@ -369,7 +368,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                   Build your lead list
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Enter a business type, time zone, and lead count.
+                  Enter a business type, location, and lead count.
                 </p>
               </div>
 
@@ -390,7 +389,10 @@ export function HomePage({ searchApi }: HomePageProps) {
         <main className="relative mx-auto flex max-w-7xl flex-col gap-6 px-4 pb-28 md:px-8">
           {result ? (
             <ResultsSummary
-              city={result.meta.locationLabel || search.city}
+              location={
+                result.meta.locationLabel ||
+                (submittedSearch ? formatLocationLabel(submittedSearch.location) : '')
+              }
               companyType={submittedSearch?.companyType || search.companyType}
               found={result.meta.progress.foundCount ?? summary.total}
               requested={result.meta.progress.requestedCount ?? search.count}
@@ -401,9 +403,9 @@ export function HomePage({ searchApi }: HomePageProps) {
           ) : (
             <section className="grid gap-4 md:grid-cols-3">
               <div className="rounded-[1.75rem] border border-slate-200 bg-white/90 p-5 shadow-[0_20px_70px_rgba(15,23,42,0.08)] backdrop-blur">
-                <p className="text-sm font-bold text-slate-950">Start with a time zone</p>
+                <p className="text-sm font-bold text-slate-950">Start with a location</p>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Search by US time zone to cover a wider regional lead pool.
+                  Search by US time zone or city/state to cover the right lead pool.
                 </p>
               </div>
 

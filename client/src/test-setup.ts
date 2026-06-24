@@ -1,1 +1,1 @@
-import '@testing-library/jest-dom/vitest';
+// Intentionally left minimal; Vitest's built-in assertions are enough for these tests.

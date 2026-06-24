@@ -10,18 +10,18 @@ const successfulPayload = {
   meta: {
     query: 'Dental Clinics in Austin, TX',
     locationLabel: 'Austin, TX',
-      status: 'complete' as const,
-      progress: {
-        discovered: 0,
-        enriched: 0,
-        totalCandidates: 0,
-        requestedCount: 50,
-        foundCount: 0,
-        duplicatesRemoved: 0,
-        currentSource: 'Queued',
-        batchesCompleted: 0,
-        estimatedRemaining: 50,
-      },
+    status: 'complete' as const,
+    progress: {
+      discovered: 0,
+      enriched: 0,
+      totalCandidates: 0,
+      requestedCount: 50,
+      foundCount: 0,
+      duplicatesRemoved: 0,
+      currentSource: 'Queued',
+      batchesCompleted: 0,
+      estimatedRemaining: 50,
+    },
     totals: {
       total: 0,
       withEmail: 0,
@@ -48,7 +48,10 @@ describe('searchApi', () => {
 
     await searchApi.startSearch({
       companyType: 'Dental Clinics',
-      city: 'Austin',
+      location: {
+        mode: 'timezone',
+        timeZone: 'EST',
+      },
       count: 50,
     });
 
@@ -59,7 +62,10 @@ describe('searchApi', () => {
       },
       body: JSON.stringify({
         companyType: 'Dental Clinics',
-        city: 'Austin',
+        location: {
+          mode: 'timezone',
+          timeZone: 'EST',
+        },
         count: 50,
       }),
     });
@@ -87,7 +93,10 @@ describe('searchApi', () => {
     await expect(
       searchApi.startSearch({
         companyType: 'Dental Clinics',
-        city: 'Austin',
+        location: {
+          mode: 'timezone',
+          timeZone: 'EST',
+        },
         count: 50,
       }),
     ).rejects.toThrow('Not found');
@@ -99,7 +108,10 @@ describe('searchApi', () => {
       },
       body: JSON.stringify({
         companyType: 'Dental Clinics',
-        city: 'Austin',
+        location: {
+          mode: 'timezone',
+          timeZone: 'EST',
+        },
         count: 50,
       }),
     });
@@ -111,7 +123,10 @@ describe('searchApi', () => {
     await expect(
       searchApi.startSearch({
         companyType: 'Dental Clinics',
-        city: 'Austin',
+        location: {
+          mode: 'timezone',
+          timeZone: 'EST',
+        },
         count: 50,
       }),
     ).rejects.toThrow('Failed to fetch');

@@ -5,36 +5,59 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDir = path.resolve(__dirname, '..');
 const repoDir = path.resolve(clientDir, '..');
+const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
-const child = spawn(
-  'vercel',
-  ['dev', '--listen', '5174', '--yes'],
-  {
+const children = [
+  spawn(npmCommand, ['run', 'dev', '--workspace', 'server'], {
     cwd: repoDir,
     stdio: 'inherit',
     env: {
       ...process.env,
-      VERCEL_SKIP_UPDATE_CHECK: '1',
     },
-  },
-);
+  }),
+  spawn(npmCommand, ['run', 'dev:vite', '--workspace', 'client'], {
+    cwd: repoDir,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+    },
+  }),
+];
 
-const shutdown = () => {
-  if (!child.killed) {
-    child.kill('SIGTERM');
+let shuttingDown = false;
+
+const shutdown = (signal = 'SIGTERM') => {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+
+  for (const child of children) {
+    if (!child.killed) {
+      child.kill(signal);
+    }
   }
 };
 
 process.on('SIGINT', () => {
-  shutdown();
+  shutdown('SIGINT');
   process.exit(130);
 });
 
 process.on('SIGTERM', () => {
-  shutdown();
+  shutdown('SIGTERM');
   process.exit(143);
 });
 
-child.on('exit', (code) => {
-  process.exit(code ?? 0);
-});
+for (const child of children) {
+  child.on('exit', (code) => {
+    if (shuttingDown) {
+      process.exit(code ?? 0);
+      return;
+    }
+
+    shutdown();
+    process.exit(code ?? 0);
+  });
+}

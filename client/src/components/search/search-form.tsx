@@ -1,13 +1,15 @@
 import { LoaderCircle, Search } from 'lucide-react';
-import type { FormEvent } from 'react';
+import type { Dispatch, FormEvent, SetStateAction } from 'react';
 
 import { companyTypeOptions, timeZoneOptions } from '../../data/search-options';
-import type { SearchRequest } from '../../types/lead';
+import { usStates } from '../../data/us-states';
+import { isSearchDraftComplete } from '../../utils/search-location';
+import type { SearchDraft } from '../../types/lead';
 
 type SearchFormProps = {
-  value: SearchRequest;
+  value: SearchDraft;
   loading: boolean;
-  onChange: (next: SearchRequest) => void;
+  onChange: Dispatch<SetStateAction<SearchDraft>>;
   onSubmit: () => void;
 };
 
@@ -30,42 +32,118 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
             list="company-type-options"
             placeholder="dentist, roofer, hvac, law firm"
             value={value.companyType}
-            onChange={(event) =>
-              onChange({
-                ...value,
-                companyType: event.target.value,
-              })
-            }
+            onChange={(event) => {
+              const nextCompanyType = event.target.value;
+
+              onChange((current) => ({
+                ...current,
+                companyType: nextCompanyType,
+              }));
+            }}
           />
         </div>
       </label>
 
-      <label className="flex flex-col gap-2 text-sm font-semibold text-slate-900">
-        Time Zone
-        <div className="relative">
-          <input
-            className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 pr-11 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
-            list="time-zone-options"
-            placeholder="EST, CST, MST, PST, Nationwide"
-            value={value.city}
-            onChange={(event) =>
-              onChange({
-                ...value,
-                city: event.target.value,
-              })
-            }
-          />
+      <fieldset className="space-y-3 text-sm font-semibold text-slate-900">
+        <legend>Location</legend>
+
+        <div className="inline-flex w-full rounded-2xl bg-slate-100 p-1">
+          <button
+            className={`flex-1 rounded-2xl px-3 py-2 text-sm font-semibold transition ${
+              value.locationMode === 'timezone'
+                ? 'bg-white text-slate-950 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+            onClick={() => onChange((current) => ({ ...current, locationMode: 'timezone' }))}
+            type="button"
+            aria-pressed={value.locationMode === 'timezone'}
+          >
+            Time Zone
+          </button>
+          <button
+            className={`flex-1 rounded-2xl px-3 py-2 text-sm font-semibold transition ${
+              value.locationMode === 'cityState'
+                ? 'bg-white text-slate-950 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+            onClick={() => onChange((current) => ({ ...current, locationMode: 'cityState' }))}
+            type="button"
+            aria-pressed={value.locationMode === 'cityState'}
+          >
+            City / State
+          </button>
         </div>
-      </label>
+
+        {value.locationMode === 'timezone' ? (
+          <label className="flex flex-col gap-2 font-semibold text-slate-900">
+            Time Zone
+            <select
+              className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
+              value={value.timeZone}
+              onChange={(event) => {
+                const nextTimeZone = event.target.value as SearchDraft['timeZone'];
+
+                onChange((current) => ({
+                  ...current,
+                  timeZone: nextTimeZone,
+                }));
+              }}
+            >
+              <option value="">Select a time zone</option>
+              {timeZoneOptions.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {option.label} ({option.code})
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
+            <label className="flex flex-col gap-2 font-semibold text-slate-900">
+              City
+              <input
+                className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
+                placeholder="Austin, Phoenix, Miami"
+                value={value.city}
+                onChange={(event) => {
+                  const nextCity = event.target.value;
+
+                  onChange((current) => ({
+                    ...current,
+                    city: nextCity,
+                  }));
+                }}
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 font-semibold text-slate-900">
+              State
+              <select
+                className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
+                value={value.stateCode}
+                onChange={(event) => {
+                  const nextStateCode = event.target.value as SearchDraft['stateCode'];
+
+                  onChange((current) => ({
+                    ...current,
+                    stateCode: nextStateCode,
+                  }));
+                }}
+              >
+                <option value="">Select</option>
+                {usStates.map((state) => (
+                  <option key={state.code} value={state.code}>
+                    {state.name} ({state.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+      </fieldset>
 
       <datalist id="company-type-options">
         {companyTypeOptions.map((option) => (
-          <option key={option} value={option} />
-        ))}
-      </datalist>
-
-      <datalist id="time-zone-options">
-        {timeZoneOptions.map((option) => (
           <option key={option} value={option} />
         ))}
       </datalist>
@@ -78,18 +156,20 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
           max={500}
           step={25}
           value={value.count}
-          onChange={(event) =>
-            onChange({
-              ...value,
-              count: Number(event.target.value),
-            })
-          }
+          onChange={(event) => {
+            const nextCount = Number(event.target.value);
+
+            onChange((current) => ({
+              ...current,
+              count: nextCount,
+            }));
+          }}
         />
       </label>
 
       <button
         className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400 md:col-span-2"
-        disabled={loading || !value.companyType.trim() || !value.city.trim()}
+        disabled={loading || !isSearchDraftComplete(value)}
         type="submit"
       >
         {loading ? (

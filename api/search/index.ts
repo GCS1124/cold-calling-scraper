@@ -1,8 +1,7 @@
 import { ZodError } from 'zod';
 import { searchRequestSchema } from '../_lib/search-contract.js';
 import { vercelSearchService } from '../../server/src/services/vercel-search-service.js';
-
-const minimumRequestedCount = 50;
+import { flattenSearchRequest } from '../../server/src/utils/search-location.js';
 
 export default async function handler(req: any, res: any) {
   if (req.method === 'GET') {
@@ -12,10 +11,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     const payload = searchRequestSchema.parse(req.body);
-    const response = await vercelSearchService.startSearch({
-      ...payload,
-      count: Math.max(payload.count, minimumRequestedCount),
-    });
+    const response = await vercelSearchService.startSearch(flattenSearchRequest(payload));
     res.status(200).json(response);
   } catch (error) {
     if (error instanceof ZodError) {

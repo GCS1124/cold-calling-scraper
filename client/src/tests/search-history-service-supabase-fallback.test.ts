@@ -40,18 +40,21 @@ describe('search-history-service supabase fallback', () => {
     const saved = await rememberSearchHistory(
       {
         companyType: 'Roofing Contractors',
-        city: 'California',
+        location: {
+          mode: 'cityState',
+          city: 'Austin',
+          stateCode: 'TX',
+        },
         count: 50,
       },
       {
         userId: 'user-1',
-        locationLabel: 'California',
         leads: [
           {
             id: 'lead-1',
             name: 'Roof Right Now',
             category: 'Roofing Contractors',
-            city: 'California',
+            city: 'Austin, TX',
             source: 'Google Places',
             confidence: 90,
             hasEmail: true,
@@ -66,14 +69,15 @@ describe('search-history-service supabase fallback', () => {
     );
 
     expect(saved.companyType).toBe('Roofing Contractors');
-    expect(saved.city).toBe('California');
+    expect(saved.city).toBe('Austin, TX');
+    expect(saved.locationLabel).toBe('Austin, TX');
     expect(saved.leadCount).toBe(1);
 
     const items = await loadSearchHistory('user-1');
 
     expect(items).toHaveLength(1);
     expect(items[0]?.companyType).toBe('Roofing Contractors');
-    expect(items[0]?.city).toBe('California');
+    expect(items[0]?.city).toBe('Austin, TX');
     expect(items[0]?.leadCount).toBe(1);
   });
 });

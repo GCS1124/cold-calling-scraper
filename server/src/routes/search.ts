@@ -2,19 +2,12 @@ import { Router } from 'express';
 import { ZodError } from 'zod';
 
 import type { SearchRequest, SearchResponse } from '../types/search';
-import { searchRequestSchema } from '../types/search';
+import { flattenSearchRequest, searchRequestSchema } from '../../../api/_lib/search-contract.js';
 
 export type SearchService = {
   startSearch: (request: SearchRequest) => Promise<SearchResponse>;
   getSearch: (searchId: string) => Promise<SearchResponse | null>;
 };
-
-const minimumRequestedCount = 50;
-
-const normalizeRequest = (request: SearchRequest): SearchRequest => ({
-  ...request,
-  count: Math.max(request.count, minimumRequestedCount),
-});
 
 type SearchResponder = {
   status: (code: number) => SearchResponder;
@@ -28,7 +21,7 @@ export const handleStartSearch = async (
 ) => {
   try {
     const payload = searchRequestSchema.parse(req.body);
-    const response = await search.startSearch(normalizeRequest(payload));
+    const response = await search.startSearch(flattenSearchRequest(payload));
 
     res.status(200).json(response);
   } catch (error) {

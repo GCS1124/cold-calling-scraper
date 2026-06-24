@@ -2,7 +2,7 @@ type ResultsSummaryProps = {
   found: number;
   requested: number;
   companyType: string;
-  city: string;
+  location: string;
   missingEmail: number;
   missingPhone: number;
   duplicatesRemoved: number;
@@ -23,7 +23,7 @@ export function ResultsSummary({
   found,
   requested,
   companyType,
-  city,
+  location,
   missingEmail,
   missingPhone,
   duplicatesRemoved,
@@ -35,7 +35,7 @@ export function ResultsSummary({
           Search Summary
         </p>
         <h2 className="mt-3 text-2xl font-semibold text-slate-950">
-          {found} leads found for {companyType || 'your query'} in {city || 'your time zone'}
+          {found} leads found for {companyType || 'your query'} in {location || 'your location'}
         </h2>
       </div>
 

@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../lib/supabase';
 import type { Lead } from '../types/lead';
 import type { SearchRequest } from '../types/lead';
+import { formatLocationLabel, serializeLocationValue } from '../utils/search-location';
 
 export type SearchHistoryItem = {
   id: string;
@@ -202,9 +203,9 @@ export const rememberSearchHistory = async (
     id: crypto.randomUUID(),
     searchId: options.searchId ?? null,
     companyType: search.companyType.trim(),
-    city: search.city.trim(),
+    city: serializeLocationValue(search.location),
     count: search.count,
-    locationLabel: options.locationLabel?.trim() || null,
+    locationLabel: options.locationLabel?.trim() || formatLocationLabel(search.location),
     leadCount: options.leads?.length ?? 0,
     leads: options.leads ?? [],
     createdAt: new Date().toISOString(),
@@ -221,9 +222,9 @@ export const rememberSearchHistory = async (
     user_id: options.userId,
     search_id: options.searchId ?? null,
     company_type: search.companyType.trim(),
-    city: search.city.trim(),
+    city: serializeLocationValue(search.location),
     count: search.count,
-    location_label: options.locationLabel?.trim() || null,
+    location_label: options.locationLabel?.trim() || formatLocationLabel(search.location),
     lead_count: options.leads?.length ?? 0,
     leads: options.leads ?? [],
   };

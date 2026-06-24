@@ -1,3 +1,6 @@
+import type { TimeZoneCode } from '../data/search-options';
+import type { UsStateCode } from '../data/us-states';
+
 export type Lead = {
   id: string;
   name: string;
@@ -28,9 +31,35 @@ export type Lead = {
   scrapedAt: string;
 };
 
+export type SearchLocation =
+  | {
+      mode: 'timezone';
+      timeZone: TimeZoneCode;
+    }
+  | {
+      mode: 'cityState';
+      city: string;
+      stateCode: UsStateCode;
+    };
+
 export type SearchRequest = {
   companyType: string;
+  location: SearchLocation;
+  count: number;
+  filters?: {
+    hasEmail?: boolean;
+    hasPhone?: boolean;
+    hasWebsite?: boolean;
+    sources?: string[];
+  };
+};
+
+export type SearchDraft = {
+  companyType: string;
+  locationMode: SearchLocation['mode'];
+  timeZone: TimeZoneCode | '';
   city: string;
+  stateCode: UsStateCode | '';
   count: number;
 };
 

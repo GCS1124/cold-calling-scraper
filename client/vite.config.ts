@@ -1,4 +1,3 @@
-import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { loadEnv } from 'vite';
 import { defineConfig } from 'vitest/config';
@@ -9,9 +8,10 @@ export default defineConfig(({ mode }) => {
   const supabaseUrl = env.VITE_SUPABASE_URL?.trim() || env.SUPABASE_URL?.trim() || '';
   const supabaseAnonKey =
     env.VITE_SUPABASE_ANON_KEY?.trim() || env.SUPABASE_ANON_KEY?.trim() || '';
+  const plugins = react();
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins,
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
@@ -19,6 +19,7 @@ export default defineConfig(({ mode }) => {
     server: process.env.VERCEL
       ? undefined
       : {
+          hmr: false,
           proxy: {
             '/api': {
               target: 'http://127.0.0.1:4000',

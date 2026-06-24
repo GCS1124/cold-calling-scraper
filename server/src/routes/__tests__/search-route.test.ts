@@ -62,7 +62,7 @@ describe('/api/search handlers', () => {
     vi.clearAllMocks();
   });
 
-  it('rejects malformed payloads', async () => {
+  it('rejects an invalid timezone code', async () => {
     const search: SearchService = {
       startSearch: vi.fn(),
       getSearch: vi.fn(),
@@ -73,27 +73,55 @@ describe('/api/search handlers', () => {
       search,
       {
         body: {
-          companyType: '',
-          city: 'Austin',
-          count: 10,
+          companyType: 'Dental Clinics',
+          location: {
+            mode: 'timezone',
+            timeZone: 'AKST',
+          },
+          count: 50,
         },
       },
       response,
     );
 
     expect(state.statusCode).toBe(400);
+    expect(search.startSearch).not.toHaveBeenCalled();
     expect(state.body).toMatchObject({
       error: 'Invalid search request',
-      details: {
-        fieldErrors: {
-          companyType: expect.any(Array),
-          count: expect.any(Array),
-        },
-      },
     });
   });
 
-  it('returns the staged search response from the service layer', async () => {
+  it('rejects malformed city and state payloads', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn(),
+    };
+    const { response, state } = createResponse();
+
+    await handleStartSearch(
+      search,
+      {
+        body: {
+          companyType: 'Dental Clinics',
+          location: {
+            mode: 'cityState',
+            city: 'Austin, TX',
+            stateCode: 'ZZ',
+          },
+          count: 50,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(400);
+    expect(search.startSearch).not.toHaveBeenCalled();
+    expect(state.body).toMatchObject({
+      error: 'Invalid search request',
+    });
+  });
+
+  it('flattens the public location contract before calling the service layer', async () => {
     const search: SearchService = {
       startSearch: vi.fn().mockResolvedValue(sampleResponse as never),
       getSearch: vi.fn(),
@@ -105,7 +133,11 @@ describe('/api/search handlers', () => {
       {
         body: {
           companyType: 'Dental Clinics',
-          city: 'Austin',
+          location: {
+            mode: 'cityState',
+            city: 'Austin',
+            stateCode: 'TX',
+          },
           count: 50,
         },
       },
@@ -116,6 +148,8 @@ describe('/api/search handlers', () => {
     expect(search.startSearch).toHaveBeenCalledOnce();
     expect(search.startSearch).toHaveBeenCalledWith(
       expect.objectContaining({
+        companyType: 'Dental Clinics',
+        city: 'Austin, TX',
         count: 50,
       }),
     );
@@ -154,7 +188,7 @@ describe('/api/search handlers', () => {
     });
   });
 
-  it('returns 404 when a search id is missing', async () => {
+  it('returns 400 when a search id is missing', async () => {
     const search: SearchService = {
       startSearch: vi.fn(),
       getSearch: vi.fn(),

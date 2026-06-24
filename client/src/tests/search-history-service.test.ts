@@ -10,10 +10,12 @@ describe('search-history-service', () => {
   it('stores and restores local fallback history when signed out', async () => {
     const saved = await rememberSearchHistory({
       companyType: 'Dental Clinics',
-      city: 'Austin, TX',
+      location: {
+        mode: 'timezone',
+        timeZone: 'EST',
+      },
       count: 50,
     }, {
-      locationLabel: 'Austin, TX',
       leads: [
         {
           id: 'lead-1',
@@ -33,14 +35,15 @@ describe('search-history-service', () => {
     });
 
     expect(saved.companyType).toBe('Dental Clinics');
-    expect(saved.city).toBe('Austin, TX');
+    expect(saved.city).toBe('EST');
+    expect(saved.locationLabel).toBe('Eastern Time');
     expect(saved.leadCount).toBe(1);
 
     const items = await loadSearchHistory();
 
     expect(items).toHaveLength(1);
     expect(items[0].companyType).toBe('Dental Clinics');
-    expect(items[0].city).toBe('Austin, TX');
+    expect(items[0].city).toBe('EST');
     expect(items[0].leadCount).toBe(1);
     expect(items[0].leads).toHaveLength(1);
   });
