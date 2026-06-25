@@ -75,10 +75,10 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
         </div>
 
         {value.locationMode === 'timezone' ? (
-          <label className="flex flex-col gap-2 font-semibold text-slate-900">
+          <label className="grid min-w-0 gap-2 font-semibold text-slate-900">
             Time Zone
             <select
-              className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
+              className="h-12 w-full min-w-0 rounded-2xl border border-slate-200 bg-white px-4 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
               value={value.timeZone}
               onChange={(event) => {
                 const nextTimeZone = event.target.value as SearchDraft['timeZone'];
@@ -98,11 +98,11 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
             </select>
           </label>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
-            <label className="flex flex-col gap-2 font-semibold text-slate-900">
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,11rem)]">
+            <label className="grid min-w-0 gap-2 font-semibold text-slate-900">
               City
               <input
-                className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
+                className="h-12 w-full min-w-0 rounded-2xl border border-slate-200 bg-white px-4 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
                 placeholder="Austin, Phoenix, Miami"
                 value={value.city}
                 onChange={(event) => {
@@ -116,10 +116,10 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
               />
             </label>
 
-            <label className="flex flex-col gap-2 font-semibold text-slate-900">
+            <label className="grid min-w-0 gap-2 font-semibold text-slate-900">
               State
               <select
-                className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
+                className="h-12 w-full min-w-0 rounded-2xl border border-slate-200 bg-white px-4 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
                 value={value.stateCode}
                 onChange={(event) => {
                   const nextStateCode = event.target.value as SearchDraft['stateCode'];
