@@ -80,6 +80,10 @@ const stateCodes: Record<string, string> = {
   'district of columbia': 'DC',
 };
 
+const stateNamesByCode = Object.fromEntries(
+  Object.entries(stateCodes).map(([name, code]) => [code, name]),
+) as Record<string, string>;
+
 export type NormalizedUsLocation = {
   mode: 'local' | 'nationwide' | 'timezone';
   label: string;
@@ -270,6 +274,38 @@ const isAcceptableMatch = (rawLocation: string, result: NominatimResult) => {
   return requiredLocationTokens.every((token) => cityTokens.includes(token));
 };
 
+const buildFallbackLocation = (rawLocation: string, error: unknown): NormalizedUsLocation => {
+  const trimmed = rawLocation.trim().replace(/\s+/g, ' ');
+  const cityStateMatch = trimmed.match(/^(.+?),\s*([A-Za-z]{2}|[A-Za-z][A-Za-z.\s'-]+)$/);
+
+  const city = cityStateMatch?.[1]?.trim() ?? trimmed;
+  const stateInput = cityStateMatch?.[2]?.trim() ?? trimmed;
+  const stateCode = toStateCode(stateInput);
+  const stateName = stateNamesByCode[stateCode] ?? stateInput;
+  const label = cityStateMatch && stateCode ? `${city}, ${stateCode}` : stateName || trimmed;
+
+  return {
+    mode: 'local',
+    label,
+    city: city || stateName || trimmed,
+    stateCode,
+    postalCode: undefined,
+    lat: 39.8283,
+    lon: -98.5795,
+    boundingBox: nationwideBoundingBox,
+    warnings: [
+      {
+        providerId: 'nominatim',
+        providerName: 'Nominatim',
+        message:
+          error instanceof Error
+            ? `${error.message} while normalizing "${trimmed}". Using a coarse fallback.`
+            : `Unable to normalize "${trimmed}". Using a coarse fallback.`,
+      },
+    ],
+  };
+};
+
 export const normalizeUsLocation = async (
   rawLocation: string,
 ): Promise<NormalizedUsLocation> => {
@@ -315,14 +351,20 @@ export const normalizeUsLocation = async (
     queryParams.featuretype = 'state';
   }
 
-  const response = await httpClient.get<NominatimResult[]>(
-    'https://nominatim.openstreetmap.org/search',
-    {
-      params: queryParams,
-      headers: nominatimHeaders,
-      timeout: 6000,
-    },
-  );
+  let response;
+
+  try {
+    response = await httpClient.get<NominatimResult[]>(
+      'https://nominatim.openstreetmap.org/search',
+      {
+        params: queryParams,
+        headers: nominatimHeaders,
+        timeout: 6000,
+      },
+    );
+  } catch (error) {
+    return buildFallbackLocation(rawLocation, error);
+  }
 
   const matches = response.data.filter(
     (result) =>

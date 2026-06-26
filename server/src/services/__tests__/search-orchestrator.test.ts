@@ -228,4 +228,49 @@ describe('createSearchService', () => {
     expect(osmCalls.length).toBeGreaterThan(1);
     expect(completed?.leads.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('keeps the job running when a regional seed fails to normalize', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+
+    const service = createSearchService({
+      idFactory: () => 'search-5',
+      normalizeLocation: vi.fn().mockImplementation(async (rawLocation: string) => {
+        if (rawLocation === 'Austin') {
+          return sampleLocation;
+        }
+
+        if (rawLocation === 'TX') {
+          return sampleLocation;
+        }
+
+        if (rawLocation === 'California') {
+          throw new Error('429 Too Many Requests');
+        }
+
+        return nationwideLocation;
+      }),
+      discoverGoogleLeads: vi.fn().mockResolvedValue([]),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'Dental Clinics',
+      city: 'USA',
+      count: 50,
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const result = await service.getSearch('search-5');
+
+    expect(result?.meta.status).toBe('complete');
+    expect(result?.meta.providerWarnings.some((warning) => warning.message.includes('California'))).toBe(true);
+  });
 });

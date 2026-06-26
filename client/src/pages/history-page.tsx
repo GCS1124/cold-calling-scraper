@@ -9,11 +9,11 @@ import {
   Search,
   Sparkles,
   TableProperties,
-  UserRound,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { SessionAction } from '../components/auth/session-action';
 import { useAuth } from '../hooks/use-auth';
 import { useSearchHistoryDetails } from '../hooks/use-search-history';
 import { downloadLeads, defaultExportColumns } from '../utils/export';
@@ -169,6 +169,15 @@ function LeadsPreviewTable({ leads }: { leads: Lead[] }) {
   );
 }
 
+function HistoryStatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
+      <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">{label}</p>
+      <p className="mt-3 text-3xl font-black tracking-[-0.04em] text-slate-950">{value}</p>
+    </div>
+  );
+}
+
 export function HistoryPage() {
   const auth = useAuth();
   const { items } = useSearchHistoryDetails(auth.user?.id);
@@ -263,38 +272,32 @@ export function HistoryPage() {
             <span className="hidden sm:inline">Search</span>
           </Link>
 
-          <Link
-            className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-            to="/"
-          >
-            <UserRound className="h-4 w-4" />
-            <span className="hidden sm:inline">Account</span>
-          </Link>
+          <SessionAction auth={auth} />
         </nav>
       </header>
 
       <section className="relative mx-auto grid max-w-7xl gap-6 px-4 pb-6 pt-3 md:px-8 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950 p-6 text-white shadow-[0_30px_100px_rgba(15,23,42,0.22)] md:p-8 lg:p-10">
-          <div className="pointer-events-none absolute inset-0">
-            <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-blue-500/30 blur-3xl" />
-            <div className="absolute bottom-[-8rem] left-[-6rem] h-80 w-80 rounded-full bg-cyan-400/20 blur-3xl" />
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(96,165,250,0.18),transparent_35%),linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)] bg-[size:auto,36px_36px,36px_36px]" />
-          </div>
+        <div className="overflow-hidden rounded-[2rem] border border-white/70 bg-white/90 p-6 shadow-[0_30px_100px_rgba(15,23,42,0.10)] backdrop-blur md:p-8 lg:p-10">
+          <div className="flex items-start justify-between gap-6">
+            <div className="max-w-3xl">
+              <p className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-blue-700">
+                <Clock3 className="h-3.5 w-3.5" />
+                Search history
+              </p>
 
-          <div className="relative">
-            <p className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-blue-100">
-              <Clock3 className="h-3.5 w-3.5" />
-              Search history
-            </p>
+              <h1 className="mt-6 max-w-3xl text-4xl font-black leading-[0.95] tracking-[-0.06em] text-slate-950 sm:text-5xl xl:text-6xl">
+                Reopen, review, and export past searches.
+              </h1>
 
-            <h1 className="mt-8 max-w-3xl text-5xl font-black leading-[0.92] tracking-[-0.06em] sm:text-6xl xl:text-7xl">
-              Reopen, review, and export past searches.
-            </h1>
+              <p className="mt-5 max-w-2xl text-base leading-7 text-slate-500 md:text-lg">
+                Every saved search stays organized with its location, requested count, saved leads,
+                and export-ready lead data.
+              </p>
+            </div>
 
-            <p className="mt-6 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
-              Every saved search stays organized with its location, requested count, saved leads,
-              and export-ready lead data.
-            </p>
+            <div className="hidden shrink-0 rounded-[1.5rem] bg-slate-50 p-4 text-blue-700 lg:flex">
+              <Sparkles className="h-6 w-6" />
+            </div>
           </div>
         </div>
 
@@ -331,26 +334,41 @@ export function HistoryPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-                Searches
-              </p>
-              <p className="mt-3 text-3xl font-black tracking-[-0.04em] text-slate-950">
-                {sortedItems.length}
-              </p>
+          <div className="rounded-[2rem] border border-slate-200 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
+              Saved searches
+            </p>
+
+            <div className="mt-4 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-slate-500">Library size</p>
+                <p className="mt-1 text-3xl font-black tracking-[-0.04em] text-slate-950">
+                  {sortedItems.length}
+                </p>
+              </div>
+
+              <Link
+                className="inline-flex h-11 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
+                to="/search"
+              >
+                New search
+                <ArrowRight className="h-4 w-4" />
+              </Link>
             </div>
 
-            <div className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-                Total leads
-              </p>
-              <p className="mt-3 text-3xl font-black tracking-[-0.04em] text-slate-950">
-                {totalLeadCount}
-              </p>
-            </div>
+            <p className="mt-4 text-sm leading-6 text-slate-500">
+              Your latest search stays selected here for export or review.
+            </p>
           </div>
         </div>
+      </section>
+
+      <section className="relative mx-auto grid max-w-7xl gap-4 px-4 pb-6 md:px-8 sm:grid-cols-2 xl:grid-cols-5">
+        <HistoryStatCard label="Searches" value={sortedItems.length} />
+        <HistoryStatCard label="Total leads" value={totalLeadCount} />
+        <HistoryStatCard label="Requested" value={selectedItem?.count ?? 0} />
+        <HistoryStatCard label="Email" value={selectedLeadStats.withEmail} />
+        <HistoryStatCard label="Phone" value={selectedLeadStats.withPhone} />
       </section>
 
       <section className="relative mx-auto grid max-w-7xl gap-6 px-4 pb-28 md:px-8 lg:grid-cols-[360px_minmax(0,1fr)]">

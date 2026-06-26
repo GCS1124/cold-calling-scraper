@@ -24,6 +24,8 @@ const children = [
   }),
 ];
 
+const [serverChild, clientChild] = children;
+
 let shuttingDown = false;
 
 const shutdown = (signal = 'SIGTERM') => {
@@ -54,6 +56,13 @@ for (const child of children) {
   child.on('exit', (code) => {
     if (shuttingDown) {
       process.exit(code ?? 0);
+      return;
+    }
+
+    if (child === clientChild && (code ?? 0) !== 0 && serverChild.exitCode === null) {
+      console.warn(
+        `client dev exited with code ${code ?? 0}; keeping the server running so /api stays available.`,
+      );
       return;
     }
 

@@ -94,6 +94,19 @@ describe('normalizeUsLocation', () => {
     );
   });
 
+  it('falls back to a coarse city/state location when normalization is rate-limited', async () => {
+    mockedHttpClient.get.mockRejectedValueOnce(new Error('Request failed with status code 429'));
+
+    const result = await normalizeUsLocation('Erie, PA');
+
+    expect(result.mode).toBe('local');
+    expect(result.label).toBe('Erie, PA');
+    expect(result.city).toBe('Erie');
+    expect(result.stateCode).toBe('PA');
+    expect(result.warnings[0]?.providerId).toBe('nominatim');
+    expect(result.warnings[0]?.message).toContain('429');
+  });
+
   it('rejects fuzzy non-place matches like amenities or roads', async () => {
     mockedHttpClient.get.mockResolvedValueOnce({
       data: [

@@ -8,7 +8,6 @@ import {
   MapPin,
   Search,
   Sparkles,
-  UserRound,
   Zap,
 } from 'lucide-react';
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
@@ -16,6 +15,7 @@ import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { ExportModal } from '../components/export/export-modal';
+import { SessionAction } from '../components/auth/session-action';
 import { FiltersPanel } from '../components/results/filters-panel';
 import { ResultsSummary } from '../components/results/results-summary';
 import { ResultsTable } from '../components/results/results-table';
@@ -282,20 +282,14 @@ export function HomePage({ searchApi }: HomePageProps) {
               <span className="hidden sm:inline">History</span>
             </Link>
 
-            <Link
-              className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-              to="/"
-            >
-              <UserRound className="h-4 w-4" />
-              <span className="hidden sm:inline">Account</span>
-            </Link>
+            <SessionAction auth={auth} />
           </nav>
         </header>
 
         <section className="relative mx-auto flex max-w-7xl justify-center px-4 pb-8 pt-3 md:px-8">
           <motion.div
             animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-[460px] rounded-[2rem] border border-white/70 bg-white/90 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] backdrop-blur-xl sm:p-5"
+            className="w-full max-w-[1280px] rounded-[2rem] border border-white/70 bg-white/90 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] backdrop-blur-xl sm:p-5"
             initial={{ opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.45, delay: 0.08 }}
           >

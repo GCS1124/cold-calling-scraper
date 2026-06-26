@@ -76,6 +76,15 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: s
   }
 };
 
+const buildNormalizationWarning = (seed: string, error: unknown) => ({
+  providerId: 'nominatim',
+  providerName: 'Nominatim',
+  message:
+    error instanceof Error
+      ? `${error.message} while normalizing ${seed}`
+      : `US location normalization failed for ${seed}`,
+});
+
 const rankDiscoveryCandidates = (leads: Lead[]) =>
   [...leads].sort((left, right) => {
     const leftSignal =
@@ -289,23 +298,22 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     const profile = resolveCategoryProfile(job.request.companyType);
     job.providerWarnings.push(...profile.warnings);
 
-    const discoveryLocations =
-      location.mode === 'nationwide'
-        ? [
-            location,
-            ...(await Promise.all(
-              nationwideStateQueries.map((seed) => normalizeLocation(seed)),
-            )),
-          ]
-        : [
-            location,
-            ...(location.stateCode
-              ? [await normalizeLocation(location.stateCode)]
-              : []),
-            ...(await Promise.all(
-              nationwideStateQueries.map((seed) => normalizeLocation(seed)),
-            )),
-          ];
+    const discoverySeeds =
+      location.mode === 'nationwide' ? [...nationwideStateQueries] : [];
+
+    const discoveryLocations = [location];
+    const normalizedSeeds = await Promise.all(
+      discoverySeeds.map(async (seed) => {
+        try {
+          return await normalizeLocation(seed);
+        } catch (error) {
+          job.providerWarnings.push(buildNormalizationWarning(seed, error));
+          return null;
+        }
+      }),
+    );
+
+    discoveryLocations.push(...normalizedSeeds.filter((entry): entry is NormalizedUsLocation => Boolean(entry)));
 
     for (const regionalLocation of discoveryLocations) {
       if (job.progress.foundCount >= job.request.count) {

@@ -3,13 +3,17 @@ import {
   Clock3,
   Sparkles,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 
 import { AuthPanel } from '../components/auth/auth-panel';
 import { useAuth } from '../hooks/use-auth';
 
 export function AuthPage() {
   const auth = useAuth();
+
+  if (auth.user) {
+    return <Navigate replace to="/search" />;
+  }
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-50 px-4 py-6 text-slate-950 sm:px-6 lg:px-8">
