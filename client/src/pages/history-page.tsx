@@ -442,7 +442,8 @@ export function HistoryPage() {
               </h1>
 
               <p className="mt-5 max-w-2xl text-base leading-7 text-slate-500 md:text-lg">
-                Track searches, saved lead counts, and exported results in one compact log.
+                Track {sortedItems.length} searches and {totalLeadCount} saved leads in one compact
+                log.
               </p>
             </div>
 

@@ -484,11 +484,13 @@ describe('App', () => {
       getSearch: vi.fn(),
     });
 
-    await waitForText(container, /reopen, review, and export past searches/i);
-    await waitForText(container, /Northstar Labs/i);
+    await waitForText(container, /search history/i);
+    await waitForText(container, /saved searches/i);
     expect(normalizedText(container)).toContain('Dental Clinics');
-    expect(normalizedText(container)).toContain('Northstar Labs');
-    expect(Array.from(container.querySelectorAll('button')).some((button) => /download/i.test(normalizedText(button)))).toBe(true);
+    expect(normalizedText(container)).toContain('Austin, TX');
+    expect(normalizedText(container)).toContain('Ready');
+    expect(normalizedText(container)).toContain('1 lead saved');
+    expect(Array.from(container.querySelectorAll('button')).some((button) => /export/i.test(normalizedText(button)))).toBe(true);
 
     await unmount();
   });
