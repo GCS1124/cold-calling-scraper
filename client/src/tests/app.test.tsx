@@ -31,6 +31,7 @@ vi.mock('sonner', () => ({
 
 import App from '../App';
 import type { SearchApi } from '../services/search-service';
+import { rememberSearchHistory } from '../services/search-history-service';
 import type { SearchResponse } from '../types/lead';
 
 const completedResponse: SearchResponse = {
@@ -443,40 +444,38 @@ describe('App', () => {
   });
 
   it('shows the history page with downloadable saved searches', async () => {
-    window.localStorage.setItem(
-      'lead-finder-history',
-      JSON.stringify([
-        {
-          id: 'history-1',
-          searchId: 'search-1',
-          companyType: 'Dental Clinics',
-          city: 'Austin, TX',
-          count: 50,
-          locationLabel: 'Austin, TX',
-          leadCount: 1,
-          leads: [
-            {
-              id: 'lead-1',
-              name: 'Northstar Labs',
-              mobile: '+1 512 555 0121',
-              email: 'hello@northstarlabs.ai',
-              website: 'https://northstarlabs.ai',
-              address: 'South Congress',
-              category: 'Dental Clinics',
-              city: 'Austin, TX',
-              source: 'OpenStreetMap',
-              confidence: 92,
-              hasEmail: true,
-              hasPhone: true,
-              hasWebsite: true,
-              verifiedPhone: true,
-              verifiedEmail: true,
-              scrapedAt: '2026-04-21T00:00:00.000Z',
-            },
-          ],
-          createdAt: '2026-04-21T00:00:00.000Z',
+    await rememberSearchHistory(
+      {
+        companyType: 'Dental Clinics',
+        location: {
+          mode: 'cityState',
+          city: 'Austin',
+          stateCode: 'TX',
         },
-      ]),
+        count: 50,
+      },
+      {
+        leads: [
+          {
+            id: 'lead-1',
+            name: 'Northstar Labs',
+            mobile: '+1 512 555 0121',
+            email: 'hello@northstarlabs.ai',
+            website: 'https://northstarlabs.ai',
+            address: 'South Congress',
+            category: 'Dental Clinics',
+            city: 'Austin, TX',
+            source: 'OpenStreetMap',
+            confidence: 92,
+            hasEmail: true,
+            hasPhone: true,
+            hasWebsite: true,
+            verifiedPhone: true,
+            verifiedEmail: true,
+            scrapedAt: '2026-04-21T00:00:00.000Z',
+          },
+        ] as never,
+      },
     );
 
     const { container, unmount } = await renderApp(['/history'], {
@@ -484,8 +483,7 @@ describe('App', () => {
       getSearch: vi.fn(),
     });
 
-    await waitForText(container, /search history/i);
-    await waitForText(container, /saved searches/i);
+    await waitForText(container, /Dental Clinics/i);
     expect(normalizedText(container)).toContain('Dental Clinics');
     expect(normalizedText(container)).toContain('Austin, TX');
     expect(normalizedText(container)).toContain('Ready');

@@ -160,7 +160,7 @@ function SearchHistoryTable({
       <div className="overflow-x-auto">
         <table
           aria-label="Saved search history"
-          className="min-w-[980px] text-left text-sm text-slate-700"
+          className="min-w-full text-left text-sm text-slate-700"
         >
           <thead className="bg-slate-50 text-xs uppercase tracking-[0.18em] text-slate-400">
             <tr>
