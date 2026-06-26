@@ -7,7 +7,6 @@ import {
   LoaderCircle,
   MapPin,
   Search,
-  ShieldCheck,
   Sparkles,
   UserRound,
   Zap,
@@ -293,69 +292,10 @@ export function HomePage({ searchApi }: HomePageProps) {
           </nav>
         </header>
 
-        <section className="relative mx-auto grid max-w-7xl gap-6 px-4 pb-8 pt-3 md:px-8 lg:grid-cols-[minmax(0,1fr)_460px] lg:items-stretch">
-          <motion.div
-            animate={{ opacity: 1, y: 0 }}
-            className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950 p-6 text-white shadow-[0_30px_100px_rgba(15,23,42,0.22)] md:p-8 lg:p-10"
-            initial={{ opacity: 0, y: 18 }}
-            transition={{ duration: 0.45 }}
-          >
-            <div className="pointer-events-none absolute inset-0">
-              <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-blue-500/30 blur-3xl" />
-              <div className="absolute bottom-[-8rem] left-[-6rem] h-80 w-80 rounded-full bg-cyan-400/20 blur-3xl" />
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(96,165,250,0.18),transparent_35%),linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)] bg-[size:auto,36px_36px,36px_36px]" />
-            </div>
-
-            <div className="relative flex h-full flex-col justify-between gap-10">
-              <div>
-                <p className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-blue-100">
-                  <Zap className="h-3.5 w-3.5" />
-                  Lead Finder Pro
-                </p>
-
-                <h1 className="mt-8 max-w-3xl text-5xl font-black leading-[0.92] tracking-[-0.06em] sm:text-6xl xl:text-7xl">
-                  Find qualified local leads faster.
-                </h1>
-
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-400/15 text-blue-200">
-                    <Search className="h-5 w-5" />
-                  </div>
-                  <p className="mt-4 text-sm font-bold text-white">Structured search</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-400">
-                    Category and location-based discovery.
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-400/15 text-cyan-200">
-                    <ShieldCheck className="h-5 w-5" />
-                  </div>
-                  <p className="mt-4 text-sm font-bold text-white">Quality filters</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-400">
-                    Focus on email, phone, and website coverage.
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-400/15 text-indigo-200">
-                    <Download className="h-5 w-5" />
-                  </div>
-                  <p className="mt-4 text-sm font-bold text-white">Excel export</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-400">
-                    Download selected or visible rows.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-
+        <section className="relative mx-auto flex max-w-7xl justify-center px-4 pb-8 pt-3 md:px-8">
           <motion.div
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-[2rem] border border-white/70 bg-white/90 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] backdrop-blur-xl sm:p-5"
+            className="w-full max-w-[460px] rounded-[2rem] border border-white/70 bg-white/90 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] backdrop-blur-xl sm:p-5"
             initial={{ opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.45, delay: 0.08 }}
           >
