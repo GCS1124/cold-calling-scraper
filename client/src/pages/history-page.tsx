@@ -1,23 +1,24 @@
 import {
+  AlertTriangle,
   ArrowRight,
   CalendarClock,
   Clock3,
+  Copy,
   Download,
-  ExternalLink,
-  FileSpreadsheet,
   MapPin,
+  Plus,
   Search,
   Sparkles,
   TableProperties,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 
 import { SessionAction } from '../components/auth/session-action';
 import { useAuth } from '../hooks/use-auth';
-import { useSearchHistoryDetails } from '../hooks/use-search-history';
+import { useSearchHistoryDetails, type SearchHistoryItem } from '../hooks/use-search-history';
 import { downloadLeads, defaultExportColumns } from '../utils/export';
-import type { Lead } from '../types/lead';
 
 const formatDate = (value?: string | null) => {
   if (!value) return '—';
@@ -51,114 +52,237 @@ const buildFileName = (
   return parts.join('-') || 'lead-finder-history';
 };
 
-const getWebsiteHref = (website: string) =>
-  /^https?:\/\//i.test(website) ? website : `https://${website}`;
+const formatLeadLabel = (count: number) => `${count} lead${count === 1 ? '' : 's'}`;
 
-const getWebsiteLabel = (website: string) =>
-  website.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+const isWithinDays = (value: string, days: number) => {
+  const timestamp = new Date(value).getTime();
 
-function LeadsPreviewTable({ leads }: { leads: Lead[] }) {
+  if (Number.isNaN(timestamp)) {
+    return false;
+  }
+
+  return Date.now() - timestamp <= days * 24 * 60 * 60 * 1000;
+};
+
+type HistoryTab = 'all' | 'week' | 'ready' | 'empty';
+
+function HistoryMetricCard({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number;
+}) {
   return (
-    <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
+    <div className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{label}</p>
+          <p className="mt-4 text-4xl font-black tracking-[-0.05em] text-slate-950">{value}</p>
+        </div>
+
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+          {icon}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HistoryTabButton({
+  active,
+  count,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  count: number;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={[
+        'inline-flex h-12 items-center gap-2 rounded-2xl border px-4 text-sm font-medium transition',
+        active
+          ? 'border-slate-950 bg-slate-950 text-white shadow-[0_10px_25px_rgba(15,23,42,0.15)]'
+          : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:text-blue-700',
+      ].join(' ')}
+      onClick={onClick}
+      type="button"
+    >
+      <span>{label}</span>
+      <span
+        className={[
+          'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+          active ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-500',
+        ].join(' ')}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function SearchHistoryTable({
+  items,
+  onCopySummary,
+  onExportSearch,
+  onResetFilters,
+  hasAnyItems,
+}: {
+  hasAnyItems: boolean;
+  items: SearchHistoryItem[];
+  onCopySummary: (item: SearchHistoryItem) => void;
+  onExportSearch: (item: SearchHistoryItem) => void;
+  onResetFilters: () => void;
+}) {
+  return (
+    <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
       <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
             <TableProperties className="h-3.5 w-3.5" />
-            Lead preview
+            Saved searches
           </p>
           <h2 className="mt-2 text-xl font-black tracking-[-0.035em] text-slate-950">
-            Saved lead list
+            Search log
           </h2>
         </div>
 
         <span className="w-fit rounded-2xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700">
-          {leads.length} {leads.length === 1 ? 'lead' : 'leads'}
+          {items.length} {items.length === 1 ? 'search' : 'searches'}
         </span>
       </div>
 
       <div className="overflow-x-auto">
         <table
-          aria-label="Saved search leads"
-          className="min-w-full text-left text-sm text-slate-700"
+          aria-label="Saved search history"
+          className="min-w-[980px] text-left text-sm text-slate-700"
         >
           <thead className="bg-slate-50 text-xs uppercase tracking-[0.18em] text-slate-400">
             <tr>
-              <th className="whitespace-nowrap px-5 py-4 font-bold">Company</th>
-              <th className="whitespace-nowrap px-5 py-4 font-bold">Phone</th>
-              <th className="whitespace-nowrap px-5 py-4 font-bold">Email</th>
-              <th className="whitespace-nowrap px-5 py-4 font-bold">Website</th>
-              <th className="whitespace-nowrap px-5 py-4 font-bold">Source</th>
+              <th className="whitespace-nowrap px-5 py-4 font-bold">Search</th>
+              <th className="whitespace-nowrap px-5 py-4 font-bold">Location</th>
+              <th className="whitespace-nowrap px-5 py-4 font-bold">Requested</th>
+              <th className="whitespace-nowrap px-5 py-4 font-bold">Leads</th>
+              <th className="whitespace-nowrap px-5 py-4 font-bold">Saved</th>
+              <th className="whitespace-nowrap px-5 py-4 font-bold">Status</th>
+              <th className="whitespace-nowrap px-5 py-4 font-bold text-right">Actions</th>
             </tr>
           </thead>
 
           <tbody>
-            {leads.map((lead) => (
-              <tr
-                className="border-t border-slate-100 transition hover:bg-slate-50/80"
-                key={lead.id}
-              >
-                <td className="min-w-[240px] px-5 py-4">
-                  <div className="font-bold text-slate-950">{lead.name}</div>
-                  <div className="mt-1 max-w-sm text-xs leading-5 text-slate-500">
-                    {lead.address || 'No address saved'}
-                  </div>
-                </td>
+            {items.map((item) => {
+              const ready = item.leadCount > 0;
 
-                <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-700">
-                  {lead.mobile || '—'}
-                </td>
+              return (
+                <tr className="border-t border-slate-100 transition hover:bg-slate-50/80" key={item.id}>
+                  <td className="px-5 py-4">
+                    <div className="font-bold text-slate-950">
+                      {item.companyType || 'Untitled search'}
+                    </div>
+                    <div className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
+                      {ready ? `${formatLeadLabel(item.leadCount)} saved` : 'No leads saved'}
+                    </div>
+                  </td>
 
-                <td className="whitespace-nowrap px-5 py-4">
-                  {lead.email ? (
-                    <a
-                      className="font-medium text-blue-700 hover:text-blue-800"
-                      href={`mailto:${lead.email}`}
+                  <td className="px-5 py-4">
+                    <div className="inline-flex max-w-[260px] items-center gap-1.5 text-slate-700">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                      <span className="truncate">
+                        {item.locationLabel ?? item.city ?? 'Unknown location'}
+                      </span>
+                    </div>
+                  </td>
+
+                  <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-700">
+                    {item.count}
+                  </td>
+
+                  <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-700">
+                    {item.leadCount}
+                  </td>
+
+                  <td className="whitespace-nowrap px-5 py-4 text-slate-600">
+                    {formatDate(item.createdAt)}
+                  </td>
+
+                  <td className="whitespace-nowrap px-5 py-4">
+                    <span
+                      className={[
+                        'rounded-full px-3 py-1 text-xs font-bold',
+                        ready ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500',
+                      ].join(' ')}
                     >
-                      {lead.email}
-                    </a>
-                  ) : (
-                    <span className="text-slate-400">—</span>
-                  )}
-                </td>
+                      {ready ? 'Ready' : 'Empty'}
+                    </span>
+                  </td>
 
-                <td className="min-w-[180px] px-5 py-4">
-                  {lead.website ? (
-                    <a
-                      className="inline-flex items-center gap-1.5 font-medium text-blue-700 hover:text-blue-800"
-                      href={getWebsiteHref(lead.website)}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <span>{getWebsiteLabel(lead.website)}</span>
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </a>
-                  ) : (
-                    <span className="text-slate-400">—</span>
-                  )}
-                </td>
+                  <td className="px-5 py-4">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        aria-label={`Copy summary for ${item.companyType || 'saved search'}`}
+                        className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-blue-200 hover:text-blue-700"
+                        onClick={() => onCopySummary(item)}
+                        type="button"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
 
-                <td className="whitespace-nowrap px-5 py-4">
-                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-                    {lead.source}
-                  </span>
-                </td>
-              </tr>
-            ))}
+                      <button
+                        aria-label={`Export ${item.companyType || 'saved search'}`}
+                        className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={!ready}
+                        onClick={() => onExportSearch(item)}
+                        type="button"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
 
-            {!leads.length ? (
+            {!items.length ? (
               <tr>
-                <td className="px-5 py-16 text-center" colSpan={5}>
+                <td className="px-5 py-16 text-center" colSpan={7}>
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
                     <Search className="h-7 w-7" />
                   </div>
 
                   <h3 className="mt-5 text-lg font-black tracking-[-0.03em] text-slate-950">
-                    No leads saved
+                    {hasAnyItems ? 'No searches match these filters' : 'No saved searches yet'}
                   </h3>
 
                   <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500">
-                    This saved search does not contain stored leads.
+                    {hasAnyItems
+                      ? 'Clear the filters to see every saved search again.'
+                      : 'Run a search first. Saved searches will appear here automatically.'}
                   </p>
+
+                  <div className="mt-5 flex flex-wrap justify-center gap-3">
+                    {hasAnyItems ? (
+                      <button
+                        className="inline-flex h-11 items-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-blue-700"
+                        onClick={onResetFilters}
+                        type="button"
+                      >
+                        Reset filters
+                      </button>
+                    ) : null}
+
+                    <Link
+                      className="inline-flex h-11 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
+                      to="/search"
+                    >
+                      Start searching
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </div>
                 </td>
               </tr>
             ) : null}
@@ -169,20 +293,11 @@ function LeadsPreviewTable({ leads }: { leads: Lead[] }) {
   );
 }
 
-function HistoryStatCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
-      <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">{label}</p>
-      <p className="mt-3 text-3xl font-black tracking-[-0.04em] text-slate-950">{value}</p>
-    </div>
-  );
-}
-
 export function HistoryPage() {
   const auth = useAuth();
   const { items } = useSearchHistoryDetails(auth.user?.id);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [format, setFormat] = useState<'xlsx' | 'csv'>('xlsx');
+  const [activeTab, setActiveTab] = useState<HistoryTab>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const sortedItems = useMemo(() => {
     return [...items].sort(
@@ -191,57 +306,94 @@ export function HistoryPage() {
     );
   }, [items]);
 
-  useEffect(() => {
-    if (!sortedItems.length) {
-      setSelectedId(null);
-      return;
-    }
-
-    if (!selectedId || !sortedItems.some((item) => item.id === selectedId)) {
-      setSelectedId(sortedItems[0]?.id ?? null);
-    }
-  }, [sortedItems, selectedId]);
-
-  const selectedItem = useMemo(
-    () => sortedItems.find((item) => item.id === selectedId) ?? sortedItems[0] ?? null,
-    [sortedItems, selectedId],
-  );
-
-  const selectedLeads = useMemo(() => selectedItem?.leads ?? [], [selectedItem]);
-
   const totalLeadCount = useMemo(
-    () =>
-      sortedItems.reduce(
-        (total, item) => total + (item.leadCount ?? item.leads?.length ?? 0),
-        0,
-      ),
+    () => sortedItems.reduce((total, item) => total + (item.leadCount ?? item.leads.length), 0),
     [sortedItems],
   );
 
-  const selectedLeadStats = useMemo(
-    () => ({
-      withEmail: selectedLeads.filter((lead) => lead.hasEmail || Boolean(lead.email)).length,
-      withPhone: selectedLeads.filter((lead) => lead.hasPhone || Boolean(lead.mobile)).length,
-      withWebsite: selectedLeads.filter((lead) => lead.hasWebsite || Boolean(lead.website))
-        .length,
-    }),
-    [selectedLeads],
+  const todayCount = useMemo(
+    () => sortedItems.filter((item) => isWithinDays(item.createdAt, 1)).length,
+    [sortedItems],
   );
 
-  const handleDownload = () => {
-    if (!selectedItem?.leads.length) {
+  const weekCount = useMemo(
+    () => sortedItems.filter((item) => isWithinDays(item.createdAt, 7)).length,
+    [sortedItems],
+  );
+
+  const monthCount = useMemo(
+    () => sortedItems.filter((item) => isWithinDays(item.createdAt, 30)).length,
+    [sortedItems],
+  );
+
+  const emptyCount = useMemo(
+    () => sortedItems.filter((item) => item.leadCount === 0).length,
+    [sortedItems],
+  );
+
+  const readyCount = sortedItems.length - emptyCount;
+
+  const visibleItems = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+
+    return sortedItems.filter((item) => {
+      if (activeTab === 'week' && !isWithinDays(item.createdAt, 7)) {
+        return false;
+      }
+
+      if (activeTab === 'ready' && item.leadCount === 0) {
+        return false;
+      }
+
+      if (activeTab === 'empty' && item.leadCount > 0) {
+        return false;
+      }
+
+      if (!normalizedQuery) {
+        return true;
+      }
+
+      const haystack = [
+        item.companyType,
+        item.locationLabel,
+        item.city,
+        item.searchId ?? '',
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(normalizedQuery);
+    });
+  }, [activeTab, searchQuery, sortedItems]);
+
+  const handleExportSearch = (item: SearchHistoryItem) => {
+    if (!item.leads.length) {
+      toast.error('No leads are saved for this search');
       return;
     }
 
-    downloadLeads(selectedItem.leads, {
-      fileName: buildFileName(
-        selectedItem.companyType,
-        selectedItem.locationLabel,
-        selectedItem.createdAt,
-      ),
-      format,
+    downloadLeads(item.leads, {
+      fileName: buildFileName(item.companyType, item.locationLabel, item.createdAt),
+      format: 'xlsx',
       columns: [...defaultExportColumns],
     });
+
+    toast.success('Export started');
+  };
+
+  const handleCopySummary = async (item: SearchHistoryItem) => {
+    const summary = [
+      item.companyType || 'Untitled search',
+      item.locationLabel ?? item.city ?? 'Unknown location',
+      formatLeadLabel(item.leadCount),
+    ].join(' · ');
+
+    try {
+      await navigator.clipboard.writeText(summary);
+      toast.success('Search summary copied');
+    } catch {
+      toast.error('Copy failed');
+    }
   };
 
   return (
@@ -276,9 +428,9 @@ export function HistoryPage() {
         </nav>
       </header>
 
-      <section className="relative mx-auto grid max-w-7xl gap-6 px-4 pb-6 pt-3 md:px-8 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <section className="relative mx-auto flex max-w-7xl flex-col gap-6 px-4 pb-6 pt-3 md:px-8">
         <div className="overflow-hidden rounded-[2rem] border border-white/70 bg-white/90 p-6 shadow-[0_30px_100px_rgba(15,23,42,0.10)] backdrop-blur md:p-8 lg:p-10">
-          <div className="flex items-start justify-between gap-6">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
               <p className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-blue-700">
                 <Clock3 className="h-3.5 w-3.5" />
@@ -290,274 +442,89 @@ export function HistoryPage() {
               </h1>
 
               <p className="mt-5 max-w-2xl text-base leading-7 text-slate-500 md:text-lg">
-                Every saved search stays organized with its location, requested count, saved leads,
-                and export-ready lead data.
+                Track searches, saved lead counts, and exported results in one compact log.
               </p>
             </div>
 
-            <div className="hidden shrink-0 rounded-[1.5rem] bg-slate-50 p-4 text-blue-700 lg:flex">
-              <Sparkles className="h-6 w-6" />
-            </div>
+            <Link
+              className="inline-flex h-12 items-center gap-2 self-start rounded-2xl bg-blue-600 px-5 text-sm font-bold text-white shadow-[0_18px_50px_rgba(37,99,235,0.24)] transition hover:bg-blue-700"
+              to="/search"
+            >
+              <Plus className="h-4 w-4" />
+              New search
+            </Link>
           </div>
         </div>
 
-        <div className="grid gap-4">
-          <div className="rounded-[2rem] border border-white/70 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)] backdrop-blur">
-            <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-blue-700">
-              <FileSpreadsheet className="h-3.5 w-3.5" />
-              Export selected search
-            </p>
-
-            <div className="mt-5 flex items-center gap-3">
-              <select
-                className="h-12 flex-1 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                onChange={(event) => setFormat(event.target.value as 'xlsx' | 'csv')}
-                value={format}
-              >
-                <option value="xlsx">Excel</option>
-                <option value="csv">CSV</option>
-              </select>
-
-              <button
-                className="inline-flex h-12 items-center gap-2 rounded-2xl bg-emerald-600 px-4 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
-                disabled={!selectedLeads.length}
-                onClick={handleDownload}
-                type="button"
-              >
-                <Download className="h-4 w-4" />
-                Download
-              </button>
-            </div>
-
-            <p className="mt-4 text-sm leading-6 text-slate-500">
-              Download the currently selected saved search in your preferred format.
-            </p>
-          </div>
-
-          <div className="rounded-[2rem] border border-slate-200 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
-              Saved searches
-            </p>
-
-            <div className="mt-4 flex items-end justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold text-slate-500">Library size</p>
-                <p className="mt-1 text-3xl font-black tracking-[-0.04em] text-slate-950">
-                  {sortedItems.length}
-                </p>
-              </div>
-
-              <Link
-                className="inline-flex h-11 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
-                to="/search"
-              >
-                New search
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
-
-            <p className="mt-4 text-sm leading-6 text-slate-500">
-              Your latest search stays selected here for export or review.
-            </p>
-          </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <HistoryMetricCard icon={<CalendarClock className="h-5 w-5" />} label="Today" value={todayCount} />
+          <HistoryMetricCard icon={<Search className="h-5 w-5" />} label="This week" value={weekCount} />
+          <HistoryMetricCard icon={<Sparkles className="h-5 w-5" />} label="This month" value={monthCount} />
+          <HistoryMetricCard
+            icon={<AlertTriangle className="h-5 w-5" />}
+            label="Empty searches"
+            value={emptyCount}
+          />
         </div>
-      </section>
 
-      <section className="relative mx-auto grid max-w-7xl gap-4 px-4 pb-6 md:px-8 sm:grid-cols-2 xl:grid-cols-5">
-        <HistoryStatCard label="Searches" value={sortedItems.length} />
-        <HistoryStatCard label="Total leads" value={totalLeadCount} />
-        <HistoryStatCard label="Requested" value={selectedItem?.count ?? 0} />
-        <HistoryStatCard label="Email" value={selectedLeadStats.withEmail} />
-        <HistoryStatCard label="Phone" value={selectedLeadStats.withPhone} />
-      </section>
-
-      <section className="relative mx-auto grid max-w-7xl gap-6 px-4 pb-28 md:px-8 lg:grid-cols-[360px_minmax(0,1fr)]">
-        <aside className="rounded-[2rem] border border-slate-200 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur lg:sticky lg:top-6 lg:self-start">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
-                Search list
-              </p>
-              <h2 className="mt-2 text-xl font-black tracking-[-0.035em] text-slate-950">
-                Saved searches
-              </h2>
-            </div>
-
-            <span className="rounded-2xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700">
-              {sortedItems.length}
-            </span>
+        <div className="rounded-[2rem] border border-slate-200 bg-white/95 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
+          <div className="flex flex-wrap gap-3">
+            <HistoryTabButton
+              active={activeTab === 'all'}
+              count={sortedItems.length}
+              label="All searches"
+              onClick={() => setActiveTab('all')}
+            />
+            <HistoryTabButton
+              active={activeTab === 'week'}
+              count={weekCount}
+              label="This week"
+              onClick={() => setActiveTab('week')}
+            />
+            <HistoryTabButton
+              active={activeTab === 'ready'}
+              count={readyCount}
+              label="Ready to export"
+              onClick={() => setActiveTab('ready')}
+            />
+            <HistoryTabButton
+              active={activeTab === 'empty'}
+              count={emptyCount}
+              label="Empty"
+              onClick={() => setActiveTab('empty')}
+            />
           </div>
 
-          <div className="max-h-[680px] space-y-3 overflow-y-auto pr-1">
-            {sortedItems.map((item) => {
-              const active = item.id === selectedItem?.id;
-
-              return (
-                <button
-                  className={[
-                    'group w-full rounded-[1.4rem] border px-4 py-4 text-left transition',
-                    active
-                      ? 'border-blue-200 bg-blue-50 shadow-[0_16px_40px_rgba(37,99,235,0.12)]'
-                      : 'border-slate-200 bg-slate-50/80 hover:border-blue-200 hover:bg-white',
-                  ].join(' ')}
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                  type="button"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="truncate font-black text-slate-950">
-                        {item.companyType || 'Untitled search'}
-                      </p>
-
-                      <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-600">
-                        <MapPin className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">
-                          {item.locationLabel ?? item.city ?? 'Unknown location'}
-                        </span>
-                      </p>
-                    </div>
-
-                    <span
-                      className={[
-                        'shrink-0 rounded-full px-2.5 py-1 text-xs font-bold',
-                        active
-                          ? 'bg-white text-blue-700'
-                          : 'bg-white text-slate-500 group-hover:text-blue-700',
-                      ].join(' ')}
-                    >
-                      {item.leadCount} leads
-                    </span>
-                  </div>
-
-                  <div className="mt-4 flex items-center justify-between gap-3">
-                    <span className="text-xs font-semibold text-slate-500">
-                      {item.count} requested
-                    </span>
-
-                    <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
-                      <Clock3 className="h-3.5 w-3.5" />
-                      {formatDate(item.createdAt)}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-
-            {!sortedItems.length ? (
-              <div className="rounded-[1.5rem] border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-slate-500">
-                  <Search className="h-6 w-6" />
-                </div>
-
-                <h3 className="mt-4 font-black tracking-[-0.03em] text-slate-950">
-                  No saved searches yet
-                </h3>
-
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Run a search first. Completed searches will appear here automatically.
-                </p>
-
-                <Link
-                  className="mt-5 inline-flex h-11 items-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-blue-700"
-                  to="/search"
-                >
-                  Start searching
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </div>
-            ) : null}
-          </div>
-        </aside>
-
-        <div className="space-y-6">
-          <section className="rounded-[2rem] border border-slate-200 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur sm:p-6">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
-                  Search details
-                </p>
-
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <h2 className="text-3xl font-black tracking-[-0.045em] text-slate-950">
-                    {selectedItem?.companyType ?? 'No search selected'}
-                  </h2>
-
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600">
-                    <MapPin className="h-3.5 w-3.5" />
-                    {selectedItem?.locationLabel ?? selectedItem?.city ?? 'Select a search'}
-                  </span>
-                </div>
-
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-                  Review the stored leads from this search or download the full saved result set
-                  again.
-                </p>
-              </div>
-
-              <button
-                className="inline-flex h-12 w-fit items-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-bold text-white shadow-lg shadow-slate-900/15 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
-                disabled={!selectedLeads.length}
-                onClick={handleDownload}
-                type="button"
-              >
-                <Download className="h-4 w-4" />
-                Export
-              </button>
-            </div>
-
-            <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <div className="rounded-[1.35rem] border border-slate-200 bg-slate-50 px-4 py-4">
-                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
-                  Requested
-                </p>
-                <p className="mt-2 text-2xl font-black tracking-[-0.04em] text-slate-950">
-                  {selectedItem?.count ?? 0}
-                </p>
-              </div>
-
-              <div className="rounded-[1.35rem] border border-slate-200 bg-slate-50 px-4 py-4">
-                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
-                  Leads
-                </p>
-                <p className="mt-2 text-2xl font-black tracking-[-0.04em] text-slate-950">
-                  {selectedItem?.leadCount ?? 0}
-                </p>
-              </div>
-
-              <div className="rounded-[1.35rem] border border-slate-200 bg-slate-50 px-4 py-4">
-                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
-                  Email
-                </p>
-                <p className="mt-2 text-2xl font-black tracking-[-0.04em] text-slate-950">
-                  {selectedLeadStats.withEmail}
-                </p>
-              </div>
-
-              <div className="rounded-[1.35rem] border border-slate-200 bg-slate-50 px-4 py-4">
-                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
-                  Phone
-                </p>
-                <p className="mt-2 text-2xl font-black tracking-[-0.04em] text-slate-950">
-                  {selectedLeadStats.withPhone}
-                </p>
-              </div>
-
-              <div className="rounded-[1.35rem] border border-slate-200 bg-slate-50 px-4 py-4">
-                <p className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
-                  <CalendarClock className="h-3.5 w-3.5" />
-                  Saved
-                </p>
-                <p className="mt-2 text-sm font-black leading-6 text-slate-950">
-                  {selectedItem ? formatDate(selectedItem.createdAt) : '—'}
-                </p>
-              </div>
-            </div>
-          </section>
-
-          <LeadsPreviewTable leads={selectedLeads} />
+          <label className="relative mt-5 block">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-11 text-sm font-medium text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search by company or location"
+              value={searchQuery}
+            />
+          </label>
         </div>
+
+        <SearchHistoryTable
+          hasAnyItems={sortedItems.length > 0}
+          items={visibleItems}
+          onCopySummary={(item) => void handleCopySummary(item)}
+          onExportSearch={(item) => void handleExportSearch(item)}
+          onResetFilters={() => {
+            setActiveTab('all');
+            setSearchQuery('');
+          }}
+        />
       </section>
+
+      <Link
+        aria-label="New search"
+        className="fixed bottom-5 right-5 z-40 hidden h-16 w-16 items-center justify-center rounded-full bg-blue-600 text-white shadow-[0_24px_60px_rgba(37,99,235,0.35)] transition hover:bg-blue-700 lg:flex"
+        to="/search"
+      >
+        <Plus className="h-6 w-6" />
+      </Link>
     </main>
   );
 }
