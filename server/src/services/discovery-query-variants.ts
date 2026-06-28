@@ -43,6 +43,8 @@ const replaceTokens = (value: string, replacements: Array<[RegExp, string[]]>) =
 
 const buildCategoryTerms = (companyType: string, profile: CategoryProfile) => {
   const normalized = companyType.trim();
+  const normalizedKey = normalized.toLowerCase();
+  const profileKey = profile.label.trim().toLowerCase();
   const terms = new Set<string>();
 
   if (normalized) {
@@ -50,6 +52,13 @@ const buildCategoryTerms = (companyType: string, profile: CategoryProfile) => {
   }
   if (profile.label && profile.label.trim()) {
     terms.add(profile.label.trim());
+  }
+
+  for (const synonym of serviceSynonyms[normalizedKey] ?? []) {
+    terms.add(synonym);
+  }
+  for (const synonym of serviceSynonyms[profileKey] ?? []) {
+    terms.add(synonym);
   }
 
   const profileTerms = unique(profile.searchTerms ?? []);
@@ -70,7 +79,7 @@ const buildCategoryTerms = (companyType: string, profile: CategoryProfile) => {
     terms.add(variant);
   }
 
-  return unique([...terms]).slice(0, 4);
+  return unique([...terms]).slice(0, 8);
 };
 
 const buildLocationTerms = (location: NormalizedUsLocation) => {
@@ -80,11 +89,13 @@ const buildLocationTerms = (location: NormalizedUsLocation) => {
 
   const variants = [
     location.label,
+    location.city && location.stateCode ? `${location.city} ${location.stateCode}` : '',
+    location.city && location.stateCode ? `${location.city}, ${location.stateCode}` : '',
     location.city && location.city !== location.label ? location.city : '',
     location.stateCode,
   ];
 
-  return unique(variants).slice(0, 2);
+  return unique(variants).slice(0, 5);
 };
 
 export const buildDiscoveryQueryVariants = (
@@ -99,12 +110,15 @@ export const buildDiscoveryQueryVariants = (
   for (const categoryTerm of categoryTerms) {
     for (const locationTerm of locationTerms) {
       queries.push(`${categoryTerm} in ${locationTerm}`);
+      queries.push(`${categoryTerm} ${locationTerm}`);
+      queries.push(`${categoryTerm} near ${locationTerm}`);
     }
   }
 
   if (location.mode !== 'nationwide' && location.city && location.city !== location.label) {
     queries.push(`${categoryTerms[0] ?? companyType.trim()} near ${location.city}`);
+    queries.push(`${categoryTerms[0] ?? companyType.trim()} in ${location.city}`);
   }
 
-  return unique(queries).slice(0, 6);
+  return unique(queries).slice(0, 16);
 };

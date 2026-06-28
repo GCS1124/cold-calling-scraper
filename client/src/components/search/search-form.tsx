@@ -29,8 +29,9 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
         <div className="relative">
           <input
             className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 pr-11 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
+            aria-describedby="company-type-help"
             list="company-type-options"
-            placeholder="dentist, roofer, hvac, law firm"
+            placeholder="dentist, plumber, roofer, HVAC contractor"
             value={value.companyType}
             onChange={(event) => {
               const nextCompanyType = event.target.value;
@@ -42,6 +43,10 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
             }}
           />
         </div>
+        <p id="company-type-help" className="text-xs font-normal leading-5 text-slate-500">
+          Tailored to Google Business listings: try dentist, orthodontist, plumber, roofer, HVAC
+          contractor, real estate agent, attorney, urgent care, mechanic, or commercial cleaning.
+        </p>
       </label>
 
       <fieldset className="space-y-3 text-sm font-semibold text-slate-900">

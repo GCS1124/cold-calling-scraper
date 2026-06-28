@@ -139,6 +139,25 @@ const waitingResponse: SearchResponse = {
   },
 };
 
+const queuedResponse: SearchResponse = {
+  ...waitingResponse,
+  searchId: 'search-queued',
+  meta: {
+    ...waitingResponse.meta,
+    status: 'queued',
+    progress: {
+      ...waitingResponse.meta.progress,
+      discovered: 0,
+      enriched: 0,
+      totalCandidates: 0,
+      foundCount: 0,
+      currentSource: 'Queued',
+      batchesCompleted: 0,
+      estimatedRemaining: 50,
+    },
+  },
+};
+
 const cleanupTasks: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
@@ -363,10 +382,10 @@ describe('App', () => {
       count: 50,
     });
 
-    await waitForText(container, /search complete/i, 6000);
+    await waitForText(container, /discovery complete/i, 6000);
     expect(normalizedText(container)).toContain('2 visible leads');
     expect(normalizedText(container)).toContain('Eastern Time');
-    expect(normalizedText(container)).toContain('Search complete');
+    expect(normalizedText(container)).toContain('Discovery complete');
 
     await unmount();
   });
@@ -395,9 +414,9 @@ describe('App', () => {
       count: 50,
     });
 
-    await waitForText(container, /search complete/i, 6000);
+    await waitForText(container, /discovery complete/i, 6000);
     expect(normalizedText(container)).toContain('Austin, TX');
-    expect(normalizedText(container)).toContain('Search complete');
+    expect(normalizedText(container)).toContain('Discovery complete');
 
     await unmount();
   });
@@ -414,7 +433,7 @@ describe('App', () => {
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
 
-    await waitForText(container, /search complete/i, 6000);
+    await waitForText(container, /discovery complete/i, 6000);
     expect(normalizedText(container)).toContain('Missing Phone');
     expect(normalizedText(container)).not.toContain('show rejected leads');
     expect(normalizedText(container)).not.toContain('include partial leads');
@@ -439,6 +458,29 @@ describe('App', () => {
     expect(normalizedText(container)).toContain('Results will appear here when the search finishes');
     expect(normalizedText(container)).not.toContain('click any company row to verify details before export');
     expect(normalizedText(container)).not.toContain('Download Excel');
+
+    await unmount();
+  });
+
+  it('keeps polling when discovery responses do not change yet', async () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(queuedResponse),
+      getSearch: vi
+        .fn()
+        .mockResolvedValueOnce(waitingResponse)
+        .mockResolvedValueOnce(waitingResponse)
+        .mockResolvedValue(completedResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await typeValue(getCompanyTypeInput(container), 'Dental Clinics');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+
+    await waitForText(container, /discovery complete/i, 10000);
+    expect(searchApi.getSearch).toHaveBeenCalledTimes(3);
+    expect(normalizedText(container)).toContain('Discovery complete');
 
     await unmount();
   });

@@ -317,4 +317,48 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.meta.progress.foundCount).toBeGreaterThan(0);
     expect(googleCalls.length).toBeGreaterThan(1);
   });
+
+  it('stops a no-progress discovery after the 20-second stall window expires', async () => {
+    let currentTime = 0;
+    const googleCalls: string[] = [];
+
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(nationwideLocation),
+      googlePlaces: {
+        id: 'google-places',
+        name: 'Google Places',
+        fetchLeads: vi.fn().mockImplementation(async ({ query }) => {
+          googleCalls.push(query);
+          return [];
+        }),
+      } as never,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-stalled',
+      now: () => currentTime,
+    });
+
+    const started = await service.startSearch({
+      companyType: 'Law Firms',
+      city: 'USA',
+      count: 50,
+    });
+
+    expect(started.meta.status).toBe('queued');
+
+    currentTime = 5_000;
+    let snapshot = await service.getSearch('search-stalled');
+    expect(snapshot?.meta.status).toBe('discovering');
+
+    currentTime = 12_000;
+    snapshot = await service.getSearch('search-stalled');
+    expect(snapshot?.meta.status).toBe('discovering');
+
+    currentTime = 25_000;
+    snapshot = await service.getSearch('search-stalled');
+
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.meta.providerWarnings.some((warning) => warning.providerId === 'discovery-limit')).toBe(true);
+    expect(googleCalls.length).toBeGreaterThan(1);
+  });
 });

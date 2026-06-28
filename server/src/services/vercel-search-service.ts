@@ -34,9 +34,11 @@ type VercelSearchServiceDeps = {
 
 const jobTtlMs = 15 * 60 * 1000;
 const maxCandidatePool = 3000;
+const discoveryStallMs = 20_000;
 
 const getDiscoveryBatchSize = (requestedCount: number) => (requestedCount >= 100 ? 2 : 1);
-const getPerSeedCount = (requestedCount: number) => (requestedCount >= 100 ? 10 : 6);
+const getPerSeedCount = (requestedCount: number) =>
+  requestedCount >= 100 ? 30 : requestedCount >= 50 ? 25 : 20;
 const getMaxTickDurationMs = (requestedCount: number) => (requestedCount >= 100 ? 7_000 : 5_000);
 
 const withNow = () => Date.now();
@@ -99,6 +101,8 @@ const refreshProgress = (job: SearchJobRecord) => {
   job.progress.estimatedRemaining = Math.max(0, job.request.count - job.leads.length);
 };
 
+const getLastProgressAt = (job: SearchJobRecord) => job.lastProgressAt ?? job.createdAt;
+
 const appendWarningOnce = (job: SearchJobRecord, warning: ProviderWarning) => {
   if (
     job.providerWarnings.some(
@@ -122,12 +126,16 @@ const dedupeWithCount = (leads: Lead[]) => {
 const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
   rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
 
-const mergeLeads = (job: SearchJobRecord, incoming: Lead[]) => {
+const mergeLeads = (job: SearchJobRecord, incoming: Lead[], now: () => number) => {
+  const previousCount = job.leads.length;
   const merged = [...job.leads, ...incoming];
   const normalized = enrichLeads(merged).map(normalizeLead);
   const { leads, duplicatesRemoved } = dedupeWithCount(normalized);
   job.progress.duplicatesRemoved += duplicatesRemoved;
   job.leads = trimCandidatePool(leads, job.request.count);
+  if (job.leads.length > previousCount) {
+    job.lastProgressAt = now();
+  }
   refreshProgress(job);
 };
 
@@ -160,6 +168,7 @@ const discoverRegionLeads = async (
       query,
       queryVariants,
       request: googleRequest,
+      location,
       deadlineMs,
     });
   } catch (error) {
@@ -278,7 +287,7 @@ const tickJob = async (
       );
 
       job.providerWarnings.push(...warnings);
-      mergeLeads(job, leads);
+      mergeLeads(job, leads, deps.now);
       job.nextSeedIndex += 1;
       job.progress.batchesCompleted += 1;
       processed += 1;
@@ -291,6 +300,19 @@ const tickJob = async (
   }
 
   job.discoveryComplete = job.nextSeedIndex >= job.searchSeeds.length;
+  const stalledForTooLong =
+    job.progress.foundCount < job.request.count &&
+    deps.now() - getLastProgressAt(job) >= discoveryStallMs;
+
+  if (stalledForTooLong) {
+    job.discoveryComplete = true;
+    appendWarningOnce(job, {
+      providerId: 'discovery-limit',
+      providerName: 'Discovery',
+      message:
+        'No new businesses were returned after 20 seconds. Search stopped after verifying the available results.',
+    });
+  }
 
   if (job.progress.foundCount >= job.request.count || job.discoveryComplete) {
     job.status = 'complete';
@@ -340,6 +362,7 @@ export const createVercelSearchServiceWithDeps = (
         searchSeeds: [],
         nextSeedIndex: 0,
         discoveryComplete: false,
+        lastProgressAt: createdAt,
         expiresAt: createdAt + jobTtlMs,
         createdAt,
         updatedAt: createdAt,

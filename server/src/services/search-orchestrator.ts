@@ -41,6 +41,7 @@ type SearchDeps = {
     request: SearchRequest;
     location: NormalizedUsLocation;
     queryVariants: string[];
+    deadlineMs?: number;
   }) => Promise<Lead[]>);
   discoverOsmLeads?: (args: {
     request: SearchRequest;
@@ -199,6 +200,7 @@ const runRegionalDiscovery = async (
                 request,
                 location,
                 queryVariants,
+                deadlineMs: Date.now() + googleDiscoveryTimeoutMs,
               })
             : discoverGoogleLeads.fetchLeads({
                 rawQuery: request.companyType,
@@ -209,6 +211,8 @@ const runRegionalDiscovery = async (
                   city: location.label,
                   count: Math.max(request.count, 100),
                 },
+                location,
+                deadlineMs: Date.now() + googleDiscoveryTimeoutMs,
               }),
           googleDiscoveryTimeoutMs,
           'Google Places discovery timed out before the batch completed',

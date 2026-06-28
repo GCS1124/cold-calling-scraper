@@ -107,6 +107,10 @@ export function HomePage({ searchApi }: HomePageProps) {
     : 0;
 
   const requestedCount = result?.meta.progress.requestedCount ?? search.count;
+  const resultsExhausted =
+    result !== null &&
+    result.meta.status === 'complete' &&
+    result.meta.progress.foundCount < result.meta.progress.requestedCount;
 
   const progressPercent = result
     ? Math.min(
@@ -123,11 +127,13 @@ export function HomePage({ searchApi }: HomePageProps) {
       ? `Queued ${result.meta.progress.requestedCount} leads`
       : result.meta.status === 'discovering'
         ? `Finding leads in ${result.meta.locationLabel}`
-        : result.meta.status === 'enriching'
+      : result.meta.status === 'enriching'
           ? 'Collecting contact details'
           : result.meta.status === 'failed'
             ? 'Search failed'
-            : 'Search complete'
+            : resultsExhausted
+              ? 'Discovery complete'
+              : 'Search complete'
     : '';
 
   const statusDescription = result
@@ -135,11 +141,13 @@ export function HomePage({ searchApi }: HomePageProps) {
       ? 'Your search is waiting to begin.'
       : result.meta.status === 'discovering'
         ? 'Scanning matching businesses and removing duplicates.'
-        : result.meta.status === 'enriching'
+      : result.meta.status === 'enriching'
           ? 'Adding emails, phone numbers, websites, and source details.'
           : result.meta.status === 'failed'
             ? 'The search could not be completed. Adjust the query and try again.'
-            : 'Your leads are ready to review, filter, copy, and export.'
+            : resultsExhausted
+              ? 'We verified the available businesses and stopped once the discovery sources stopped returning new results.'
+              : 'Your leads are ready to review, filter, copy, and export.'
     : '';
 
   const emptyStateMessage =
@@ -172,31 +180,52 @@ export function HomePage({ searchApi }: HomePageProps) {
       return;
     }
 
-    if (isPollingRef.current) {
-      return;
-    }
+    let cancelled = false;
 
-    const timer = window.setTimeout(async () => {
-      isPollingRef.current = true;
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        window.setTimeout(resolve, ms);
+      });
 
-      try {
-        const nextResult = await searchApi.getSearch(result.searchId);
-        setResult(nextResult);
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'Search update failed');
-      } finally {
-        isPollingRef.current = false;
+    const poll = async () => {
+      while (!cancelled) {
+        await sleep(1500);
+
+        if (cancelled) {
+          return;
+        }
+
+        isPollingRef.current = true;
+
+        try {
+          const nextResult = await searchApi.getSearch(result.searchId);
+          if (cancelled) {
+            return;
+          }
+
+          setResult(nextResult);
+
+          if (!pollingStatuses.includes(nextResult.meta.status)) {
+            return;
+          }
+        } catch (error) {
+          if (!cancelled) {
+            toast.error(error instanceof Error ? error.message : 'Search update failed');
+          }
+          return;
+        } finally {
+          isPollingRef.current = false;
+        }
       }
-    }, 1500);
+    };
 
-    return () => window.clearTimeout(timer);
-  }, [
-    result?.searchId,
-    result?.meta.status,
-    result?.meta.progress.discovered,
-    result?.meta.progress.enriched,
-    searchApi,
-  ]);
+    void poll();
+
+    return () => {
+      cancelled = true;
+      isPollingRef.current = false;
+    };
+  }, [result?.searchId, searchApi]);
 
   const handleSearch = async (override?: SearchRequest) => {
     const nextSearch = override ?? buildSearchRequestFromDraft(search);

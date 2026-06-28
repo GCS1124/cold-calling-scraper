@@ -16,6 +16,7 @@ export type SearchJobRecord = {
   searchSeeds: string[];
   nextSeedIndex: number;
   discoveryComplete: boolean;
+  lastProgressAt: number;
   expiresAt: number;
   createdAt: number;
   updatedAt: number;
