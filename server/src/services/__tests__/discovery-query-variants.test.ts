@@ -25,14 +25,28 @@ describe('buildDiscoveryQueryVariants', () => {
     const queries = buildDiscoveryQueryVariants('HVAC Contractors', austinLocation, profile);
 
     expect(queries[0]).toBe('HVAC Contractors in Austin, TX');
-    expect(queries.length).toBe(60);
+    expect(queries.length).toBe(80);
     expect(
       queries.some(
         (query) => query.startsWith('hvac ') || query.startsWith('air conditioning '),
       ),
     ).toBe(true);
     expect(
-      queries.some((query) => query.includes('Austin') && query.startsWith('air conditioning')),
+      queries.some(
+        (query) =>
+          query.includes('Austin') &&
+          (query.startsWith('air conditioning') ||
+            query.startsWith('hvac repair') ||
+            query.startsWith('air conditioning company')),
+      ),
+    ).toBe(true);
+    expect(
+      queries.some(
+        (query) =>
+          query.startsWith('hvac repair') ||
+          query.startsWith('air conditioning company') ||
+          query.startsWith('duct cleaning'),
+      ),
     ).toBe(true);
   });
 });

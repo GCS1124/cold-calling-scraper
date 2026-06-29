@@ -6,7 +6,40 @@ const serviceSynonyms: Record<string, string[]> = {
   'dental clinics': ['dentist', 'dental office', 'orthodontist', 'periodontist'],
   plumbers: ['plumber', 'plumbing service', 'plumbing company'],
   'roofing contractors': ['roofer', 'roofing company', 'roofing service'],
-  'hvac contractors': ['hvac', 'air conditioning', 'heating repair', 'heating and cooling'],
+  'hvac contractors': [
+    'hvac installation',
+    'hvac maintenance',
+    'hvac repair',
+    'hvac service',
+    'air conditioner repair',
+    'air conditioner service',
+    'air conditioning installation',
+    'air conditioning repair',
+    'air conditioning service',
+    'ac installation',
+    'ac repair',
+    'ac service',
+    'air conditioning company',
+    'air conditioning contractor',
+    'cooling repair',
+    'cooling service',
+    'heating installation',
+    'heating repair',
+    'heating service',
+    'furnace installation',
+    'furnace repair',
+    'furnace service',
+    'heat pump repair',
+    'heat pump service',
+    'duct cleaning',
+    'duct repair',
+    'thermostat repair',
+    'mini split installation',
+    'commercial hvac',
+    'residential hvac',
+    'emergency hvac',
+    'heating and cooling',
+  ],
   'real estate agencies': ['real estate', 'real estate agent', 'realtor', 'property management'],
   'law firms': ['law firm', 'attorney', 'lawyer', 'legal services'],
   'medical clinics': ['medical clinic', 'clinic', 'doctor', 'urgent care'],
@@ -86,7 +119,7 @@ const buildCategoryTerms = (companyType: string, profile: CategoryProfile) => {
     terms.add(variant);
   }
 
-  return unique([...terms]).slice(0, 10);
+  return unique([...terms]).slice(0, 24);
 };
 
 const buildLocationTerms = (location: NormalizedUsLocation) => {
@@ -171,5 +204,5 @@ export const buildDiscoveryQueryVariants = (
     queries.push(`${categoryTerms[0] ?? companyType.trim()} in ${location.city}`);
   }
 
-  return unique(queries).slice(0, location.mode === 'local' && location.label.includes(',') ? 60 : 24);
+  return unique(queries).slice(0, location.mode === 'local' && location.label.includes(',') ? 80 : 24);
 };

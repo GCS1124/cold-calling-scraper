@@ -44,7 +44,6 @@ type VercelSearchServiceDeps = {
 
 const jobTtlMs = 15 * 60 * 1000;
 const maxCandidatePool = 3000;
-const googleMapsDiscoveryTimeoutMs = 9000;
 const getDiscoveryStallMs = (requestedCount: number) =>
   requestedCount >= 50 ? 45_000 : 20_000;
 const getDiscoveryStallLabel = (requestedCount: number) =>
@@ -53,7 +52,12 @@ const getDiscoveryStallLabel = (requestedCount: number) =>
 const getDiscoveryBatchSize = (requestedCount: number) => (requestedCount >= 100 ? 2 : 1);
 const getPerSeedCount = (requestedCount: number) =>
   requestedCount >= 100 ? 30 : requestedCount >= 50 ? 25 : 20;
-const getMaxTickDurationMs = (requestedCount: number) => (requestedCount >= 100 ? 7_000 : 5_000);
+const getGooglePlacesTimeoutMs = (requestedCount: number) =>
+  requestedCount >= 50 ? 20_000 : 8_000;
+const getGoogleMapsTimeoutMs = (requestedCount: number) =>
+  requestedCount >= 50 ? 15_000 : 8_000;
+const getMaxTickDurationMs = (requestedCount: number) =>
+  requestedCount >= 50 ? 40_000 : 15_000;
 
 const withNow = () => Date.now();
 
@@ -145,6 +149,7 @@ const discoverRegionLeads = async (
   googlePlaces: typeof googlePlacesProvider,
   discoverGoogleMapsLeads: VercelSearchServiceDeps['discoverGoogleMapsLeads'],
   discoverOsmLeads: typeof discoverUsLeadsFromOsm,
+  now: () => number,
   profile = resolveCategoryProfile(request.companyType),
   deadlineMs = Date.now() + getMaxTickDurationMs(request.count),
 ) => {
@@ -162,6 +167,10 @@ const discoverRegionLeads = async (
     profile,
   );
   const warnings: ProviderWarning[] = [...profile.warnings, ...discoveryLocation.warnings];
+  const googlePlacesDeadlineMs = Math.min(
+    deadlineMs,
+    now() + getGooglePlacesTimeoutMs(request.count),
+  );
 
   let googleLeads: Lead[] = [];
   try {
@@ -171,7 +180,7 @@ const discoverRegionLeads = async (
       queryVariants,
       request: googleRequest,
       location: discoveryLocation,
-      deadlineMs,
+      deadlineMs: googlePlacesDeadlineMs,
     });
   } catch (error) {
     warnings.push({
@@ -222,6 +231,10 @@ const discoverRegionLeads = async (
     try {
       const remainingCount = request.count - acceptedDiscoveryLeads.length;
       const googleMapsRequestCount = Math.min(Math.max(remainingCount, 15), 30);
+      const googleMapsDeadlineMs = Math.min(
+        deadlineMs,
+        now() + getGoogleMapsTimeoutMs(request.count),
+      );
       googleMapsLeads = await discoverGoogleMapsLeads({
         request: {
           ...request,
@@ -230,8 +243,8 @@ const discoverRegionLeads = async (
         location: discoveryLocation,
         queryVariants,
         maxResults: googleMapsRequestCount,
-        queryLimit: 4,
-        deadlineMs,
+        queryLimit: 12,
+        deadlineMs: googleMapsDeadlineMs,
       });
     } catch (error) {
       warnings.push({
@@ -326,6 +339,7 @@ const tickJob = async (
         deps.googlePlaces,
         deps.discoverGoogleMapsLeads ?? discoverUsLeadsFromGoogleMaps,
         deps.discoverOsmLeads,
+        deps.now,
         resolveCategoryProfile(job.request.companyType),
         deps.now() + maxTickDurationMs,
       );

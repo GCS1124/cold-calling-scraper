@@ -504,7 +504,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(googleCalls.length).toBeGreaterThan(1);
   });
 
-  it('stops a no-progress discovery after the 20-second stall window expires', async () => {
+  it('stops a no-progress discovery after the 45-second stall window expires', async () => {
     let currentTime = 0;
     const googleCalls: string[] = [];
 
@@ -540,7 +540,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     snapshot = await service.getSearch('search-stalled');
     expect(snapshot?.meta.status).toBe('discovering');
 
-    currentTime = 25_000;
+    currentTime = 50_000;
     snapshot = await service.getSearch('search-stalled');
 
     expect(snapshot?.meta.status).toBe('complete');

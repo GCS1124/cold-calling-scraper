@@ -17,7 +17,13 @@ describe('resolveCategoryProfile', () => {
 
     expect(profile.label).toBe('HVAC Contractors');
     expect(profile.searchTerms).toEqual(
-      expect.arrayContaining(['ac repair', 'air conditioning repair', 'furnace repair']),
+      expect.arrayContaining([
+        'ac repair',
+        'air conditioning repair',
+        'air conditioning company',
+        'hvac repair',
+        'furnace repair',
+      ]),
     );
   });
 

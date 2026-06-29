@@ -540,7 +540,7 @@ const buildExpandedSearchQueries = (
         seen.add(key);
         queries.push(query);
 
-        if (queries.length >= 30) {
+        if (queries.length >= 40) {
           return queries;
         }
       }
@@ -553,7 +553,7 @@ const buildExpandedSearchQueries = (
       location.city?.trim(),
   );
 
-  return queries.slice(0, isCityStateLocal ? 30 : 12);
+  return queries.slice(0, isCityStateLocal ? 40 : 12);
 };
 
 const collectCandidatesForQueries = async (
@@ -712,7 +712,7 @@ export const googlePlacesProvider: LeadProvider = {
       : Math.min(request.count, 60);
     const searchQueries = uniqueQueries([query, ...queryVariants]).slice(
       0,
-      isCityStateLocal ? 60 : 10,
+      isCityStateLocal ? 80 : 10,
     );
 
     const candidateMap = new Map<string, PlaceCandidate>();

@@ -66,7 +66,7 @@ type SearchDeps = {
 
 const jobTtlMs = 15 * 60 * 1000;
 const googleDiscoveryTimeoutMs = 20000;
-const googleMapsDiscoveryTimeoutMs = 12000;
+const googleMapsDiscoveryTimeoutMs = 20000;
 const osmDiscoveryTimeoutMs = 20000;
 const maxCandidatePool = 3000;
 const getDiscoveryStallMs = (requestedCount: number) =>
@@ -294,15 +294,15 @@ const runRegionalDiscovery = async (
       const googleMapsLeads = await withTimeout(
         discoverGoogleMapsLeads({
           request: {
-            ...request,
-            count: Math.min(Math.max(remainingCount, 15), 30),
-          },
-          location: discoveryLocation,
-          queryVariants,
-          maxResults: Math.min(Math.max(remainingCount, 15), 30),
-          queryLimit: 4,
-          deadlineMs: Date.now() + googleMapsDiscoveryTimeoutMs,
-        }),
+          ...request,
+          count: Math.min(Math.max(remainingCount, 15), 30),
+        },
+        location: discoveryLocation,
+        queryVariants,
+        maxResults: Math.min(Math.max(remainingCount, 15), 30),
+        queryLimit: 12,
+        deadlineMs: Date.now() + googleMapsDiscoveryTimeoutMs,
+      }),
         googleMapsDiscoveryTimeoutMs,
         'Google Maps discovery timed out before the batch completed',
       );

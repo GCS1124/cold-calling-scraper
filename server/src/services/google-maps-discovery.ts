@@ -256,7 +256,7 @@ export const discoverUsLeadsFromGoogleMaps = async ({
     const queries = uniqueValues([
       `${request.companyType} in ${location.label}`,
       ...queryVariants,
-    ]).slice(0, queryLimit ?? (isCityStateLocal ? 5 : 3));
+    ]).slice(0, queryLimit ?? (isCityStateLocal ? 12 : 3));
 
     for (const query of queries) {
       if (candidates.size >= resultLimit || (deadlineMs && Date.now() >= deadlineMs)) {

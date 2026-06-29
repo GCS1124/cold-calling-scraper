@@ -420,17 +420,14 @@ describe('createSearchService', () => {
     expect(completed?.leads.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('stops a no-progress discovery after the 20-second stall window expires', async () => {
+  it('stops a no-progress discovery after the 45-second stall window expires', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
     const googleCalls: string[] = [];
-    let nowCalls = 0;
+    let currentTime = 0;
 
     const service = createSearchService({
       idFactory: () => 'search-4b',
-      now: () => {
-        nowCalls += 1;
-        return nowCalls <= 2 ? 0 : 25_000;
-      },
+      now: () => currentTime,
       normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
       discoverGoogleLeads: vi.fn().mockImplementation(async ({ location }) => {
         googleCalls.push(location.label);
@@ -452,13 +449,14 @@ describe('createSearchService', () => {
       throw new Error('Background task was not scheduled');
     }
 
+    currentTime = 50_000;
     const task = backgroundTask as () => Promise<void>;
     await task();
     const completed = await service.getSearch('search-4b');
 
     expect(completed?.meta.status).toBe('complete');
     expect(completed?.meta.providerWarnings.some((warning) => warning.providerId === 'discovery-limit')).toBe(true);
-    expect(googleCalls.length).toBe(1);
+    expect(googleCalls.length).toBe(0);
   });
 
   it('keeps the job running when a regional seed fails to normalize', async () => {
