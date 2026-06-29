@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
+import { usStateNames, type UsStateCode } from '../data/us-states';
 import type { NormalizedUsLocation } from '../services/us-location';
 import { resolveCategoryProfile } from '../services/us-category-mapping';
 import type { Lead } from '../types/lead';
@@ -465,17 +466,21 @@ const buildLocationTerms = (locationLabel: string, location?: NormalizedUsLocati
   if (isCityStateLocal && location) {
     const city = location.city.trim();
     const label = location.label.trim();
+    const stateName = location.stateCode ? usStateNames[location.stateCode as UsStateCode] : '';
 
     return uniqueQueries([
       label,
       city,
       `${city}, ${location.stateCode}`,
       `${city} ${location.stateCode}`,
+      stateName ? `${city}, ${stateName}` : '',
+      stateName ? `${city} ${stateName}` : '',
       `${city} area`,
       `greater ${city}`,
       `${city} metro`,
       `${city} metro area`,
       `downtown ${city}`,
+      `central ${city}`,
       `north ${city}`,
       `south ${city}`,
       `east ${city}`,

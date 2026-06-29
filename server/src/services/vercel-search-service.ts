@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { Lead } from '../types/lead';
 import type { ProviderWarning, SearchProgress, SearchRequest, SearchResponse, SearchStatus } from '../types/search';
+import { usStateNames, type UsStateCode } from '../data/us-states';
 import { deduplicateLeads } from './lead-deduplication';
 import { enrichLead } from './lead-validation';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
@@ -66,6 +67,32 @@ const toSearchSeeds = (location: NormalizedUsLocation) => {
 
   if (location.mode === 'timezone' && location.timeZoneCode) {
     return [...timezoneStateQueries[location.timeZoneCode]];
+  }
+
+  const isCityStateLocal = location.mode === 'local' && location.label.includes(',');
+
+  if (isCityStateLocal) {
+    const city = location.city.trim() || location.label.split(',')[0]?.trim() || location.label;
+    const stateName = location.stateCode ? usStateNames[location.stateCode as UsStateCode] : '';
+
+    return [
+      location.label,
+      city,
+      `${city}, ${location.stateCode}`,
+      `${city} ${location.stateCode}`,
+      stateName ? `${city}, ${stateName}` : '',
+      stateName ? `${city} ${stateName}` : '',
+      `${city} area`,
+      `greater ${city}`,
+      `${city} metro`,
+      `${city} metro area`,
+      `downtown ${city}`,
+      `central ${city}`,
+      `north ${city}`,
+      `south ${city}`,
+      `east ${city}`,
+      `west ${city}`,
+    ].filter((value): value is string => Boolean(value?.trim()));
   }
 
   const seeds = [location.label];

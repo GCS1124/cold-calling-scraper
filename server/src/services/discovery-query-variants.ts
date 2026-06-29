@@ -1,4 +1,5 @@
 import type { CategoryProfile } from './us-category-mapping';
+import { usStateNames, type UsStateCode } from '../data/us-states';
 import type { NormalizedUsLocation } from './us-location';
 
 const serviceSynonyms: Record<string, string[]> = {
@@ -93,17 +94,21 @@ const buildLocationTerms = (location: NormalizedUsLocation) => {
 
   if (isCityStateLocal) {
     const city = normalizedCity || normalizedLabel.split(',')[0]?.trim() || normalizedLabel;
+    const stateName = location.stateCode ? usStateNames[location.stateCode as UsStateCode] : '';
 
     return unique([
       normalizedLabel,
       city,
       `${city}, ${location.stateCode}`,
       `${city} ${location.stateCode}`,
+      stateName ? `${city}, ${stateName}` : '',
+      stateName ? `${city} ${stateName}` : '',
       `${city} area`,
       `greater ${city}`,
       `${city} metro`,
       `${city} metro area`,
       `downtown ${city}`,
+      `central ${city}`,
       `north ${city}`,
       `south ${city}`,
       `east ${city}`,
