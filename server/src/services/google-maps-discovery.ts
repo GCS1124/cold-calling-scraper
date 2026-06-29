@@ -209,6 +209,10 @@ export const discoverUsLeadsFromGoogleMaps = async ({
   queryLimit?: number;
   deadlineMs?: number;
 }): Promise<Lead[]> => {
+  if (process.env.VERCEL && !process.env.PLAYWRIGHT_BROWSERS_PATH) {
+    process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
+  }
+
   const { chromium } = await import('playwright');
   const browser = await chromium.launch({
     headless: true,
