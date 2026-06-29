@@ -25,7 +25,7 @@ describe('buildDiscoveryQueryVariants', () => {
     const queries = buildDiscoveryQueryVariants('HVAC Contractors', austinLocation, profile);
 
     expect(queries[0]).toBe('HVAC Contractors in Austin, TX');
-    expect(queries.length).toBe(24);
+    expect(queries.length).toBe(48);
     expect(
       queries.some(
         (query) => query.startsWith('hvac ') || query.startsWith('air conditioning '),

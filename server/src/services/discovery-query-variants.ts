@@ -171,5 +171,5 @@ export const buildDiscoveryQueryVariants = (
     queries.push(`${categoryTerms[0] ?? companyType.trim()} in ${location.city}`);
   }
 
-  return unique(queries).slice(0, 24);
+  return unique(queries).slice(0, location.mode === 'local' && location.label.includes(',') ? 48 : 24);
 };
