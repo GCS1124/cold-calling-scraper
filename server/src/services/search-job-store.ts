@@ -9,6 +9,7 @@ import type {
   SearchStatus,
 } from '../types/search';
 import { deduplicateLeads } from './lead-deduplication';
+import type { NormalizedUsLocation } from './us-location';
 
 export type SearchLocationMode =
   | 'local'
@@ -24,6 +25,7 @@ export type SearchJobRecord = {
   query: string;
   locationLabel: string;
   locationMode: SearchLocationMode;
+  targetLocation?: NormalizedUsLocation;
   status: SearchStatus;
   progress: SearchProgress;
   leads: Lead[];

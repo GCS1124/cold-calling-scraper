@@ -145,7 +145,8 @@ const buildQuery = (companyType: string, location: NormalizedUsLocation) =>
 
 const discoverRegionLeads = async (
   request: SearchRequest,
-  location: NormalizedUsLocation,
+  targetLocation: NormalizedUsLocation,
+  discoveryLocation: NormalizedUsLocation,
   googlePlaces: typeof googlePlacesProvider,
   discoverOsmLeads: typeof discoverUsLeadsFromOsm,
   profile = resolveCategoryProfile(request.companyType),
@@ -154,13 +155,17 @@ const discoverRegionLeads = async (
   const perSeedCount = getPerSeedCount(request.count);
   const googleRequest: SearchRequest = {
     ...request,
-    city: location.label,
+    city: discoveryLocation.label,
     count: perSeedCount,
   };
 
-  const query = buildQuery(request.companyType, location);
-  const queryVariants = buildDiscoveryQueryVariants(request.companyType, location, profile);
-  const warnings: ProviderWarning[] = [...profile.warnings, ...location.warnings];
+  const query = buildQuery(request.companyType, discoveryLocation);
+  const queryVariants = buildDiscoveryQueryVariants(
+    request.companyType,
+    discoveryLocation,
+    profile,
+  );
+  const warnings: ProviderWarning[] = [...profile.warnings, ...discoveryLocation.warnings];
 
   let googleLeads: Lead[] = [];
   try {
@@ -169,7 +174,7 @@ const discoverRegionLeads = async (
       query,
       queryVariants,
       request: googleRequest,
-      location,
+      location: discoveryLocation,
       deadlineMs,
     });
   } catch (error) {
@@ -188,7 +193,7 @@ const discoverRegionLeads = async (
     if (!googleLeads.length) {
       osmLeads = await discoverOsmLeads({
         request: googleRequest,
-        location,
+        location: discoveryLocation,
         profile,
       });
     }
@@ -205,12 +210,12 @@ const discoverRegionLeads = async (
     warnings.push({
       providerId: 'discovery',
       providerName: 'Discovery',
-      message: `No discovery candidates returned for ${location.label}`,
+      message: `No discovery candidates returned for ${discoveryLocation.label}`,
     });
   }
 
   return {
-    leads: filterLeadsForLocation([...googleLeads, ...osmLeads], location),
+    leads: filterLeadsForLocation([...googleLeads, ...osmLeads], targetLocation),
     warnings,
   };
 };
@@ -220,23 +225,12 @@ const tickJob = async (
   store: ReturnType<typeof createSearchJobStore>,
   deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'now'>>,
 ): Promise<SearchJobRecord> => {
-  if (job.status === 'failed' || job.status === 'complete') {
-    return job;
-  }
+  let targetLocation = job.targetLocation as NormalizedUsLocation | undefined;
 
-  if (!job.searchSeeds.length) {
+  if (!targetLocation) {
     try {
-      const normalizedLocation = await deps.normalizeLocation(job.request.city);
-      job.locationLabel = normalizedLocation.label;
-      job.locationMode = normalizedLocation.mode;
-      job.query =
-        normalizedLocation.mode === 'nationwide'
-          ? `${job.request.companyType} in United States`
-          : buildQuery(job.request.companyType, normalizedLocation);
-      job.searchSeeds = toSearchSeeds(normalizedLocation);
-      job.status = 'discovering';
-      job.progress.currentSource = 'Google Places API';
-      job.providerWarnings.push(...normalizedLocation.warnings);
+      targetLocation = await deps.normalizeLocation(job.request.city);
+      job.targetLocation = targetLocation;
     } catch (error) {
       appendWarningOnce(job, {
         providerId: 'nominatim',
@@ -250,6 +244,23 @@ const tickJob = async (
       await store.upsert(job);
       return job;
     }
+  }
+
+  if (job.status === 'failed' || job.status === 'complete') {
+    return job;
+  }
+
+  if (!job.searchSeeds.length) {
+    job.locationLabel = targetLocation.label;
+    job.locationMode = targetLocation.mode;
+    job.query =
+      targetLocation.mode === 'nationwide'
+        ? `${job.request.companyType} in United States`
+        : buildQuery(job.request.companyType, targetLocation);
+    job.searchSeeds = toSearchSeeds(targetLocation);
+    job.status = 'discovering';
+    job.progress.currentSource = 'Google Places API';
+    job.providerWarnings.push(...targetLocation.warnings);
   }
 
   if (job.nextSeedIndex < job.searchSeeds.length) {
@@ -280,6 +291,7 @@ const tickJob = async (
 
       const { leads, warnings } = await discoverRegionLeads(
         job.request,
+        targetLocation,
         regionalLocation,
         deps.googlePlaces,
         deps.discoverOsmLeads,

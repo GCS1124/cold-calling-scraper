@@ -183,14 +183,19 @@ const upsertLeads = (job: SearchJob, incoming: Lead[]) => {
 const runRegionalDiscovery = async (
   job: SearchJob,
   request: SearchRequest,
-  location: NormalizedUsLocation,
+  targetLocation: NormalizedUsLocation,
+  discoveryLocation: NormalizedUsLocation,
   profile: ReturnType<typeof resolveCategoryProfile>,
   discoverGoogleLeads: NonNullable<SearchDeps['discoverGoogleLeads']>,
   discoverOsmLeads: NonNullable<SearchDeps['discoverOsmLeads']>,
 ) => {
   job.progress.currentSource =
-    location.mode === 'nationwide' ? 'Nationwide Discovery' : 'Google Places API';
-  const queryVariants = buildDiscoveryQueryVariants(request.companyType, location, profile);
+    discoveryLocation.mode === 'nationwide' ? 'Nationwide Discovery' : 'Google Places API';
+  const queryVariants = buildDiscoveryQueryVariants(
+    request.companyType,
+    discoveryLocation,
+    profile,
+  );
 
   await Promise.all([
     (async () => {
@@ -199,26 +204,26 @@ const runRegionalDiscovery = async (
           typeof discoverGoogleLeads === 'function'
             ? discoverGoogleLeads({
                 request,
-                location,
+                location: discoveryLocation,
                 queryVariants,
                 deadlineMs: Date.now() + googleDiscoveryTimeoutMs,
               })
             : discoverGoogleLeads.fetchLeads({
                 rawQuery: request.companyType,
-                query: `${request.companyType} in ${location.label}`,
+                query: `${request.companyType} in ${discoveryLocation.label}`,
                 queryVariants,
                 request: {
                   ...request,
-                  city: location.label,
+                  city: discoveryLocation.label,
                   count: Math.max(request.count, 100),
                 },
-                location,
+                location: discoveryLocation,
                 deadlineMs: Date.now() + googleDiscoveryTimeoutMs,
               }),
           googleDiscoveryTimeoutMs,
           'Google Places discovery timed out before the batch completed',
         );
-        const acceptedGoogleLeads = filterLeadsForLocation(googleLeads, location);
+        const acceptedGoogleLeads = filterLeadsForLocation(googleLeads, targetLocation);
         upsertLeads(job, acceptedGoogleLeads);
         job.progress.batchesCompleted += 1;
       } catch (error) {
@@ -237,13 +242,13 @@ const runRegionalDiscovery = async (
         const osmLeads = await withTimeout(
           discoverOsmLeads({
             request,
-            location,
+            location: discoveryLocation,
             profile,
           }),
           osmDiscoveryTimeoutMs,
           'OpenStreetMap discovery timed out before the batch completed',
         );
-        const acceptedOsmLeads = filterLeadsForLocation(osmLeads, location);
+        const acceptedOsmLeads = filterLeadsForLocation(osmLeads, targetLocation);
         upsertLeads(job, acceptedOsmLeads);
         job.progress.batchesCompleted += 1;
       } catch (error) {
@@ -330,6 +335,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       await runRegionalDiscovery(
         job,
         job.request,
+        location,
         regionalLocation,
         profile,
         discoverGoogleLeads,

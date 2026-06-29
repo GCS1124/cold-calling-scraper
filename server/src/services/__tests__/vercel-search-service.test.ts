@@ -303,6 +303,86 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(googleCalls.length).toBeGreaterThan(1);
   });
 
+  it('keeps Austin searches inside Austin even when broader Texas seeds return outliers', async () => {
+    const austinLead = makeLead({
+      id: 'lead-austin',
+      address: '500 Congress Ave, Austin, TX 78701',
+      city: 'Austin, TX',
+    });
+    const dallasLead = makeLead({
+      id: 'lead-dallas',
+      address: '1000 Commerce St, Dallas, TX 75201',
+      city: 'Dallas, TX',
+    });
+    const houstonLead = makeLead({
+      id: 'lead-houston',
+      address: '1500 Main St, Houston, TX 77002',
+      city: 'Houston, TX',
+    });
+    const texasStateLocation = {
+      mode: 'local' as const,
+      label: 'Texas',
+      city: 'Texas',
+      stateCode: 'TX',
+      postalCode: undefined,
+      lat: 31.0,
+      lon: -99.0,
+      boundingBox: {
+        south: 25.8,
+        west: -106.7,
+        north: 36.6,
+        east: -93.5,
+      },
+      warnings: [],
+    };
+
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockImplementation(async (input: string) => {
+        if (input === 'Austin, TX') {
+          return localLocation;
+        }
+
+        if (input === 'TX' || input === 'Texas') {
+          return texasStateLocation;
+        }
+
+        return localLocation;
+      }),
+      googlePlaces: {
+        id: 'google-places',
+        name: 'Google Places',
+        fetchLeads: vi.fn().mockImplementation(async ({ location }) => {
+          if (location?.label === 'Austin, TX') {
+            return [austinLead];
+          }
+
+          if (location?.label === 'Texas') {
+            return [dallasLead, houstonLead];
+          }
+
+          return [];
+        }),
+      } as never,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-austin-strict',
+      now: () => 1000,
+    });
+
+    await service.startSearch({
+      companyType: 'HVAC Contractors',
+      city: 'Austin, TX',
+      count: 50,
+    });
+
+    const snapshot = await pollJob(service, 'search-austin-strict', 120);
+
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.leads).toHaveLength(1);
+    expect(snapshot?.leads[0]?.city).toContain('Austin');
+    expect(snapshot?.leads[0]?.address).toContain('Austin, TX');
+  });
+
   it('fans out nationwide searches across multiple state seeds and query variants', async () => {
     const googleCalls: string[] = [];
     const service = createVercelSearchServiceWithDeps({
