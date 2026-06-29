@@ -79,7 +79,7 @@ const buildCategoryTerms = (companyType: string, profile: CategoryProfile) => {
     terms.add(variant);
   }
 
-  return unique([...terms]).slice(0, 8);
+  return unique([...terms]).slice(0, 10);
 };
 
 const buildLocationTerms = (location: NormalizedUsLocation) => {
@@ -87,11 +87,35 @@ const buildLocationTerms = (location: NormalizedUsLocation) => {
     return ['United States'];
   }
 
+  const normalizedCity = location.city.trim();
+  const normalizedLabel = location.label.trim();
+  const isCityStateLocal = location.mode === 'local' && normalizedLabel.includes(',');
+
+  if (isCityStateLocal) {
+    const city = normalizedCity || normalizedLabel.split(',')[0]?.trim() || normalizedLabel;
+
+    return unique([
+      normalizedLabel,
+      city,
+      `${city}, ${location.stateCode}`,
+      `${city} ${location.stateCode}`,
+      `${city} area`,
+      `greater ${city}`,
+      `${city} metro`,
+      `${city} metro area`,
+      `downtown ${city}`,
+      `north ${city}`,
+      `south ${city}`,
+      `east ${city}`,
+      `west ${city}`,
+    ]).slice(0, 13);
+  }
+
   const variants = [
-    location.label,
+    normalizedLabel,
     location.city && location.stateCode ? `${location.city} ${location.stateCode}` : '',
     location.city && location.stateCode ? `${location.city}, ${location.stateCode}` : '',
-    location.city && location.city !== location.label ? location.city : '',
+    location.city && location.city !== normalizedLabel ? location.city : '',
     location.stateCode,
   ];
 
@@ -120,5 +144,5 @@ export const buildDiscoveryQueryVariants = (
     queries.push(`${categoryTerms[0] ?? companyType.trim()} in ${location.city}`);
   }
 
-  return unique(queries).slice(0, 16);
+  return unique(queries).slice(0, 24);
 };

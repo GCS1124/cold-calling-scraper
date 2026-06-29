@@ -209,6 +209,145 @@ describe('googlePlacesProvider', () => {
     expect(mockedGet.mock.calls.some(([url]) => String(url).includes('/textsearch/'))).toBe(false);
   });
 
+  it('keeps collecting Austin-specific expansion queries after the first raw 60 candidates', async () => {
+    process.env.GOOGLE_PLACES_API_KEY = 'test-key';
+
+    const seenQueries: string[] = [];
+    const austinLocation = {
+      mode: 'local' as const,
+      label: 'Austin, TX',
+      city: 'Austin',
+      stateCode: 'TX',
+      postalCode: '78701',
+      lat: 30.2672,
+      lon: -97.7431,
+      boundingBox: {
+        south: 30,
+        west: -98,
+        north: 31,
+        east: -97,
+      },
+      warnings: [],
+    };
+
+    mockedGet.mockImplementation(async (url, config) => {
+      const endpoint = String(url);
+      const params = (config as { params?: Record<string, string | undefined> } | undefined)?.params ?? {};
+
+      if (endpoint.includes('/textsearch/')) {
+        return {
+          data: {
+            status: 'ZERO_RESULTS',
+            results: [],
+          },
+        };
+      }
+
+      throw new Error(`Unexpected request: ${endpoint}`);
+    });
+
+    mockedPost.mockImplementation(async (url, body) => {
+      const endpoint = String(url);
+      if (endpoint.includes('places.googleapis.com/v1/places:searchText')) {
+        const textQuery = String((body as { textQuery?: string } | undefined)?.textQuery ?? '');
+        const pageToken = String((body as { pageToken?: string } | undefined)?.pageToken ?? '');
+
+        if (textQuery === 'HVAC Contractors in Austin, TX' && !pageToken) {
+          return {
+            data: {
+              places: Array.from({ length: 20 }, (_, index) => ({
+                id: `baseline-${index + 1}`,
+                displayName: {
+                  text: `Austin HVAC ${index + 1}`,
+                },
+                formattedAddress: `Austin, TX 7870${index % 10}`,
+                nationalPhoneNumber: `(512) 555-0${String(index + 1).padStart(3, '0')}`,
+                websiteUri: `austin-hvac-${index + 1}.example.com`,
+              })),
+              nextPageToken: 'page-2',
+            },
+          };
+        }
+
+        if (textQuery === 'HVAC Contractors in Austin, TX' && pageToken === 'page-2') {
+          return {
+            data: {
+              places: Array.from({ length: 20 }, (_, index) => ({
+                id: `baseline-${index + 21}`,
+                displayName: {
+                  text: `Austin HVAC ${index + 21}`,
+                },
+                formattedAddress: `Austin, TX 7871${index % 10}`,
+                nationalPhoneNumber: `(512) 555-1${String(index + 1).padStart(3, '0')}`,
+                websiteUri: `austin-hvac-${index + 21}.example.com`,
+              })),
+              nextPageToken: 'page-3',
+            },
+          };
+        }
+
+        if (textQuery === 'HVAC Contractors in Austin, TX' && pageToken === 'page-3') {
+          return {
+            data: {
+              places: Array.from({ length: 20 }, (_, index) => ({
+                id: `baseline-${index + 41}`,
+                displayName: {
+                  text: `Austin HVAC ${index + 41}`,
+                },
+                formattedAddress: `Austin, TX 7872${index % 10}`,
+                nationalPhoneNumber: `(512) 555-2${String(index + 1).padStart(3, '0')}`,
+                websiteUri: `austin-hvac-${index + 41}.example.com`,
+              })),
+            },
+          };
+        }
+
+        seenQueries.push(textQuery);
+
+        if (/austin (area|metro|metro area|downtown|north|south|east|west)|greater austin/i.test(textQuery)) {
+          return {
+            data: {
+              places: [
+                {
+                  id: 'expanded-austin-1',
+                  displayName: {
+                    text: 'Greater Austin HVAC',
+                  },
+                  formattedAddress: 'Austin, TX 78703',
+                  nationalPhoneNumber: '(512) 555-9999',
+                  websiteUri: 'greater-austin-hvac.example.com',
+                },
+              ],
+            },
+          };
+        }
+
+        return {
+          data: {
+            places: [],
+          },
+        };
+      }
+
+      throw new Error(`Unexpected request: ${endpoint}`);
+    });
+
+    const leads = await googlePlacesProvider.fetchLeads({
+      rawQuery: 'HVAC Contractors',
+      query: 'HVAC Contractors in Austin, TX',
+      request: {
+        companyType: 'HVAC Contractors',
+        city: 'Austin, TX',
+        count: 50,
+      },
+      location: austinLocation,
+      deadlineMs: Date.now() + 15_000,
+    });
+
+    expect(leads).toHaveLength(61);
+    expect(seenQueries.some((value) => /austin (area|metro|metro area|downtown|north|south|east|west)|greater austin/i.test(value))).toBe(true);
+  });
+
   it('falls back to legacy Places only after expanded Places API (New) queries still come up short', async () => {
     process.env.GOOGLE_PLACES_API_KEY = 'test-key';
 

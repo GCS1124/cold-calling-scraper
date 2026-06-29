@@ -456,6 +456,33 @@ const buildLocationTerms = (locationLabel: string, location?: NormalizedUsLocati
     return ['United States'];
   }
 
+  const isCityStateLocal = Boolean(
+    location?.mode === 'local' &&
+      location?.label?.includes(',') &&
+      location.city?.trim(),
+  );
+
+  if (isCityStateLocal && location) {
+    const city = location.city.trim();
+    const label = location.label.trim();
+
+    return uniqueQueries([
+      label,
+      city,
+      `${city}, ${location.stateCode}`,
+      `${city} ${location.stateCode}`,
+      `${city} area`,
+      `greater ${city}`,
+      `${city} metro`,
+      `${city} metro area`,
+      `downtown ${city}`,
+      `north ${city}`,
+      `south ${city}`,
+      `east ${city}`,
+      `west ${city}`,
+    ]).slice(0, 13);
+  }
+
   return uniqueQueries([
     location?.label ?? locationLabel,
     location?.city && location?.stateCode ? `${location.city} ${location.stateCode}` : '',
@@ -666,8 +693,18 @@ export const googlePlacesProvider: LeadProvider = {
     }
 
     const deadlineMs = requestDeadlineMs ?? Date.now() + 5_000;
-    const maxLeadCount = Math.min(request.count, 60);
-    const searchQueries = uniqueQueries([query, ...queryVariants]).slice(0, 10);
+    const isCityStateLocal = Boolean(
+      location?.mode === 'local' &&
+        location?.label?.includes(',') &&
+        location.city?.trim(),
+    );
+    const maxLeadCount = isCityStateLocal
+      ? Math.min(Math.max(request.count * 2, 80), 120)
+      : Math.min(request.count, 60);
+    const searchQueries = uniqueQueries([query, ...queryVariants]).slice(
+      0,
+      isCityStateLocal ? 16 : 10,
+    );
 
     const candidateMap = new Map<string, PlaceCandidate>();
     const locationLabel = location?.label ?? request.city;
