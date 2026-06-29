@@ -209,6 +209,25 @@ export function HomePage({ searchApi }: HomePageProps) {
             return;
           }
 
+          if (!nextResult) {
+            setResult((current) =>
+              current
+                ? {
+                    ...current,
+                    meta: {
+                      ...current.meta,
+                      status: 'complete',
+                      progress: {
+                        ...current.meta.progress,
+                        currentSource: 'Complete',
+                      },
+                    },
+                  }
+                : current,
+            );
+            return;
+          }
+
           setResult(nextResult);
 
           if (!pollingStatuses.includes(nextResult.meta.status)) {

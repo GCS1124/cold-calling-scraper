@@ -30,7 +30,7 @@ const fetchFromApi = async (path: string, init?: RequestInit): Promise<Response>
 
 export type SearchApi = {
   startSearch: (request: SearchRequest) => Promise<SearchResponse>;
-  getSearch: (searchId: string) => Promise<SearchResponse>;
+  getSearch: (searchId: string) => Promise<SearchResponse | null>;
 };
 
 export const searchApi: SearchApi = {
@@ -49,6 +49,11 @@ export const searchApi: SearchApi = {
 
   async getSearch(searchId) {
     const response = await fetchFromApi(`/api/search/${searchId}`);
+
+    if (response.status === 204) {
+      return null;
+    }
+
     return response.json() as Promise<SearchResponse>;
   },
 };

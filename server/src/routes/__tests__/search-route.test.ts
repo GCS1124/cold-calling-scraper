@@ -38,6 +38,7 @@ const createResponse = () => {
   const state = {
     statusCode: 200,
     body: undefined as unknown,
+    ended: false,
   };
 
   const response = {
@@ -47,6 +48,10 @@ const createResponse = () => {
     },
     json(payload: unknown) {
       state.body = payload;
+      return response;
+    },
+    end() {
+      state.ended = true;
       return response;
     },
   };
@@ -186,6 +191,28 @@ describe('/api/search handlers', () => {
         locationLabel: 'Austin, TX',
       },
     });
+  });
+
+  it('returns 204 when a search id is valid but no job snapshot is available', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn().mockResolvedValue(null),
+    };
+    const { response, state } = createResponse();
+
+    await handleGetSearch(
+      search,
+      {
+        params: {
+          searchId: 'search-missing',
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(204);
+    expect(state.ended).toBe(true);
+    expect(search.getSearch).toHaveBeenCalledWith('search-missing');
   });
 
   it('returns 400 when a search id is missing', async () => {

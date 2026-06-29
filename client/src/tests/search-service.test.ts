@@ -84,6 +84,16 @@ describe('searchApi', () => {
     expect(globalThis.fetch).toHaveBeenCalledWith('/api/search/search-1', undefined);
   });
 
+  it('returns null when the search snapshot is no longer available', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: vi.fn(),
+    } as unknown as Response);
+
+    await expect(searchApi.getSearch('search-1')).resolves.toBeNull();
+  });
+
   it('surfaces an API error without falling back to localhost', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,

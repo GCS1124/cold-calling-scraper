@@ -12,6 +12,7 @@ export type SearchService = {
 type SearchResponder = {
   status: (code: number) => SearchResponder;
   json: (payload: unknown) => SearchResponder;
+  end: () => SearchResponder;
 };
 
 export const handleStartSearch = async (
@@ -55,9 +56,7 @@ export const handleGetSearch = async (
 
     const response = await search.getSearch(searchId);
     if (!response) {
-      res.status(404).json({
-        error: 'Search not found',
-      });
+      res.status(204).end();
       return;
     }
 
