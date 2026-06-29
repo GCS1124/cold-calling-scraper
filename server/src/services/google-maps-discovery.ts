@@ -13,6 +13,25 @@ const normalizePhoneCandidate = (value: string) => value.trim();
 const toAbsoluteUrl = (value: string) =>
   value.startsWith('http') ? value : `https://www.google.com${value}`;
 
+const buildLaunchOptions = async () => {
+  const baseArgs = ['--disable-blink-features=AutomationControlled'];
+
+  if (!process.env.VERCEL) {
+    return {
+      headless: true,
+      args: baseArgs,
+    };
+  }
+
+  const { default: sparticuzChromium } = await import('@sparticuz/chromium');
+
+  return {
+    headless: true,
+    args: [...sparticuzChromium.args, ...baseArgs],
+    executablePath: await sparticuzChromium.executablePath(),
+  };
+};
+
 const parseListingCoordinates = (listingUrl: string) => {
   const match =
     listingUrl.match(listingCoordinatePattern) ??
@@ -209,15 +228,8 @@ export const discoverUsLeadsFromGoogleMaps = async ({
   queryLimit?: number;
   deadlineMs?: number;
 }): Promise<Lead[]> => {
-  if (process.env.VERCEL && !process.env.PLAYWRIGHT_BROWSERS_PATH) {
-    process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
-  }
-
   const { chromium } = await import('playwright');
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--disable-blink-features=AutomationControlled'],
-  });
+  const browser = await chromium.launch(await buildLaunchOptions());
   const page = await browser.newPage({
     userAgent:
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',

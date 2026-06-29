@@ -6,12 +6,12 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run --coverage",
-    "postinstall": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium"
+    "test": "vitest run --coverage"
   },
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@sparticuz/chromium": "^149.0.0",
     "axios": "^1.15.1",
     "cheerio": "^1.2.0",
     "cors": "^2.8.6",
