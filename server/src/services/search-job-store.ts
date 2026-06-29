@@ -53,12 +53,30 @@ const POSTGRES_STATEMENT_TIMEOUT_MS = Number(
   process.env.SEARCH_JOB_POSTGRES_STATEMENT_TIMEOUT_MS ?? 10_000,
 );
 
+const normalizeConnectionString = (url: string) => {
+  try {
+    const parsed = new URL(url);
+
+    for (const key of ['sslmode', 'sslrootcert', 'sslcert', 'sslkey', 'sslaccept']) {
+      parsed.searchParams.delete(key);
+    }
+
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+};
+
 const connectionString =
   process.env.POSTGRES_URL_NON_POOLING?.trim() ||
   process.env.POSTGRES_PRISMA_URL?.trim() ||
   process.env.POSTGRES_URL?.trim() ||
   process.env.DATABASE_URL?.trim() ||
   '';
+
+const sanitizedConnectionString = connectionString
+  ? normalizeConnectionString(connectionString)
+  : '';
 
 const shouldUseSsl = (url: string) => {
   if (!url) return false;
@@ -83,7 +101,7 @@ const getPool = () => {
 
   if (!pool) {
     const config: PoolConfig = {
-      connectionString,
+      connectionString: sanitizedConnectionString,
       max: Number(process.env.SEARCH_JOB_POSTGRES_POOL_MAX ?? 2),
       idleTimeoutMillis: Number(process.env.SEARCH_JOB_POSTGRES_IDLE_TIMEOUT_MS ?? 10_000),
       connectionTimeoutMillis: Number(process.env.SEARCH_JOB_POSTGRES_CONNECT_TIMEOUT_MS ?? 6_000),
