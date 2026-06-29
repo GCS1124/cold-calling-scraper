@@ -126,6 +126,87 @@ describe('createSearchService', () => {
     expect(completed?.leads[0]?.name).toBe('Lattice Dental');
   });
 
+  it('fans out Austin city-state searches across local seed variants before finishing', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+    const googleCalls: string[] = [];
+
+    const service = createSearchService({
+      idFactory: () => 'search-2b',
+      normalizeLocation: vi.fn().mockImplementation(async (input: string) => {
+        if (input === 'Austin') {
+          return sampleLocation;
+        }
+
+        if (
+          input === 'Austin, TX' ||
+          input === 'Austin TX' ||
+          input === 'Austin, Texas' ||
+          input === 'Austin Texas'
+        ) {
+          return {
+            ...sampleLocation,
+            label: input,
+          };
+        }
+
+        if (
+          input === 'Austin area' ||
+          input === 'greater Austin' ||
+          input === 'Austin metro' ||
+          input === 'Austin metro area' ||
+          input === 'downtown Austin' ||
+          input === 'central Austin'
+        ) {
+          return {
+            ...sampleLocation,
+            label: input,
+          };
+        }
+
+        return sampleLocation;
+      }),
+      discoverGoogleLeads: vi.fn().mockImplementation(async ({ location }) => {
+        googleCalls.push(location.label);
+
+        if (location.label === 'Austin area' || location.label === 'greater Austin') {
+          return [
+            {
+              ...sampleLead,
+              id: `lead-${location.label}`,
+              source: 'Google Places',
+              address: '500 Congress Ave, Austin, TX 78701',
+              city: 'Austin, TX',
+            },
+          ];
+        }
+
+        return [];
+      }),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'Dental Clinics',
+      city: 'Austin',
+      count: 50,
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-2b');
+
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.leads).toHaveLength(1);
+    expect(googleCalls).toEqual(expect.arrayContaining(['Austin area', 'greater Austin']));
+  });
+
   it('keeps category warnings while keeping the job open until the target is met', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 
@@ -289,6 +370,47 @@ describe('createSearchService', () => {
     expect(googleCalls.length).toBeGreaterThan(1);
     expect(osmCalls.length).toBeGreaterThan(1);
     expect(completed?.leads.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('stops a no-progress discovery after the 20-second stall window expires', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+    const googleCalls: string[] = [];
+    let nowCalls = 0;
+
+    const service = createSearchService({
+      idFactory: () => 'search-4b',
+      now: () => {
+        nowCalls += 1;
+        return nowCalls <= 2 ? 0 : 25_000;
+      },
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverGoogleLeads: vi.fn().mockImplementation(async ({ location }) => {
+        googleCalls.push(location.label);
+        return [];
+      }),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'Dental Clinics',
+      city: 'Austin',
+      count: 50,
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-4b');
+
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.meta.providerWarnings.some((warning) => warning.providerId === 'discovery-limit')).toBe(true);
+    expect(googleCalls.length).toBe(1);
   });
 
   it('keeps the job running when a regional seed fails to normalize', async () => {

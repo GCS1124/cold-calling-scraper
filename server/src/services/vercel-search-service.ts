@@ -2,14 +2,11 @@ import { randomUUID } from 'node:crypto';
 
 import type { Lead } from '../types/lead';
 import type { ProviderWarning, SearchProgress, SearchRequest, SearchResponse, SearchStatus } from '../types/search';
-import { usStateNames, type UsStateCode } from '../data/us-states';
 import { deduplicateLeads } from './lead-deduplication';
 import { enrichLead } from './lead-validation';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
 import { googlePlacesProvider } from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
-import { nationwideStateQueries } from './us-discovery-regions';
-import { timezoneStateQueries } from './us-timezones';
 import { filterLeadsForLocation } from './location-acceptance';
 import {
   createSearchJobStore,
@@ -19,6 +16,7 @@ import {
 } from './search-job-store';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
+import { buildDiscoverySeeds } from './discovery-seeds';
 
 type VercelSearchService = {
   startSearch: (request: SearchRequest) => Promise<SearchResponse>;
@@ -59,49 +57,6 @@ const createProgress = (requestedCount: number): SearchProgress => ({
 });
 
 const normalizeLead = (lead: Lead) => enrichLead(lead);
-
-const toSearchSeeds = (location: NormalizedUsLocation) => {
-  if (location.mode === 'nationwide') {
-    return [...nationwideStateQueries];
-  }
-
-  if (location.mode === 'timezone' && location.timeZoneCode) {
-    return [...timezoneStateQueries[location.timeZoneCode]];
-  }
-
-  const isCityStateLocal = location.mode === 'local' && location.label.includes(',');
-
-  if (isCityStateLocal) {
-    const city = location.city.trim() || location.label.split(',')[0]?.trim() || location.label;
-    const stateName = location.stateCode ? usStateNames[location.stateCode as UsStateCode] : '';
-
-    return [
-      location.label,
-      city,
-      `${city}, ${location.stateCode}`,
-      `${city} ${location.stateCode}`,
-      stateName ? `${city}, ${stateName}` : '',
-      stateName ? `${city} ${stateName}` : '',
-      `${city} area`,
-      `greater ${city}`,
-      `${city} metro`,
-      `${city} metro area`,
-      `downtown ${city}`,
-      `central ${city}`,
-      `north ${city}`,
-      `south ${city}`,
-      `east ${city}`,
-      `west ${city}`,
-    ].filter((value): value is string => Boolean(value?.trim()));
-  }
-
-  const seeds = [location.label];
-  if (location.stateCode && location.stateCode !== location.label) {
-    seeds.push(location.stateCode);
-  }
-  seeds.push(...nationwideStateQueries);
-  return seeds;
-};
 
 const rankDiscoveryCandidates = (leads: Lead[]) =>
   [...leads].sort((left, right) => {
@@ -284,7 +239,7 @@ const tickJob = async (
       targetLocation.mode === 'nationwide'
         ? `${job.request.companyType} in United States`
         : buildQuery(job.request.companyType, targetLocation);
-    job.searchSeeds = toSearchSeeds(targetLocation);
+    job.searchSeeds = buildDiscoverySeeds(targetLocation);
     job.status = 'discovering';
     job.progress.currentSource = 'Google Places API';
     job.providerWarnings.push(...targetLocation.warnings);

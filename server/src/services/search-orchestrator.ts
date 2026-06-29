@@ -12,11 +12,11 @@ import { deduplicateLeads } from './lead-deduplication';
 import { enrichLeads } from './lead-validation';
 import { googlePlacesProvider } from '../providers/google-places';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
-import { nationwideStateQueries } from './us-discovery-regions';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
+import { buildDiscoverySeeds } from './discovery-seeds';
 
 type SearchJob = {
   searchId: string;
@@ -28,6 +28,7 @@ type SearchJob = {
   progress: SearchProgress;
   providerWarnings: ProviderWarning[];
   expiresAt: number;
+  lastProgressAt: number;
 };
 
 type SearchService = {
@@ -57,6 +58,7 @@ type SearchDeps = {
 const jobTtlMs = 15 * 60 * 1000;
 const googleDiscoveryTimeoutMs = 20000;
 const osmDiscoveryTimeoutMs = 20000;
+const discoveryStallMs = 20000;
 const maxCandidatePool = 3000;
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: string) => {
@@ -172,11 +174,15 @@ const refreshProgress = (job: SearchJob) => {
 const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
   rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
 
-const upsertLeads = (job: SearchJob, incoming: Lead[]) => {
+const upsertLeads = (job: SearchJob, incoming: Lead[], now: () => number) => {
+  const previousCount = job.leads.length;
   const merged = [...job.leads, ...enrichLeads(incoming)];
   const { leads, duplicatesRemoved } = dedupeWithCount(merged);
   job.progress.duplicatesRemoved += duplicatesRemoved;
   job.leads = trimCandidatePool(leads, job.request.count);
+  if (job.leads.length > previousCount) {
+    job.lastProgressAt = now();
+  }
   refreshProgress(job);
 };
 
@@ -188,6 +194,7 @@ const runRegionalDiscovery = async (
   profile: ReturnType<typeof resolveCategoryProfile>,
   discoverGoogleLeads: NonNullable<SearchDeps['discoverGoogleLeads']>,
   discoverOsmLeads: NonNullable<SearchDeps['discoverOsmLeads']>,
+  now: () => number,
 ) => {
   job.progress.currentSource =
     discoveryLocation.mode === 'nationwide' ? 'Nationwide Discovery' : 'Google Places API';
@@ -224,7 +231,7 @@ const runRegionalDiscovery = async (
           'Google Places discovery timed out before the batch completed',
         );
         const acceptedGoogleLeads = filterLeadsForLocation(googleLeads, targetLocation);
-        upsertLeads(job, acceptedGoogleLeads);
+        upsertLeads(job, acceptedGoogleLeads, now);
         job.progress.batchesCompleted += 1;
       } catch (error) {
         job.providerWarnings.push({
@@ -249,7 +256,7 @@ const runRegionalDiscovery = async (
           'OpenStreetMap discovery timed out before the batch completed',
         );
         const acceptedOsmLeads = filterLeadsForLocation(osmLeads, targetLocation);
-        upsertLeads(job, acceptedOsmLeads);
+        upsertLeads(job, acceptedOsmLeads, now);
         job.progress.batchesCompleted += 1;
       } catch (error) {
         job.providerWarnings.push({
@@ -310,8 +317,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     const profile = resolveCategoryProfile(job.request.companyType);
     job.providerWarnings.push(...profile.warnings);
 
-    const discoverySeeds =
-      location.mode === 'nationwide' ? [...nationwideStateQueries] : [];
+    const discoverySeeds = buildDiscoverySeeds(location);
 
     const discoveryLocations = [location];
     const normalizedSeeds = await Promise.all(
@@ -325,10 +331,22 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       }),
     );
 
-    discoveryLocations.push(...normalizedSeeds.filter((entry): entry is NormalizedUsLocation => Boolean(entry)));
+    discoveryLocations.push(
+      ...normalizedSeeds.filter((entry): entry is NormalizedUsLocation => Boolean(entry)),
+    );
 
     for (const regionalLocation of discoveryLocations) {
       if (job.progress.foundCount >= job.request.count) {
+        break;
+      }
+
+      if (job.progress.foundCount < job.request.count && now() - job.lastProgressAt >= discoveryStallMs) {
+        job.providerWarnings.push({
+          providerId: 'discovery-limit',
+          providerName: 'Discovery',
+          message:
+            'No new businesses were returned after 20 seconds. Search stopped after verifying the available results.',
+        });
         break;
       }
 
@@ -340,7 +358,18 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         profile,
         discoverGoogleLeads,
         discoverOsmLeads,
+        now,
       );
+
+      if (job.progress.foundCount < job.request.count && now() - job.lastProgressAt >= discoveryStallMs) {
+        job.providerWarnings.push({
+          providerId: 'discovery-limit',
+          providerName: 'Discovery',
+          message:
+            'No new businesses were returned after 20 seconds. Search stopped after verifying the available results.',
+        });
+        break;
+      }
     }
 
     refreshProgress(job);
@@ -357,7 +386,8 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
 
   return {
     async startSearch(request) {
-      cleanupExpiredJobs(jobs, now);
+      const startedAt = now();
+      cleanupExpiredJobs(jobs, () => startedAt);
 
       const searchId = idFactory();
       const job: SearchJob = {
@@ -369,7 +399,8 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         status: 'queued',
         progress: createProgress(request.count),
         providerWarnings: [],
-        expiresAt: now() + jobTtlMs,
+        expiresAt: startedAt + jobTtlMs,
+        lastProgressAt: startedAt,
       };
 
       jobs.set(searchId, job);
