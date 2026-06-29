@@ -30,7 +30,7 @@ export const searchLocationSchema = z.discriminatedUnion('mode', [
 export const searchRequestSchema = z.object({
   companyType: z.string().trim().min(2).max(80),
   location: searchLocationSchema,
-  count: z.number().int().min(1).max(500),
+  count: z.number().int().min(50).max(500),
   filters: z
     .object({
       hasEmail: z.boolean().optional(),

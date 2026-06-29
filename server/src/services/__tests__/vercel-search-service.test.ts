@@ -61,7 +61,7 @@ const makeLead = (overrides: Partial<Lead> = {}): Lead => ({
   mobile: '',
   email: '',
   website: 'https://northstarlabs.ai',
-  address: '',
+  address: '123 Congress Ave, Austin, TX 78701',
   category: 'Dental Clinics',
   city: 'Austin, TX',
   source: 'Google Places',
@@ -172,7 +172,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     const snapshot = await service.getSearch(response.searchId);
 
     expect(snapshot?.leads[0]?.mobile).toBe('+1 512 555 0101');
-    expect(snapshot?.leads[0]?.website).toBe('https://northstarlabs.ai');
+    expect(snapshot?.leads[0]?.website).toBe('https://northstarlabs.ai/');
     expect(snapshot?.leads[0]?.hasPhone).toBe(true);
     expect(snapshot?.leads[0]?.hasWebsite).toBe(true);
   });
@@ -231,7 +231,12 @@ describe('createVercelSearchServiceWithDeps', () => {
         id: 'google-places',
         name: 'Google Places',
         fetchLeads: vi.fn().mockResolvedValue([
-          makeLead({ id: 'lead-state', city: 'California', source: 'Google Places' }),
+          makeLead({
+            id: 'lead-state',
+            city: 'Sacramento, CA',
+            source: 'Google Places',
+            address: '1000 Capitol Mall, Sacramento, CA 95814',
+          }),
         ]),
       } as never,
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
@@ -251,6 +256,51 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.leads.length).toBeGreaterThan(0);
     expect(snapshot?.meta.status).toBe('discovering');
     expect(snapshot?.meta.providerWarnings.some((warning) => warning.providerId === 'nominatim')).toBe(true);
+  });
+
+  it('completes cleanly when every candidate is filtered out by the location gate', async () => {
+    const googleCalls: string[] = [];
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      googlePlaces: {
+        id: 'google-places',
+        name: 'Google Places',
+        fetchLeads: vi.fn().mockImplementation(async ({ query, queryVariants = [] }) => {
+          googleCalls.push(query, ...queryVariants);
+          return [
+            makeLead({
+              id: `lead-${googleCalls.length}`,
+              source: 'Google Places',
+              address: '200 Main St, Round Rock, TX 78664',
+              city: 'Round Rock, TX',
+            }),
+            makeLead({
+              id: `lead-${googleCalls.length}-2`,
+              source: 'Google Maps',
+              address: '1000 Commerce St, Dallas, TX 75201',
+              city: 'Dallas, TX',
+            }),
+          ];
+        }),
+      } as never,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-3c',
+      now: () => 1000,
+    });
+
+    await service.startSearch({
+      companyType: 'Medical Clinics',
+      city: 'Austin, TX',
+      count: 50,
+    });
+
+    const snapshot = await pollJob(service, 'search-3c', 120);
+
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.meta.progress.foundCount).toBe(0);
+    expect(snapshot?.leads).toHaveLength(0);
+    expect(googleCalls.length).toBeGreaterThan(1);
   });
 
   it('fans out nationwide searches across multiple state seeds and query variants', async () => {

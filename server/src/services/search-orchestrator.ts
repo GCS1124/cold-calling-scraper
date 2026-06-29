@@ -16,6 +16,7 @@ import { nationwideStateQueries } from './us-discovery-regions';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
+import { filterLeadsForLocation } from './location-acceptance';
 
 type SearchJob = {
   searchId: string;
@@ -172,8 +173,8 @@ const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
   rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
 
 const upsertLeads = (job: SearchJob, incoming: Lead[]) => {
-  const merged = [...job.leads, ...incoming];
-  const { leads, duplicatesRemoved } = dedupeWithCount(enrichLeads(merged));
+  const merged = [...job.leads, ...enrichLeads(incoming)];
+  const { leads, duplicatesRemoved } = dedupeWithCount(merged);
   job.progress.duplicatesRemoved += duplicatesRemoved;
   job.leads = trimCandidatePool(leads, job.request.count);
   refreshProgress(job);
@@ -217,7 +218,8 @@ const runRegionalDiscovery = async (
           googleDiscoveryTimeoutMs,
           'Google Places discovery timed out before the batch completed',
         );
-        upsertLeads(job, googleLeads);
+        const acceptedGoogleLeads = filterLeadsForLocation(googleLeads, location);
+        upsertLeads(job, acceptedGoogleLeads);
         job.progress.batchesCompleted += 1;
       } catch (error) {
         job.providerWarnings.push({
@@ -241,7 +243,8 @@ const runRegionalDiscovery = async (
           osmDiscoveryTimeoutMs,
           'OpenStreetMap discovery timed out before the batch completed',
         );
-        upsertLeads(job, osmLeads);
+        const acceptedOsmLeads = filterLeadsForLocation(osmLeads, location);
+        upsertLeads(job, acceptedOsmLeads);
         job.progress.batchesCompleted += 1;
       } catch (error) {
         job.providerWarnings.push({

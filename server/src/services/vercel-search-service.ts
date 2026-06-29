@@ -3,14 +3,16 @@ import { randomUUID } from 'node:crypto';
 import type { Lead } from '../types/lead';
 import type { ProviderWarning, SearchProgress, SearchRequest, SearchResponse, SearchStatus } from '../types/search';
 import { deduplicateLeads } from './lead-deduplication';
-import { enrichLead, enrichLeads } from './lead-validation';
+import { enrichLead } from './lead-validation';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
 import { googlePlacesProvider } from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { nationwideStateQueries } from './us-discovery-regions';
 import { timezoneStateQueries } from './us-timezones';
+import { filterLeadsForLocation } from './location-acceptance';
 import {
   createSearchJobStore,
+  CURRENT_SCHEMA_VERSION,
   type SearchJobRecord,
   toSearchResponse,
 } from './search-job-store';
@@ -128,9 +130,8 @@ const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
 
 const mergeLeads = (job: SearchJobRecord, incoming: Lead[], now: () => number) => {
   const previousCount = job.leads.length;
-  const merged = [...job.leads, ...incoming];
-  const normalized = enrichLeads(merged).map(normalizeLead);
-  const { leads, duplicatesRemoved } = dedupeWithCount(normalized);
+  const merged = [...job.leads, ...incoming.map(normalizeLead)];
+  const { leads, duplicatesRemoved } = dedupeWithCount(merged);
   job.progress.duplicatesRemoved += duplicatesRemoved;
   job.leads = trimCandidatePool(leads, job.request.count);
   if (job.leads.length > previousCount) {
@@ -209,7 +210,7 @@ const discoverRegionLeads = async (
   }
 
   return {
-    leads: [...googleLeads, ...osmLeads],
+    leads: filterLeadsForLocation([...googleLeads, ...osmLeads], location),
     warnings,
   };
 };
@@ -350,6 +351,7 @@ export const createVercelSearchServiceWithDeps = (
       const searchId = idFactory();
       const createdAt = now();
       let job: SearchJobRecord = {
+        schemaVersion: CURRENT_SCHEMA_VERSION,
         searchId,
         request,
         query: `${request.companyType} in ${request.city}`,

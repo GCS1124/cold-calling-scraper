@@ -188,8 +188,14 @@ export function HomePage({ searchApi }: HomePageProps) {
       });
 
     const poll = async () => {
+      let firstTick = true;
+
       while (!cancelled) {
-        await sleep(1500);
+        if (firstTick) {
+          firstTick = false;
+        } else {
+          await sleep(1500);
+        }
 
         if (cancelled) {
           return;

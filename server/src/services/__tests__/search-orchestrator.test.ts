@@ -9,7 +9,7 @@ const sampleLead: Lead = {
   mobile: '5125550101',
   email: '',
   website: 'https://latticedental.com',
-  address: '',
+  address: '123 Congress Ave, Austin, TX 78701',
   category: 'Dental Clinics',
   city: 'Austin, TX',
   source: 'OpenStreetMap',
@@ -171,6 +171,68 @@ describe('createSearchService', () => {
     ]);
   });
 
+  it('drops out-of-area provider candidates before merge and dedupe', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+
+    const service = createSearchService({
+      idFactory: () => 'search-3b',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverGoogleLeads: vi.fn().mockResolvedValue([
+        {
+          ...sampleLead,
+          id: 'good-1',
+          source: 'Google Places',
+          address: '500 Congress Ave, Austin, TX 78701',
+          city: 'Austin, TX',
+        },
+        {
+          ...sampleLead,
+          id: 'bad-1',
+          source: 'Google Maps',
+          address: '200 Main St, Round Rock, TX 78664',
+          city: 'Round Rock, TX',
+        },
+        {
+          ...sampleLead,
+          id: 'bad-2',
+          source: 'Google Places',
+          address: '',
+        },
+      ]),
+      discoverOsmLeads: vi.fn().mockResolvedValue([
+        {
+          ...sampleLead,
+          id: 'bad-3',
+          source: 'OpenStreetMap',
+          address: '1000 Commerce St, Dallas, TX 75201',
+          city: 'Dallas, TX',
+        },
+      ]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'Dental Clinics',
+      city: 'Austin',
+      count: 50,
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-3b');
+
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.meta.progress.foundCount).toBe(1);
+    expect(completed?.leads).toHaveLength(1);
+    expect(completed?.leads[0]?.address).toContain('Austin, TX');
+  });
+
   it('fans out a nationwide search across multiple regional discovery batches without closing early', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
     const googleCalls: string[] = [];
@@ -243,7 +305,7 @@ describe('createSearchService', () => {
           return sampleLocation;
         }
 
-        if (rawLocation === 'California') {
+        if (rawLocation === 'California, USA') {
           throw new Error('429 Too Many Requests');
         }
 

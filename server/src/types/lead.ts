@@ -5,6 +5,12 @@ export type Lead = {
   email?: string;
   website?: string;
   address?: string;
+  state?: string;
+  stateCode?: string;
+  postalCode?: string;
+  zip?: string;
+  latitude?: number;
+  longitude?: number;
   category: string;
   city: string;
   source: string;
@@ -16,10 +22,12 @@ export type Lead = {
     | 'missing_email'
     | 'missing_phone'
     | 'invalid_phone'
+    | 'invalid_email'
     | 'blocked_website'
     | 'blocked_google'
     | 'duplicate'
-    | 'non_business_site';
+    | 'non_business_site'
+    | 'missing_contact';
   hasEmail: boolean;
   hasPhone: boolean;
   hasWebsite: boolean;

@@ -19,6 +19,7 @@ export type Lead = {
     | 'missing_email'
     | 'missing_phone'
     | 'invalid_phone'
+    | 'invalid_email'
     | 'blocked_website'
     | 'blocked_google'
     | 'duplicate'

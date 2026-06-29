@@ -10,6 +10,12 @@ const canonicalizeName = (value: string) =>
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 
+const normalizeText = (value?: string) =>
+  (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
 const pickValue = (...values: Array<string | undefined>) =>
   values.find((value) => Boolean(value?.trim())) ?? '';
 
@@ -37,9 +43,31 @@ const toPhoneKey = (value?: string) => {
   return digits.length === 10 ? digits : '';
 };
 
+const buildIdentityKeys = (lead: Lead) => {
+  const keys: string[] = [];
+  const domain = toDomain(lead.website);
+  const phone = toPhoneKey(lead.mobile);
+  const nameKey = canonicalizeName(lead.name);
+  const cityKey = normalizeText(lead.city);
+
+  if (domain) {
+    keys.push(`domain:${domain}`);
+  }
+
+  if (phone) {
+    keys.push(`phone:${phone}`);
+  }
+
+  if (nameKey && cityKey) {
+    keys.push(`name-city:${nameKey}|${cityKey}`);
+  }
+
+  return keys;
+};
+
 const mergeGroup = (group: Lead[]) => {
   const sorted = [...group].sort((left, right) => right.confidence - left.confidence);
-  const shortestNamed = [...group].sort((left, right) => left.name.length - right.name.length)[0];
+  const shortestNamed = [...group].sort((left, right) => left.name.length - right.name.length)[0] ?? sorted[0];
   const sources = [...new Set(group.map((lead) => lead.source))];
 
   return {
@@ -65,34 +93,66 @@ const mergeGroup = (group: Lead[]) => {
 };
 
 export const deduplicateLeads = (leads: Lead[]) => {
-  const groups: Lead[][] = [];
-
-  for (const lead of leads) {
-    const domain = toDomain(lead.website);
-    const phone = toPhoneKey(lead.mobile);
-    const nameKey = canonicalizeName(lead.name);
-    const cityKey = lead.city.toLowerCase();
-    const matchingGroup = groups.find((group) =>
-      group.some((candidate) => {
-        const candidateDomain = toDomain(candidate.website);
-        const candidatePhone = toPhoneKey(candidate.mobile);
-        const candidateNameKey = canonicalizeName(candidate.name);
-        const candidateCityKey = candidate.city.toLowerCase();
-
-        return (
-          (domain && candidateDomain && domain === candidateDomain) ||
-          (phone && candidatePhone && phone === candidatePhone) ||
-          (nameKey && candidateNameKey && cityKey === candidateCityKey && nameKey === candidateNameKey)
-        );
-      }),
-    );
-
-    if (matchingGroup) {
-      matchingGroup.push(lead);
-    } else {
-      groups.push([lead]);
-    }
+  if (leads.length <= 1) {
+    return [...leads];
   }
 
-  return groups.map(mergeGroup);
+  const parent = leads.map((_, index) => index);
+
+  const find = (index: number): number => {
+    if (parent[index] !== index) {
+      parent[index] = find(parent[index]);
+    }
+
+    return parent[index] ?? index;
+  };
+
+  const union = (left: number, right: number) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+
+    if (leftRoot === rightRoot) {
+      return;
+    }
+
+    if (leftRoot < rightRoot) {
+      parent[rightRoot] = leftRoot;
+      return;
+    }
+
+    parent[leftRoot] = rightRoot;
+  };
+
+  const firstSeenByKey = new Map<string, number>();
+
+  leads.forEach((lead, index) => {
+    for (const key of buildIdentityKeys(lead)) {
+      const existingIndex = firstSeenByKey.get(key);
+
+      if (existingIndex === undefined) {
+        firstSeenByKey.set(key, index);
+        continue;
+      }
+
+      union(index, existingIndex);
+    }
+  });
+
+  const groups = new Map<number, Lead[]>();
+
+  leads.forEach((lead, index) => {
+    const root = find(index);
+    const group = groups.get(root);
+
+    if (group) {
+      group.push(lead);
+      return;
+    }
+
+    groups.set(root, [lead]);
+  });
+
+  return [...groups.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, group]) => mergeGroup(group));
 };
