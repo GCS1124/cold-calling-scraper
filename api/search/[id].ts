@@ -15,7 +15,7 @@ export default async function handler(req: any, res: any) {
   try {
     const response = await vercelSearchService.getSearch(searchId);
     if (!response) {
-      res.status(404).json({ error: 'Search not found' });
+      res.status(204).end();
       return;
     }
 
