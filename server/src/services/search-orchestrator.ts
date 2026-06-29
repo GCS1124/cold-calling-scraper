@@ -68,8 +68,11 @@ const jobTtlMs = 15 * 60 * 1000;
 const googleDiscoveryTimeoutMs = 20000;
 const googleMapsDiscoveryTimeoutMs = 12000;
 const osmDiscoveryTimeoutMs = 20000;
-const discoveryStallMs = 20000;
 const maxCandidatePool = 3000;
+const getDiscoveryStallMs = (requestedCount: number) =>
+  requestedCount >= 50 ? 45_000 : 20_000;
+const getDiscoveryStallLabel = (requestedCount: number) =>
+  requestedCount >= 50 ? '45 seconds' : '20 seconds';
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: string) => {
   let timer: NodeJS.Timeout | undefined;
@@ -393,12 +396,15 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         break;
       }
 
-      if (job.progress.foundCount < job.request.count && now() - job.lastProgressAt >= discoveryStallMs) {
+      if (
+        job.progress.foundCount < job.request.count &&
+        now() - job.lastProgressAt >= getDiscoveryStallMs(job.request.count)
+      ) {
         job.providerWarnings.push({
           providerId: 'discovery-limit',
           providerName: 'Discovery',
           message:
-            'No new businesses were returned after 20 seconds. Search stopped after verifying the available results.',
+            `No new businesses were returned after ${getDiscoveryStallLabel(job.request.count)}. Search stopped after verifying the available results.`,
         });
         break;
       }
@@ -415,12 +421,15 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         now,
       );
 
-      if (job.progress.foundCount < job.request.count && now() - job.lastProgressAt >= discoveryStallMs) {
+      if (
+        job.progress.foundCount < job.request.count &&
+        now() - job.lastProgressAt >= getDiscoveryStallMs(job.request.count)
+      ) {
         job.providerWarnings.push({
           providerId: 'discovery-limit',
           providerName: 'Discovery',
           message:
-            'No new businesses were returned after 20 seconds. Search stopped after verifying the available results.',
+            `No new businesses were returned after ${getDiscoveryStallLabel(job.request.count)}. Search stopped after verifying the available results.`,
         });
         break;
       }

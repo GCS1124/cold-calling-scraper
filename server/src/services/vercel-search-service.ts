@@ -44,8 +44,11 @@ type VercelSearchServiceDeps = {
 
 const jobTtlMs = 15 * 60 * 1000;
 const maxCandidatePool = 3000;
-const discoveryStallMs = 20_000;
 const googleMapsDiscoveryTimeoutMs = 9000;
+const getDiscoveryStallMs = (requestedCount: number) =>
+  requestedCount >= 50 ? 45_000 : 20_000;
+const getDiscoveryStallLabel = (requestedCount: number) =>
+  requestedCount >= 50 ? '45 seconds' : '20 seconds';
 
 const getDiscoveryBatchSize = (requestedCount: number) => (requestedCount >= 100 ? 2 : 1);
 const getPerSeedCount = (requestedCount: number) =>
@@ -343,7 +346,7 @@ const tickJob = async (
   job.discoveryComplete = job.nextSeedIndex >= job.searchSeeds.length;
   const stalledForTooLong =
     job.progress.foundCount < job.request.count &&
-    deps.now() - getLastProgressAt(job) >= discoveryStallMs;
+    deps.now() - getLastProgressAt(job) >= getDiscoveryStallMs(job.request.count);
 
   if (stalledForTooLong) {
     job.discoveryComplete = true;
@@ -351,7 +354,7 @@ const tickJob = async (
       providerId: 'discovery-limit',
       providerName: 'Discovery',
       message:
-        'No new businesses were returned after 20 seconds. Search stopped after verifying the available results.',
+        `No new businesses were returned after ${getDiscoveryStallLabel(job.request.count)}. Search stopped after verifying the available results.`,
     });
   }
 
