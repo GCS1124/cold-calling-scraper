@@ -5,6 +5,7 @@ import type { ProviderWarning, SearchProgress, SearchRequest, SearchResponse, Se
 import { deduplicateLeads } from './lead-deduplication';
 import { enrichLead } from './lead-validation';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
+import { discoverUsLeadsFromGoogleMaps } from './google-maps-discovery';
 import { googlePlacesProvider } from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
@@ -27,6 +28,14 @@ type VercelSearchServiceDeps = {
   store?: ReturnType<typeof createSearchJobStore>;
   googlePlaces?: typeof googlePlacesProvider;
   normalizeLocation?: typeof normalizeUsLocation;
+  discoverGoogleMapsLeads?: (args: {
+    request: SearchRequest;
+    location: NormalizedUsLocation;
+    queryVariants: string[];
+    maxResults?: number;
+    queryLimit?: number;
+    deadlineMs?: number;
+  }) => Promise<Lead[]>;
   discoverOsmLeads?: typeof discoverUsLeadsFromOsm;
   enrichWebsiteLead?: (lead: Lead) => Promise<unknown>;
   now?: () => number;
@@ -36,6 +45,7 @@ type VercelSearchServiceDeps = {
 const jobTtlMs = 15 * 60 * 1000;
 const maxCandidatePool = 3000;
 const discoveryStallMs = 20_000;
+const googleMapsDiscoveryTimeoutMs = 9000;
 
 const getDiscoveryBatchSize = (requestedCount: number) => (requestedCount >= 100 ? 2 : 1);
 const getPerSeedCount = (requestedCount: number) =>
@@ -130,6 +140,7 @@ const discoverRegionLeads = async (
   targetLocation: NormalizedUsLocation,
   discoveryLocation: NormalizedUsLocation,
   googlePlaces: typeof googlePlacesProvider,
+  discoverGoogleMapsLeads: VercelSearchServiceDeps['discoverGoogleMapsLeads'],
   discoverOsmLeads: typeof discoverUsLeadsFromOsm,
   profile = resolveCategoryProfile(request.companyType),
   deadlineMs = Date.now() + getMaxTickDurationMs(request.count),
@@ -196,8 +207,41 @@ const discoverRegionLeads = async (
     });
   }
 
+  const acceptedDiscoveryLeads = filterLeadsForLocation([...googleLeads, ...osmLeads], targetLocation);
+  let googleMapsLeads: Lead[] = [];
+
+  if (
+    acceptedDiscoveryLeads.length < request.count &&
+    discoveryLocation.mode === 'local' &&
+    discoveryLocation.label.includes(',') &&
+    discoverGoogleMapsLeads
+  ) {
+    try {
+      const remainingCount = request.count - acceptedDiscoveryLeads.length;
+      const googleMapsRequestCount = Math.min(Math.max(remainingCount, 15), 30);
+      googleMapsLeads = await discoverGoogleMapsLeads({
+        request: {
+          ...request,
+          count: googleMapsRequestCount,
+        },
+        location: discoveryLocation,
+        queryVariants,
+        maxResults: googleMapsRequestCount,
+        queryLimit: 4,
+        deadlineMs,
+      });
+    } catch (error) {
+      warnings.push({
+        providerId: 'google-maps',
+        providerName: 'Google Maps',
+        message:
+          error instanceof Error ? error.message : 'Google Maps discovery failed',
+      });
+    }
+  }
+
   return {
-    leads: filterLeadsForLocation([...googleLeads, ...osmLeads], targetLocation),
+    leads: filterLeadsForLocation([...acceptedDiscoveryLeads, ...googleMapsLeads], targetLocation),
     warnings,
   };
 };
@@ -205,7 +249,8 @@ const discoverRegionLeads = async (
 const tickJob = async (
   job: SearchJobRecord,
   store: ReturnType<typeof createSearchJobStore>,
-  deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'now'>>,
+  deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'now'>> &
+    Pick<VercelSearchServiceDeps, 'discoverGoogleMapsLeads'>,
 ): Promise<SearchJobRecord> => {
   let targetLocation = job.targetLocation as NormalizedUsLocation | undefined;
 
@@ -276,6 +321,7 @@ const tickJob = async (
         targetLocation,
         regionalLocation,
         deps.googlePlaces,
+        deps.discoverGoogleMapsLeads ?? discoverUsLeadsFromGoogleMaps,
         deps.discoverOsmLeads,
         resolveCategoryProfile(job.request.companyType),
         deps.now() + maxTickDurationMs,
@@ -333,6 +379,9 @@ export const createVercelSearchServiceWithDeps = (
   const store = deps.store ?? createSearchJobStore();
   const googlePlaces = deps.googlePlaces ?? googlePlacesProvider;
   const normalizeLocation = deps.normalizeLocation ?? normalizeUsLocation;
+  const discoverGoogleMapsLeads =
+    deps.discoverGoogleMapsLeads ??
+    (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromGoogleMaps);
   const discoverOsm = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
@@ -381,6 +430,7 @@ export const createVercelSearchServiceWithDeps = (
       const next = await tickJob(job, store, {
         googlePlaces,
         normalizeLocation,
+        discoverGoogleMapsLeads,
         discoverOsmLeads: discoverOsm,
         now,
       });

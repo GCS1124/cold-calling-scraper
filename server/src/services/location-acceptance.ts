@@ -377,6 +377,11 @@ const matchesTimezoneLocation = (
   return allowedStates.includes(stateName);
 };
 
+const matchesCoordinateLocation = (
+  lead: LeadLocationCandidate,
+  location: NormalizedUsLocation,
+) => isPointInsideBoundingBox(lead, location.boundingBox);
+
 const matchesStateLocation = (
   evidence: ParsedAddressEvidence | null,
   location: NormalizedUsLocation,
@@ -389,19 +394,24 @@ const matchesStateLocation = (
 };
 
 const matchesCityStateLocation = (
+  lead: LeadLocationCandidate,
   evidence: ParsedAddressEvidence | null,
   location: NormalizedUsLocation,
 ) => {
   if (!evidence) {
-    return false;
+    return matchesCoordinateLocation(lead, location);
   }
 
   if (isStateLevelLocalLocation(location)) {
-    return matchesStateLocation(evidence, location);
+    if (evidence.stateCode) {
+      return matchesStateLocation(evidence, location);
+    }
+
+    return matchesCoordinateLocation(lead, location);
   }
 
   if (!evidence.stateCode || !location.stateCode) {
-    return false;
+    return matchesCoordinateLocation(lead, location);
   }
 
   if (evidence.stateCode !== location.stateCode) {
@@ -416,7 +426,7 @@ const matchesCityStateLocation = (
   }
 
   if (!evidenceCity) {
-    return false;
+    return matchesCoordinateLocation(lead, location);
   }
 
   return evidenceCity === expectedCity;
@@ -466,14 +476,18 @@ export const leadMatchesLocation = (
   }
 
   if (location.mode === 'state') {
-    return matchesStateLocation(evidence, location);
+    if (evidence?.stateCode) {
+      return matchesStateLocation(evidence, location);
+    }
+
+    return matchesCoordinateLocation(lead, location);
   }
 
   if (location.mode === 'region') {
     return matchesRegionLocation(lead, evidence, location);
   }
 
-  return matchesCityStateLocation(evidence, location);
+  return matchesCityStateLocation(lead, evidence, location);
 };
 
 export const filterLeadsForLocation = (

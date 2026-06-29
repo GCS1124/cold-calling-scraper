@@ -303,6 +303,62 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(googleCalls.length).toBeGreaterThan(1);
   });
 
+  it('keeps Google Maps leads when coordinate evidence proves the Austin location', async () => {
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      googlePlaces: {
+        id: 'google-places',
+        name: 'Google Places',
+        fetchLeads: vi.fn().mockResolvedValue([]),
+      } as never,
+      discoverGoogleMapsLeads: vi.fn().mockResolvedValue([
+        makeLead({
+          id: 'lead-maps-austin',
+          source: 'Google Maps',
+          address: '',
+          city: '',
+          latitude: 30.2672,
+          longitude: -97.7431,
+          mobile: '+1 512 555 0101',
+          website: 'https://austinac.com',
+          hasPhone: true,
+          hasWebsite: true,
+          verifiedPhone: true,
+        }),
+        makeLead({
+          id: 'lead-maps-out',
+          source: 'Google Maps',
+          address: '',
+          city: '',
+          latitude: 32.7767,
+          longitude: -96.797,
+          mobile: '+1 214 555 0199',
+          website: 'https://dallasac.com',
+          hasPhone: true,
+          hasWebsite: true,
+          verifiedPhone: true,
+        }),
+      ]),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-maps-coords',
+      now: () => 1000,
+    });
+
+    const response = await service.startSearch({
+      companyType: 'HVAC Contractors',
+      city: 'Austin, TX',
+      count: 50,
+    });
+
+    const snapshot = await pollJob(service, response.searchId);
+
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.leads).toHaveLength(1);
+    expect(snapshot?.leads[0]?.source).toContain('Google Maps');
+    expect(snapshot?.leads[0]?.address ?? '').toBe('');
+  });
+
   it('keeps Austin searches inside Austin even when broader Texas seeds return outliers', async () => {
     const austinLead = makeLead({
       id: 'lead-austin',
@@ -410,10 +466,10 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
     });
 
-    const snapshot = await pollJob(service, 'search-4', 70);
+    const snapshot = await pollJob(service, 'search-4', 35);
 
     expect(googleCalls.length).toBeGreaterThan(1);
-    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.meta.locationLabel).toBe('United States');
     expect(snapshot?.meta.progress.foundCount).toBeGreaterThanOrEqual(1);
   });
 

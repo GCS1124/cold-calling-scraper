@@ -1,5 +1,3 @@
-import { chromium } from 'playwright';
-
 import type { Lead } from '../types/lead';
 import type { SearchRequest } from '../types/search';
 import type { NormalizedUsLocation } from './us-location';
@@ -7,11 +5,35 @@ import type { NormalizedUsLocation } from './us-location';
 const blockedPattern =
   /unusual traffic|detected unusual traffic|sorry|captcha|automated queries|verify you are human/i;
 const phonePattern = /\+?1?[\s.(\-]*\d{3}[\s.)\-]*\d{3}[\s.\-]*\d{4}/;
+const listingCoordinatePattern = /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/;
+const locationCoordinatePattern = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),/;
 
 const normalizePhoneCandidate = (value: string) => value.trim();
 
 const toAbsoluteUrl = (value: string) =>
   value.startsWith('http') ? value : `https://www.google.com${value}`;
+
+const parseListingCoordinates = (listingUrl: string) => {
+  const match =
+    listingUrl.match(listingCoordinatePattern) ??
+    listingUrl.match(locationCoordinatePattern);
+
+  if (!match) {
+    return {};
+  }
+
+  const latitude = Number(match[1]);
+  const longitude = Number(match[2]);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return {};
+  }
+
+  return {
+    latitude,
+    longitude,
+  };
+};
 
 const scoreLead = (lead: Lead) => {
   let score = 55;
@@ -25,18 +47,30 @@ type GoogleMapsCandidate = {
   name: string;
   listingUrl: string;
   phone?: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 const extractListingCandidates = async (page: import('playwright').Page) =>
   page.$$eval('a[href*="/maps/place/"]', (anchors) => {
-    const unique = new Map<string, { name: string; listingUrl: string; phone?: string }>();
+    const unique = new Map<
+      string,
+      { name: string; listingUrl: string; phone?: string; latitude?: number; longitude?: number }
+    >();
     const phonePattern = /\+?1?[\s.(\-]*\d{3}[\s.)\-]*\d{3}[\s.\-]*\d{4}/;
+    const listingCoordinatePattern = /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/;
+    const locationCoordinatePattern = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),/;
 
     for (const anchor of anchors) {
       const href = anchor.getAttribute('href');
       if (!href) continue;
       const listingUrl = href.startsWith('http') ? href : `https://www.google.com${href}`;
       if (unique.has(listingUrl)) continue;
+      const coordinateMatch =
+        listingUrl.match(listingCoordinatePattern) ??
+        listingUrl.match(locationCoordinatePattern);
+      const latitude = Number(coordinateMatch?.[1]);
+      const longitude = Number(coordinateMatch?.[2]);
 
       const root =
         anchor.closest('[role="article"]') ??
@@ -52,6 +86,8 @@ const extractListingCandidates = async (page: import('playwright').Page) =>
         name,
         listingUrl,
         phone: phoneMatch || undefined,
+        latitude: Number.isFinite(latitude) ? latitude : undefined,
+        longitude: Number.isFinite(longitude) ? longitude : undefined,
       });
     }
 
@@ -76,11 +112,11 @@ const scrapeListingDetails = async (
     });
 
     const body = (await page.textContent('body')) ?? '';
-    if (blockedPattern.test(body)) {
-      return {
-        id: `google-${Buffer.from(candidate.listingUrl).toString('base64').slice(0, 24)}`,
-        name: candidate.name,
-        mobile: candidate.phone ?? '',
+      if (blockedPattern.test(body)) {
+        return {
+          id: `google-${Buffer.from(candidate.listingUrl).toString('base64').slice(0, 24)}`,
+          name: candidate.name,
+          mobile: candidate.phone ?? '',
         email: '',
         website: '',
         address: '',
@@ -95,10 +131,12 @@ const scrapeListingDetails = async (
         hasPhone: false,
         hasWebsite: false,
         verifiedPhone: false,
-        verifiedEmail: false,
-        scrapedAt: new Date().toISOString(),
-      };
-    }
+          verifiedEmail: false,
+          scrapedAt: new Date().toISOString(),
+          latitude: candidate.latitude,
+          longitude: candidate.longitude,
+        };
+      }
 
     const scraped = await page.evaluate(() => {
       const name =
@@ -139,6 +177,8 @@ const scrapeListingDetails = async (
       confidence: 0,
       sourceScore: 90,
       listingUrl: candidate.listingUrl,
+      latitude: candidate.latitude,
+      longitude: candidate.longitude,
       hasEmail: false,
       hasPhone: false,
       hasWebsite: false,
@@ -158,11 +198,18 @@ export const discoverUsLeadsFromGoogleMaps = async ({
   request,
   location,
   queryVariants = [],
+  maxResults,
+  queryLimit,
+  deadlineMs,
 }: {
   request: SearchRequest;
   location: NormalizedUsLocation;
   queryVariants?: string[];
+  maxResults?: number;
+  queryLimit?: number;
+  deadlineMs?: number;
 }): Promise<Lead[]> => {
+  const { chromium } = await import('playwright');
   const browser = await chromium.launch({
     headless: true,
     args: ['--disable-blink-features=AutomationControlled'],
@@ -173,21 +220,27 @@ export const discoverUsLeadsFromGoogleMaps = async ({
   });
 
   try {
-    const maxResults = Math.min(Math.max(Math.ceil(request.count * 0.8), 60), 120);
+    const isCityStateLocal = Boolean(
+      location.mode === 'local' &&
+        location.label.includes(',') &&
+        location.city.trim(),
+    );
+    const targetResults = maxResults ?? Math.min(Math.max(Math.ceil(request.count * 0.8), 60), 120);
+    const resultLimit = Math.min(targetResults, isCityStateLocal ? 120 : 60);
     const candidates = new Map<string, GoogleMapsCandidate>();
     const queries = uniqueValues([
       `${request.companyType} in ${location.label}`,
       ...queryVariants,
-    ]).slice(0, 5);
+    ]).slice(0, queryLimit ?? (isCityStateLocal ? 5 : 3));
 
     for (const query of queries) {
-      if (candidates.size >= maxResults) {
+      if (candidates.size >= resultLimit || (deadlineMs && Date.now() >= deadlineMs)) {
         break;
       }
 
       await page.goto(`https://www.google.com/maps/search/${encodeURIComponent(query)}`, {
         waitUntil: 'domcontentloaded',
-        timeout: 30000,
+        timeout: 12000,
       });
 
       const acceptButton = page.locator('button:has-text("Accept all")').first();
@@ -195,7 +248,7 @@ export const discoverUsLeadsFromGoogleMaps = async ({
         await acceptButton.click().catch(() => undefined);
       }
 
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(600);
 
       const body = (await page.textContent('body')) ?? '';
       if (blockedPattern.test(body) || /\/sorry\//i.test(page.url())) {
@@ -205,7 +258,11 @@ export const discoverUsLeadsFromGoogleMaps = async ({
       const feed = page.locator('[role="feed"]').first();
       let stagnantRounds = 0;
 
-      while (candidates.size < maxResults && stagnantRounds < 3) {
+      while (candidates.size < resultLimit && stagnantRounds < 3) {
+        if (deadlineMs && Date.now() >= deadlineMs) {
+          break;
+        }
+
         const before = candidates.size;
         for (const candidate of await extractListingCandidates(page)) {
           if (!candidates.has(candidate.listingUrl)) {
@@ -226,16 +283,20 @@ export const discoverUsLeadsFromGoogleMaps = async ({
         } else {
           await page.mouse.wheel(0, 3500);
         }
-        await page.waitForTimeout(700);
+        await page.waitForTimeout(500);
       }
     }
 
-    const listingCandidates = [...candidates.values()].slice(0, maxResults);
+    const listingCandidates = [...candidates.values()].slice(0, resultLimit);
     const detailBrowser = browser;
     const concurrency = 4;
     const results: Lead[] = [];
 
     for (let index = 0; index < listingCandidates.length; index += concurrency) {
+      if (deadlineMs && Date.now() >= deadlineMs) {
+        break;
+      }
+
       const chunk = listingCandidates.slice(index, index + concurrency);
       const leads = await Promise.all(
         chunk.map((candidate) =>

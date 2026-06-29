@@ -314,6 +314,54 @@ describe('createSearchService', () => {
     expect(completed?.leads[0]?.address).toContain('Austin, TX');
   });
 
+  it('keeps Google Maps coordinate matches when Google Places is short', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+
+    const service = createSearchService({
+      idFactory: () => 'search-3c',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverGoogleLeads: vi.fn().mockResolvedValue([]),
+      discoverGoogleMapsLeads: vi.fn().mockResolvedValue([
+        {
+          ...sampleLead,
+          id: 'lead-maps-austin',
+          source: 'Google Maps',
+          address: '',
+          city: '',
+          latitude: 30.2672,
+          longitude: -97.7431,
+          website: 'https://austinac.com',
+          mobile: '+1 512 555 0101',
+          hasPhone: true,
+          hasWebsite: true,
+          verifiedPhone: true,
+        },
+      ]),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'HVAC Contractors',
+      city: 'Austin',
+      count: 50,
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-3c');
+
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.leads).toHaveLength(1);
+    expect(completed?.leads[0]?.source).toContain('Google Maps');
+  });
+
   it('fans out a nationwide search across multiple regional discovery batches without closing early', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
     const googleCalls: string[] = [];

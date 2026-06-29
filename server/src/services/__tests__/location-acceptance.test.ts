@@ -92,16 +92,6 @@ describe('location-acceptance', () => {
       id: 'lead-3',
       address: '',
     });
-
-    expect(leadMatchesLocation(goodLead, austinLocation)).toBe(true);
-    expect(leadMatchesLocation(sameStateDifferentCity, austinLocation)).toBe(false);
-    expect(leadMatchesLocation(missingAddress, austinLocation)).toBe(false);
-    expect(filterLeadsForLocation([goodLead, sameStateDifferentCity, missingAddress], austinLocation)).toHaveLength(
-      1,
-    );
-  });
-
-  it('rejects coordinate-only leads when the address cannot prove the location', () => {
     const coordinateOnlyLead = makeLead({
       id: 'lead-4',
       address: '',
@@ -110,9 +100,26 @@ describe('location-acceptance', () => {
       latitude: 30.2672,
       longitude: -97.7431,
     });
+    const outOfBoundsCoordinateLead = makeLead({
+      id: 'lead-5',
+      address: '',
+      city: '',
+      stateCode: '',
+      latitude: 31.5,
+      longitude: -96.0,
+    });
 
-    expect(leadMatchesLocation(coordinateOnlyLead, austinLocation)).toBe(false);
-    expect(filterLeadsForLocation([coordinateOnlyLead], austinLocation)).toHaveLength(0);
+    expect(leadMatchesLocation(goodLead, austinLocation)).toBe(true);
+    expect(leadMatchesLocation(sameStateDifferentCity, austinLocation)).toBe(false);
+    expect(leadMatchesLocation(missingAddress, austinLocation)).toBe(false);
+    expect(leadMatchesLocation(coordinateOnlyLead, austinLocation)).toBe(true);
+    expect(leadMatchesLocation(outOfBoundsCoordinateLead, austinLocation)).toBe(false);
+    expect(
+      filterLeadsForLocation(
+        [goodLead, sameStateDifferentCity, missingAddress, coordinateOnlyLead, outOfBoundsCoordinateLead],
+        austinLocation,
+      ),
+    ).toHaveLength(2);
   });
 
   it('accepts only states inside the selected timezone allow-list', () => {
@@ -169,7 +176,7 @@ describe('location-acceptance', () => {
 
     expect(leadMatchesLocation(inStateLead, californiaLocation)).toBe(true);
     expect(leadMatchesLocation(outOfStateLead, californiaLocation)).toBe(false);
-    expect(leadMatchesLocation(coordinateOnlyLead, californiaLocation)).toBe(false);
-    expect(filterLeadsForLocation([inStateLead, outOfStateLead, coordinateOnlyLead], californiaLocation)).toHaveLength(1);
+    expect(leadMatchesLocation(coordinateOnlyLead, californiaLocation)).toBe(true);
+    expect(filterLeadsForLocation([inStateLead, outOfStateLead, coordinateOnlyLead], californiaLocation)).toHaveLength(2);
   });
 });

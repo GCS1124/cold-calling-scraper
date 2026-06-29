@@ -12,6 +12,7 @@ import { deduplicateLeads } from './lead-deduplication';
 import { enrichLeads } from './lead-validation';
 import { googlePlacesProvider } from '../providers/google-places';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
+import { discoverUsLeadsFromGoogleMaps } from './google-maps-discovery';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
@@ -45,6 +46,14 @@ type SearchDeps = {
     queryVariants: string[];
     deadlineMs?: number;
   }) => Promise<Lead[]>);
+  discoverGoogleMapsLeads?: (args: {
+    request: SearchRequest;
+    location: NormalizedUsLocation;
+    queryVariants: string[];
+    maxResults?: number;
+    queryLimit?: number;
+    deadlineMs?: number;
+  }) => Promise<Lead[]>;
   discoverOsmLeads?: (args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
@@ -57,6 +66,7 @@ type SearchDeps = {
 
 const jobTtlMs = 15 * 60 * 1000;
 const googleDiscoveryTimeoutMs = 20000;
+const googleMapsDiscoveryTimeoutMs = 12000;
 const osmDiscoveryTimeoutMs = 20000;
 const discoveryStallMs = 20000;
 const maxCandidatePool = 3000;
@@ -193,6 +203,7 @@ const runRegionalDiscovery = async (
   discoveryLocation: NormalizedUsLocation,
   profile: ReturnType<typeof resolveCategoryProfile>,
   discoverGoogleLeads: NonNullable<SearchDeps['discoverGoogleLeads']>,
+  discoverGoogleMapsLeads: SearchDeps['discoverGoogleMapsLeads'] | undefined,
   discoverOsmLeads: NonNullable<SearchDeps['discoverOsmLeads']>,
   now: () => number,
 ) => {
@@ -268,12 +279,54 @@ const runRegionalDiscovery = async (
       }
     })(),
   ]);
+
+  if (
+    job.progress.foundCount < request.count &&
+    discoveryLocation.mode === 'local' &&
+    discoveryLocation.label.includes(',') &&
+    discoverGoogleMapsLeads
+  ) {
+    try {
+      const remainingCount = request.count - job.progress.foundCount;
+      const googleMapsLeads = await withTimeout(
+        discoverGoogleMapsLeads({
+          request: {
+            ...request,
+            count: Math.min(Math.max(remainingCount, 15), 30),
+          },
+          location: discoveryLocation,
+          queryVariants,
+          maxResults: Math.min(Math.max(remainingCount, 15), 30),
+          queryLimit: 4,
+          deadlineMs: Date.now() + googleMapsDiscoveryTimeoutMs,
+        }),
+        googleMapsDiscoveryTimeoutMs,
+        'Google Maps discovery timed out before the batch completed',
+      );
+      const acceptedGoogleMapsLeads = filterLeadsForLocation(googleMapsLeads, targetLocation);
+      upsertLeads(job, acceptedGoogleMapsLeads, now);
+      job.progress.batchesCompleted += 1;
+      job.progress.currentSource = 'Google Maps API';
+    } catch (error) {
+      job.providerWarnings.push({
+        providerId: 'google-maps',
+        providerName: 'Google Maps',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Google Maps discovery failed',
+      });
+    }
+  }
 };
 
 export const createSearchService = (deps: SearchDeps = {}): SearchService => {
   const jobs = new Map<string, SearchJob>();
   const normalizeLocation = deps.normalizeLocation ?? normalizeUsLocation;
   const discoverGoogleLeads = deps.discoverGoogleLeads ?? googlePlacesProvider;
+  const discoverGoogleMapsLeads =
+    deps.discoverGoogleMapsLeads ??
+    (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromGoogleMaps);
   const discoverOsmLeads = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
   const now = deps.now ?? Date.now;
   const idFactory = deps.idFactory ?? randomUUID;
@@ -357,6 +410,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         regionalLocation,
         profile,
         discoverGoogleLeads,
+        discoverGoogleMapsLeads,
         discoverOsmLeads,
         now,
       );
