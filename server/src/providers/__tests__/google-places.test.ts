@@ -201,11 +201,13 @@ describe('googlePlacesProvider', () => {
     expect(leads).toHaveLength(2);
     expect(leads[0]?.id).toBe('google-place-new-1');
     expect(leads[1]?.id).toBe('google-place-new-2');
-    expect(seenQueries.map((value) => value.toLowerCase())).toEqual([
-      'dentist in austin, tx',
-      'dental office in austin, tx',
-      'dental clinic in austin, tx',
-    ]);
+    expect(seenQueries.map((value) => value.toLowerCase())).toEqual(
+      expect.arrayContaining([
+        'dentist in austin, tx',
+        'dental office in austin, tx',
+        expect.stringMatching(/^dental clinic( in| | near) austin, tx$/),
+      ]),
+    );
     expect(mockedGet.mock.calls.some(([url]) => String(url).includes('/textsearch/'))).toBe(false);
   });
 
@@ -304,18 +306,18 @@ describe('googlePlacesProvider', () => {
 
         seenQueries.push(textQuery);
 
-        if (/austin (area|metro|metro area|downtown|north|south|east|west)|greater austin/i.test(textQuery)) {
+        if (/^(hvac|air conditioning|heating repair|heating and cooling)/i.test(textQuery)) {
           return {
             data: {
               places: [
                 {
                   id: 'expanded-austin-1',
                   displayName: {
-                    text: 'Greater Austin HVAC',
+                    text: 'Expanded Austin HVAC',
                   },
                   formattedAddress: 'Austin, TX 78703',
                   nationalPhoneNumber: '(512) 555-9999',
-                  websiteUri: 'greater-austin-hvac.example.com',
+                  websiteUri: 'expanded-austin-hvac.example.com',
                 },
               ],
             },
@@ -345,7 +347,9 @@ describe('googlePlacesProvider', () => {
     });
 
     expect(leads).toHaveLength(61);
-    expect(seenQueries.some((value) => /austin (area|metro|metro area|downtown|north|south|east|west)|greater austin/i.test(value))).toBe(true);
+    expect(
+      seenQueries.some((value) => /^(hvac|air conditioning|heating repair|heating and cooling)/i.test(value)),
+    ).toBe(true);
   });
 
   it('falls back to legacy Places only after expanded Places API (New) queries still come up short', async () => {

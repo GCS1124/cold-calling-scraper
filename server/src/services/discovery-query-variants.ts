@@ -27,6 +27,12 @@ const normalizeQueryPart = (value: string) =>
 const unique = (values: string[]) =>
   [...new Set(values.map(normalizeQueryPart).filter(Boolean))];
 
+const buildQueryForms = (categoryTerm: string, locationTerm: string) => [
+  `${categoryTerm} in ${locationTerm}`,
+  `${categoryTerm} ${locationTerm}`,
+  `${categoryTerm} near ${locationTerm}`,
+];
+
 const replaceTokens = (value: string, replacements: Array<[RegExp, string[]]>) => {
   const variants = new Set<string>();
   variants.add(value);
@@ -135,12 +141,28 @@ export const buildDiscoveryQueryVariants = (
   const categoryTerms = buildCategoryTerms(companyType, profile);
   const locationTerms = buildLocationTerms(location);
   const queries: string[] = [];
+  const seen = new Set<string>();
+  const maxLayer = categoryTerms.length + locationTerms.length - 2;
 
-  for (const categoryTerm of categoryTerms) {
-    for (const locationTerm of locationTerms) {
-      queries.push(`${categoryTerm} in ${locationTerm}`);
-      queries.push(`${categoryTerm} ${locationTerm}`);
-      queries.push(`${categoryTerm} near ${locationTerm}`);
+  for (let layer = 0; layer <= maxLayer; layer += 1) {
+    for (let categoryIndex = 0; categoryIndex < categoryTerms.length; categoryIndex += 1) {
+      const locationIndex = layer - categoryIndex;
+      if (locationIndex < 0 || locationIndex >= locationTerms.length) {
+        continue;
+      }
+
+      const categoryTerm = categoryTerms[categoryIndex] ?? '';
+      const locationTerm = locationTerms[locationIndex] ?? '';
+
+      for (const query of buildQueryForms(categoryTerm, locationTerm)) {
+        const key = query.toLowerCase();
+        if (!key || seen.has(key)) {
+          continue;
+        }
+
+        seen.add(key);
+        queries.push(query);
+      }
     }
   }
 

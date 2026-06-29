@@ -124,6 +124,12 @@ const uniqueQueries = (values: string[]) => {
   return queries;
 };
 
+const buildQueryForms = (categoryTerm: string, locationTerm: string) => [
+  `${categoryTerm} in ${locationTerm}`,
+  `${categoryTerm} ${locationTerm}`,
+  `${categoryTerm} near ${locationTerm}`,
+];
+
 const mergeCandidate = (current: PlaceCandidate, incoming: PlaceCandidate): PlaceCandidate => ({
   placeId: current.placeId,
   name: incoming.name?.trim() || current.name?.trim() || '',
@@ -512,39 +518,31 @@ const buildExpandedSearchQueries = (
   ]);
   const queries: string[] = [];
   const seen = new Set<string>();
+  const maxLayer = categoryTerms.length + locationTerms.length - 2;
 
-  for (const categoryTerm of categoryTerms) {
-    for (const locationTerm of locationTerms) {
-      const query = normalizeQuery(`${categoryTerm} in ${locationTerm}`);
-      const key = queryKey(query);
-      if (!key || baselineKeys.has(key) || seen.has(key)) {
+  for (let layer = 0; layer <= maxLayer; layer += 1) {
+    for (let categoryIndex = 0; categoryIndex < categoryTerms.length; categoryIndex += 1) {
+      const locationIndex = layer - categoryIndex;
+      if (locationIndex < 0 || locationIndex >= locationTerms.length) {
         continue;
       }
 
-      seen.add(key);
-      queries.push(query);
+      const categoryTerm = categoryTerms[categoryIndex] ?? '';
+      const locationTerm = locationTerms[locationIndex] ?? '';
 
-      if (queries.length >= 12) {
-        return queries;
-      }
-    }
+      for (const queryPart of buildQueryForms(categoryTerm, locationTerm)) {
+        const query = normalizeQuery(queryPart);
+        const key = queryKey(query);
+        if (!key || baselineKeys.has(key) || seen.has(key)) {
+          continue;
+        }
 
-    if (
-      location?.mode !== 'nationwide' &&
-      location?.city &&
-      location.city !== (location?.label ?? locationLabel)
-    ) {
-      const query = normalizeQuery(`${categoryTerm} near ${location.city}`);
-      const key = queryKey(query);
-      if (!key || baselineKeys.has(key) || seen.has(key)) {
-        continue;
-      }
+        seen.add(key);
+        queries.push(query);
 
-      seen.add(key);
-      queries.push(query);
-
-      if (queries.length >= 12) {
-        return queries;
+        if (queries.length >= 18) {
+          return queries;
+        }
       }
     }
   }
