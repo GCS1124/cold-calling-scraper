@@ -2,8 +2,11 @@ import { z } from 'zod';
 
 import type { Lead } from './lead';
 
+const searchSourceModes = ['gmb', 'linkedin'] as const;
+
 export const searchRequestSchema = z.object({
   companyType: z.string().trim().min(2).max(80),
+  sourceMode: z.enum(searchSourceModes).optional(),
   city: z.string().trim().min(2).max(80),
   count: z.number().int().min(50).max(500),
   filters: z

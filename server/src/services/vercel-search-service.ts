@@ -6,6 +6,7 @@ import { deduplicateLeads } from './lead-deduplication';
 import { enrichLead } from './lead-validation';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
 import { discoverUsLeadsFromGoogleMaps } from './google-maps-discovery';
+import { discoverUsLeadsFromLinkedinSearch } from './linkedin-search';
 import { googlePlacesProvider } from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
@@ -18,6 +19,11 @@ import {
 import { resolveCategoryProfile } from './us-category-mapping';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { buildDiscoverySeeds } from './discovery-seeds';
+import {
+  leadSourceModeLabels,
+  normalizeLeadSourceMode,
+  type LeadSourceMode,
+} from './search-source-mode';
 
 type VercelSearchService = {
   startSearch: (request: SearchRequest) => Promise<SearchResponse>;
@@ -34,6 +40,11 @@ type VercelSearchServiceDeps = {
     queryVariants: string[];
     maxResults?: number;
     queryLimit?: number;
+    deadlineMs?: number;
+  }) => Promise<Lead[]>;
+  discoverLinkedinLeads?: (args: {
+    request: SearchRequest;
+    location: NormalizedUsLocation;
     deadlineMs?: number;
   }) => Promise<Lead[]>;
   discoverOsmLeads?: typeof discoverUsLeadsFromOsm;
@@ -56,6 +67,8 @@ const getGooglePlacesTimeoutMs = (requestedCount: number) =>
   requestedCount >= 50 ? 20_000 : 8_000;
 const getGoogleMapsTimeoutMs = (requestedCount: number) =>
   requestedCount >= 50 ? 15_000 : 8_000;
+const getLinkedinTimeoutMs = (requestedCount: number) =>
+  requestedCount >= 50 ? 30_000 : 20_000;
 const getMaxTickDurationMs = (requestedCount: number) =>
   requestedCount >= 50 ? 40_000 : 15_000;
 
@@ -79,6 +92,7 @@ const rankDiscoveryCandidates = (leads: Lead[]) =>
   [...leads].sort((left, right) => {
     const leftSignal =
       Number(left.source.includes('Google Places')) * 8 +
+      Number(left.source.includes('LinkedIn')) * 4 +
       Number(left.hasWebsite) * 5 +
       Number(left.hasPhone) * 5 +
       Number(Boolean(left.address)) * 2 +
@@ -86,6 +100,7 @@ const rankDiscoveryCandidates = (leads: Lead[]) =>
       (left.sourceScore ?? 0) / 20;
     const rightSignal =
       Number(right.source.includes('Google Places')) * 8 +
+      Number(right.source.includes('LinkedIn')) * 4 +
       Number(right.hasWebsite) * 5 +
       Number(right.hasPhone) * 5 +
       Number(Boolean(right.address)) * 2 +
@@ -137,6 +152,34 @@ const mergeLeads = (job: SearchJobRecord, incoming: Lead[], now: () => number) =
     job.lastProgressAt = now();
   }
   refreshProgress(job);
+};
+
+const runLinkedinDiscovery = async (
+  job: SearchJobRecord,
+  request: SearchRequest,
+  location: NormalizedUsLocation,
+  discoverLinkedinLeads: NonNullable<VercelSearchServiceDeps['discoverLinkedinLeads']>,
+  now: () => number,
+) => {
+  job.progress.currentSource = leadSourceModeLabels.linkedin;
+
+  const linkedinLeads = await discoverLinkedinLeads({
+    request,
+    location,
+    deadlineMs: now() + getLinkedinTimeoutMs(request.count),
+  });
+
+  if (linkedinLeads.length) {
+    mergeLeads(job, linkedinLeads, now);
+    job.progress.batchesCompleted += 1;
+    return;
+  }
+
+  appendWarningOnce(job, {
+    providerId: 'linkedin-search',
+    providerName: 'LinkedIn',
+    message: `No public LinkedIn profiles were returned for ${location.label}.`,
+  });
 };
 
 const buildQuery = (companyType: string, location: NormalizedUsLocation) =>
@@ -222,12 +265,7 @@ const discoverRegionLeads = async (
   const acceptedDiscoveryLeads = filterLeadsForLocation([...googleLeads, ...osmLeads], targetLocation);
   let googleMapsLeads: Lead[] = [];
 
-  if (
-    acceptedDiscoveryLeads.length < request.count &&
-    discoveryLocation.mode === 'local' &&
-    discoveryLocation.label.includes(',') &&
-    discoverGoogleMapsLeads
-  ) {
+  if (acceptedDiscoveryLeads.length < request.count && discoverGoogleMapsLeads) {
     try {
       const remainingCount = request.count - acceptedDiscoveryLeads.length;
       const googleMapsRequestCount = Math.min(Math.max(remainingCount, 15), 30);
@@ -266,7 +304,7 @@ const tickJob = async (
   job: SearchJobRecord,
   store: ReturnType<typeof createSearchJobStore>,
   deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'now'>> &
-    Pick<VercelSearchServiceDeps, 'discoverGoogleMapsLeads'>,
+    Pick<VercelSearchServiceDeps, 'discoverGoogleMapsLeads' | 'discoverLinkedinLeads'>,
 ): Promise<SearchJobRecord> => {
   let targetLocation = job.targetLocation as NormalizedUsLocation | undefined;
 
@@ -293,6 +331,8 @@ const tickJob = async (
     return job;
   }
 
+  const sourceMode: LeadSourceMode = normalizeLeadSourceMode(job.request.sourceMode);
+
   if (!job.searchSeeds.length) {
     job.locationLabel = targetLocation.label;
     job.locationMode = targetLocation.mode;
@@ -300,10 +340,65 @@ const tickJob = async (
       targetLocation.mode === 'nationwide'
         ? `${job.request.companyType} in United States`
         : buildQuery(job.request.companyType, targetLocation);
+    job.providerWarnings.push(...targetLocation.warnings);
+  }
+
+  if (sourceMode === 'linkedin') {
+    const discoverLinkedinLeads =
+      deps.discoverLinkedinLeads ??
+      (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
+
+    if (!discoverLinkedinLeads) {
+      appendWarningOnce(job, {
+        providerId: 'linkedin-search',
+        providerName: 'LinkedIn',
+        message: 'LinkedIn discovery is not configured for this environment.',
+      });
+      job.status = 'failed';
+      job.progress.currentSource = 'LinkedIn';
+      job.updatedAt = withNow();
+      await store.upsert(job);
+      return job;
+    }
+
+    job.status = 'discovering';
+    job.progress.currentSource = leadSourceModeLabels.linkedin;
+    try {
+      await runLinkedinDiscovery(
+        job,
+        job.request,
+        targetLocation,
+        discoverLinkedinLeads,
+        deps.now,
+      );
+    } catch (error) {
+      appendWarningOnce(job, {
+        providerId: 'linkedin-search',
+        providerName: 'LinkedIn',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'LinkedIn discovery failed',
+      });
+      job.status = 'failed';
+      job.progress.currentSource = 'LinkedIn';
+      job.updatedAt = withNow();
+      await store.upsert(job);
+      return job;
+    }
+    job.discoveryComplete = true;
+    job.status = 'complete';
+    job.progress.currentSource = 'Complete';
+    refreshProgress(job);
+    job.updatedAt = withNow();
+    await store.upsert(job);
+    return job;
+  }
+
+  if (!job.searchSeeds.length) {
     job.searchSeeds = buildDiscoverySeeds(targetLocation);
     job.status = 'discovering';
     job.progress.currentSource = 'Google Places API';
-    job.providerWarnings.push(...targetLocation.warnings);
   }
 
   if (job.nextSeedIndex < job.searchSeeds.length) {
@@ -399,6 +494,9 @@ export const createVercelSearchServiceWithDeps = (
   const discoverGoogleMapsLeads =
     deps.discoverGoogleMapsLeads ??
     (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromGoogleMaps);
+  const discoverLinkedinLeads =
+    deps.discoverLinkedinLeads ??
+    (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
   const discoverOsm = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
@@ -448,6 +546,7 @@ export const createVercelSearchServiceWithDeps = (
         googlePlaces,
         normalizeLocation,
         discoverGoogleMapsLeads,
+        discoverLinkedinLeads,
         discoverOsmLeads: discoverOsm,
         now,
       });

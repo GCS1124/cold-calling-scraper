@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { usStateCodes } from '../../server/src/data/us-states.js';
 
 const publicTimeZoneCodes = ['EST', 'CST', 'MST', 'PST'] as const;
+const publicSearchSourceModes = ['gmb', 'linkedin'] as const;
 
 const cityPattern = /^[\p{L}][\p{L}\s.'-]*$/u;
 
@@ -29,6 +30,7 @@ export const searchLocationSchema = z.discriminatedUnion('mode', [
 
 export const searchRequestSchema = z.object({
   companyType: z.string().trim().min(2).max(80),
+  sourceMode: z.enum(publicSearchSourceModes).optional(),
   location: searchLocationSchema,
   count: z.number().int().min(50).max(500),
   filters: z
@@ -72,6 +74,7 @@ export const formatLocationLabel = (location: SearchLocation) => {
 
 export const flattenSearchRequest = (request: PublicSearchRequest) => ({
   companyType: request.companyType.trim(),
+  sourceMode: request.sourceMode ?? 'gmb',
   city: serializeLocationValue(request.location),
   count: Math.max(request.count, 50),
   filters: request.filters,

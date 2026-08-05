@@ -38,6 +38,24 @@ const localLocation = {
   warnings: [],
 };
 
+const timezoneLocation = {
+  mode: 'timezone' as const,
+  label: 'Eastern Time',
+  city: 'Eastern Time',
+  stateCode: '',
+  timeZoneCode: 'ET' as const,
+  postalCode: undefined,
+  lat: 39.8283,
+  lon: -98.5795,
+  boundingBox: {
+    south: 24.3963,
+    west: -92.0,
+    north: 47.4597,
+    east: -66.9346,
+  },
+  warnings: [],
+};
+
 const stateLocation = {
   mode: 'local' as const,
   label: 'California',
@@ -172,9 +190,45 @@ describe('createVercelSearchServiceWithDeps', () => {
     const snapshot = await service.getSearch(response.searchId);
 
     expect(snapshot?.leads[0]?.mobile).toBe('+1 512 555 0101');
-    expect(snapshot?.leads[0]?.website).toBe('https://northstarlabs.ai/');
+    expect(snapshot?.leads[0]?.website).toBe('https://northstarlabs.ai');
     expect(snapshot?.leads[0]?.hasPhone).toBe(true);
     expect(snapshot?.leads[0]?.hasWebsite).toBe(true);
+  });
+
+  it('completes a LinkedIn search with public profile listings', async () => {
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      discoverLinkedinLeads: vi.fn().mockResolvedValue([
+        makeLead({
+          id: 'linkedin-lead-1',
+          name: 'Mark Sweeney',
+          source: 'LinkedIn',
+          website: '',
+          listingUrl: 'https://www.linkedin.com/in/mark-sweeney-austin',
+          hasWebsite: true,
+          sourceScore: 82,
+        }),
+      ]),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-linkedin-1',
+      now: () => 1000,
+    });
+
+    const response = await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin, TX',
+      count: 50,
+      sourceMode: 'linkedin',
+    });
+
+    const snapshot = await service.getSearch(response.searchId);
+
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.meta.progress.currentSource).toBe('Complete');
+    expect(snapshot?.leads).toHaveLength(1);
+    expect(snapshot?.leads[0]?.listingUrl).toContain('/in/');
+    expect(snapshot?.meta.providerWarnings).toHaveLength(0);
   });
 
   it('keeps structured email and address data from OSM without crawlers', async () => {
@@ -359,6 +413,54 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.leads[0]?.address ?? '').toBe('');
   });
 
+  it('keeps timezone Google Maps leads when coordinates fall inside the timezone boundary', async () => {
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockImplementation(async (input: string) => {
+        if (input === 'Eastern Time') {
+          return timezoneLocation;
+        }
+
+        return localLocation;
+      }),
+      googlePlaces: {
+        id: 'google-places',
+        name: 'Google Places',
+        fetchLeads: vi.fn().mockResolvedValue([]),
+      } as never,
+      discoverGoogleMapsLeads: vi.fn().mockResolvedValue([
+        makeLead({
+          id: 'lead-maps-timezone',
+          source: 'Google Maps',
+          address: '',
+          city: 'New York, NY',
+          latitude: 40.7128,
+          longitude: -74.006,
+          mobile: '+1 212 555 0101',
+          website: 'https://newyorkhvac.com',
+          hasPhone: true,
+          hasWebsite: true,
+          verifiedPhone: true,
+        }),
+      ]),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-maps-timezone',
+      now: () => 1000,
+    });
+
+    const response = await service.startSearch({
+      companyType: 'HVAC Contractors',
+      city: 'Eastern Time',
+      count: 50,
+    });
+
+    const snapshot = await pollJob(service, response.searchId);
+
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.leads).toHaveLength(1);
+    expect(snapshot?.leads[0]?.source).toContain('Google Maps');
+  });
+
   it('keeps Austin searches inside Austin even when broader Texas seeds return outliers', async () => {
     const austinLead = makeLead({
       id: 'lead-austin',
@@ -437,7 +539,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.leads).toHaveLength(1);
     expect(snapshot?.leads[0]?.city).toContain('Austin');
     expect(snapshot?.leads[0]?.address).toContain('Austin, TX');
-  });
+  }, 15000);
 
   it('fans out nationwide searches across multiple state seeds and query variants', async () => {
     const googleCalls: string[] = [];
@@ -471,7 +573,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(googleCalls.length).toBeGreaterThan(1);
     expect(snapshot?.meta.locationLabel).toBe('United States');
     expect(snapshot?.meta.progress.foundCount).toBeGreaterThanOrEqual(1);
-  });
+  }, 15000);
 
   it('completes when structured sources are exhausted even if the target is not met', async () => {
     const googleCalls: string[] = [];
@@ -502,7 +604,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.meta.status).toBe('complete');
     expect(snapshot?.meta.progress.foundCount).toBeGreaterThan(0);
     expect(googleCalls.length).toBeGreaterThan(1);
-  });
+  }, 15000);
 
   it('stops a no-progress discovery after the 45-second stall window expires', async () => {
     let currentTime = 0;

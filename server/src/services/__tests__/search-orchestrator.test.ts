@@ -58,6 +58,24 @@ const nationwideLocation = {
   warnings: [],
 };
 
+const timezoneLocation = {
+  label: 'Eastern Time',
+  city: 'Eastern Time',
+  stateCode: '',
+  mode: 'timezone' as const,
+  timeZoneCode: 'ET' as const,
+  lat: 39.8283,
+  lon: -98.5795,
+  postalCode: undefined,
+  boundingBox: {
+    south: 24.3963,
+    west: -92.0,
+    north: 47.4597,
+    east: -66.9346,
+  },
+  warnings: [],
+};
+
 describe('createSearchService', () => {
   it('starts queued and becomes failed when US normalization fails', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
@@ -124,6 +142,53 @@ describe('createSearchService', () => {
     expect(completed?.meta.progress.foundCount).toBe(1);
     expect(completed?.meta.progress.enriched).toBe(0);
     expect(completed?.leads[0]?.name).toBe('Lattice Dental');
+  });
+
+  it('completes a LinkedIn search job with public profile leads', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+
+    const service = createSearchService({
+      idFactory: () => 'search-linkedin-1',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverLinkedinLeads: vi.fn().mockResolvedValue([
+        {
+          ...sampleLead,
+          id: 'linkedin-lead-1',
+          name: 'Mark Sweeney',
+          source: 'LinkedIn',
+          website: '',
+          listingUrl: 'https://www.linkedin.com/in/mark-sweeney-austin',
+          hasWebsite: true,
+          sourceScore: 82,
+        },
+      ]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    const started = await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin',
+      count: 50,
+      sourceMode: 'linkedin',
+    });
+
+    expect(started.meta.status).toBe('queued');
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-linkedin-1');
+
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.meta.progress.currentSource).toBe('Complete');
+    expect(completed?.leads).toHaveLength(1);
+    expect(completed?.leads[0]?.listingUrl).toContain('/in/');
+    expect(completed?.meta.providerWarnings).toHaveLength(0);
   });
 
   it('fans out Austin city-state searches across local seed variants before finishing', async () => {
@@ -356,6 +421,60 @@ describe('createSearchService', () => {
     const task = backgroundTask as () => Promise<void>;
     await task();
     const completed = await service.getSearch('search-3c');
+
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.leads).toHaveLength(1);
+    expect(completed?.leads[0]?.source).toContain('Google Maps');
+  });
+
+  it('keeps Google Maps coordinate matches inside a timezone search', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+
+    const service = createSearchService({
+      idFactory: () => 'search-3d',
+      normalizeLocation: vi.fn().mockImplementation(async (input: string) => {
+        if (input === 'Eastern Time') {
+          return timezoneLocation;
+        }
+
+        return sampleLocation;
+      }),
+      discoverGoogleLeads: vi.fn().mockResolvedValue([]),
+      discoverGoogleMapsLeads: vi.fn().mockResolvedValue([
+        {
+          ...sampleLead,
+          id: 'lead-maps-east',
+          source: 'Google Maps',
+          address: '',
+          city: 'New York, NY',
+          latitude: 40.7128,
+          longitude: -74.006,
+          website: 'https://newyorkhvac.com',
+          mobile: '+1 212 555 0101',
+          hasPhone: true,
+          hasWebsite: true,
+          verifiedPhone: true,
+        },
+      ]),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'HVAC Contractors',
+      city: 'Eastern Time',
+      count: 50,
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-3d');
 
     expect(completed?.meta.status).toBe('complete');
     expect(completed?.leads).toHaveLength(1);

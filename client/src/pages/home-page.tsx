@@ -9,6 +9,7 @@ import {
   Search,
   Sparkles,
   Zap,
+  BriefcaseBusiness,
 } from 'lucide-react';
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -28,6 +29,7 @@ import {
   createSearchDraft,
   formatLocationLabel,
 } from '../utils/search-location';
+import { sourceModeLabelsByCode } from '../data/search-options';
 import type { Lead, SearchDraft, SearchRequest, SearchResponse } from '../types/lead';
 
 type HomePageProps = {
@@ -73,6 +75,8 @@ export function HomePage({ searchApi }: HomePageProps) {
   const deferredLeads = useDeferredValue(visibleLeads);
 
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const activeSourceMode = submittedSearch?.sourceMode ?? search.sourceMode;
+  const activeSourceLabel = sourceModeLabelsByCode[activeSourceMode];
 
   const exportableLeads = useMemo(() => {
     if (!selectedIds.length) return visibleLeads;
@@ -126,8 +130,8 @@ export function HomePage({ searchApi }: HomePageProps) {
     ? result.meta.status === 'queued'
       ? `Queued ${result.meta.progress.requestedCount} leads`
       : result.meta.status === 'discovering'
-        ? `Finding leads in ${result.meta.locationLabel}`
-      : result.meta.status === 'enriching'
+        ? `Finding ${activeSourceMode === 'linkedin' ? 'prospects' : 'leads'} in ${result.meta.locationLabel}`
+        : result.meta.status === 'enriching'
           ? 'Collecting contact details'
           : result.meta.status === 'failed'
             ? 'Search failed'
@@ -138,14 +142,16 @@ export function HomePage({ searchApi }: HomePageProps) {
 
   const statusDescription = result
     ? result.meta.status === 'queued'
-      ? 'Your search is waiting to begin.'
+      ? `Your ${activeSourceLabel} search is waiting to begin.`
       : result.meta.status === 'discovering'
-        ? 'Scanning matching businesses and removing duplicates.'
-      : result.meta.status === 'enriching'
-          ? 'Adding emails, phone numbers, websites, and source details.'
-          : result.meta.status === 'failed'
-            ? 'The search could not be completed. Adjust the query and try again.'
-            : resultsExhausted
+        ? activeSourceMode === 'linkedin'
+          ? 'Searching public LinkedIn profiles, capturing matched prospects, and removing duplicates.'
+          : 'Scanning matching businesses and removing duplicates.'
+          : result.meta.status === 'enriching'
+              ? 'Adding emails, phone numbers, websites, and source details.'
+              : result.meta.status === 'failed'
+                  ? 'The search could not be completed. Adjust the query and try again.'
+                  : resultsExhausted
               ? 'We verified the available businesses and stopped once the discovery sources stopped returning new results.'
               : 'Your leads are ready to review, filter, copy, and export.'
     : '';
@@ -296,7 +302,7 @@ export function HomePage({ searchApi }: HomePageProps) {
       lead.name,
       lead.mobile,
       lead.email,
-      lead.website,
+      lead.website || lead.listingUrl || '',
       lead.address,
       lead.source,
     ]
@@ -356,12 +362,16 @@ export function HomePage({ searchApi }: HomePageProps) {
                   Build your lead list
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Enter a business type, location, and lead count.
+                  Choose GMB or LinkedIn, then enter a business type, location, and lead count.
                 </p>
               </div>
 
               <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700 sm:flex">
-                <MapPin className="h-6 w-6" />
+                {activeSourceMode === 'linkedin' ? (
+                  <BriefcaseBusiness className="h-6 w-6" />
+                ) : (
+                  <MapPin className="h-6 w-6" />
+                )}
               </div>
             </div>
 

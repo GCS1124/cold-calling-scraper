@@ -29,7 +29,7 @@ export function ResultsTable({
             Results
           </p>
           <p className="mt-1 text-sm text-slate-600">
-            Click any company row to verify details before export.
+            Click any row to verify details before export.
           </p>
         </div>
 
@@ -84,14 +84,14 @@ export function ResultsTable({
                   <td className="px-4 py-4">{lead.mobile || '—'}</td>
                   <td className="px-4 py-4">{lead.email || '—'}</td>
                   <td className="px-4 py-4">
-                    {lead.website ? (
+                    {lead.website || lead.listingUrl ? (
                       <a
                         className="text-blue-700 hover:text-blue-800"
-                        href={lead.website}
+                        href={lead.website || lead.listingUrl || '#'}
                         rel="noreferrer"
                         target="_blank"
                       >
-                        {lead.website.replace(/^https?:\/\//, '')}
+                        {(lead.website || lead.listingUrl || '').replace(/^https?:\/\//, '')}
                       </a>
                     ) : (
                       '—'
@@ -118,9 +118,9 @@ export function ResultsTable({
                       </button>
                       <a
                         className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-blue-200 hover:text-blue-700"
-                        href={lead.website || '#'}
+                        href={lead.website || lead.listingUrl || '#'}
                         onClick={(event) => {
-                          if (!lead.website) event.preventDefault();
+                          if (!lead.website && !lead.listingUrl) event.preventDefault();
                         }}
                         rel="noreferrer"
                         target="_blank"

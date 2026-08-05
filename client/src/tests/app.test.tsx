@@ -375,6 +375,7 @@ describe('App', () => {
 
     expect(searchApi.startSearch).toHaveBeenCalledWith({
       companyType: 'Dental Clinics',
+      sourceMode: 'gmb',
       location: {
         mode: 'timezone',
         timeZone: 'EST',
@@ -406,6 +407,7 @@ describe('App', () => {
 
     expect(searchApi.startSearch).toHaveBeenCalledWith({
       companyType: 'Dental Clinics',
+      sourceMode: 'gmb',
       location: {
         mode: 'cityState',
         city: 'Austin',
@@ -458,6 +460,35 @@ describe('App', () => {
     expect(normalizedText(container)).toContain('Results will appear here when the search finishes');
     expect(normalizedText(container)).not.toContain('click any company row to verify details before export');
     expect(normalizedText(container)).not.toContain('Download Excel');
+
+    await unmount();
+  });
+
+  it('submits a LinkedIn search with the alternate source mode', async () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(completedResponse),
+      getSearch: vi.fn().mockResolvedValue(completedResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await clickElement(getButton(container, /linkedin/i));
+    await typeValue(getCompanyTypeInput(container), 'Founders');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+
+    expect(searchApi.startSearch).toHaveBeenCalledWith({
+      companyType: 'Founders',
+      sourceMode: 'linkedin',
+      location: {
+        mode: 'timezone',
+        timeZone: 'EST',
+      },
+      count: 50,
+    });
+
+    await waitForText(container, /discovery complete/i, 6000);
+    expect(normalizedText(container)).toContain('LinkedIn');
 
     await unmount();
   });

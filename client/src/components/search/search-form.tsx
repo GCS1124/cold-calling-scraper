@@ -1,7 +1,12 @@
-import { LoaderCircle, Search } from 'lucide-react';
+import { Building2, BriefcaseBusiness, LoaderCircle, Search } from 'lucide-react';
 import type { Dispatch, FormEvent, SetStateAction } from 'react';
 
-import { companyTypeOptions, timeZoneOptions } from '../../data/search-options';
+import {
+  companyTypeOptions,
+  sourceModeLabelsByCode,
+  sourceModeOptions,
+  timeZoneOptions,
+} from '../../data/search-options';
 import { usStates } from '../../data/us-states';
 import { isSearchDraftComplete } from '../../utils/search-location';
 import type { SearchDraft } from '../../types/lead';
@@ -14,6 +19,14 @@ type SearchFormProps = {
 };
 
 export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormProps) {
+  const isLinkedInMode = value.sourceMode === 'linkedin';
+  const companyTypePlaceholder = isLinkedInMode
+    ? 'founder, CEO, operations manager, marketing director'
+    : 'dentist, plumber, roofer, HVAC contractor';
+  const companyTypeHelp = isLinkedInMode
+    ? 'Tailored to public LinkedIn search: try founder, owner, CEO, manager, agency partner, or other decision-maker roles.'
+    : 'Tailored to Google Business listings: try dentist, orthodontist, plumber, roofer, HVAC contractor, real estate agent, attorney, urgent care, mechanic, or commercial cleaning.';
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     onSubmit();
@@ -24,6 +37,48 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
       className="grid gap-5 rounded-[28px] border border-white/50 bg-white/82 p-5 shadow-[0_32px_120px_rgba(15,23,42,0.12)] backdrop-blur md:grid-cols-[1.1fr_0.85fr] md:p-7"
       onSubmit={handleSubmit}
     >
+      <fieldset className="space-y-3 text-sm font-semibold text-slate-900 md:col-span-2">
+        <legend>Lead Source</legend>
+
+        <div className="inline-flex w-full rounded-2xl bg-slate-100 p-1">
+          {sourceModeOptions.map((option) => {
+            const active = value.sourceMode === option.code;
+
+            return (
+              <button
+                className={`flex flex-1 flex-col items-center justify-center rounded-2xl px-3 py-3 text-center transition ${
+                  active
+                    ? 'bg-white text-slate-950 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+                key={option.code}
+                onClick={() => onChange((current) => ({ ...current, sourceMode: option.code }))}
+                type="button"
+                aria-pressed={active}
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold">
+                  {option.code === 'gmb' ? (
+                    <Building2 className="h-4 w-4" />
+                  ) : (
+                    <BriefcaseBusiness className="h-4 w-4" />
+                  )}
+                  {option.label}
+                </span>
+                <span className="mt-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+                  {option.hint}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="text-xs font-normal leading-5 text-slate-500">
+          {isLinkedInMode
+            ? `${sourceModeLabelsByCode.linkedin} uses free public profile search.`
+            : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
+        </p>
+      </fieldset>
+
       <label className="flex flex-col gap-2 text-sm font-semibold text-slate-900">
         Company Type
         <div className="relative">
@@ -31,7 +86,7 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
             className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 pr-11 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
             aria-describedby="company-type-help"
             list="company-type-options"
-            placeholder="dentist, plumber, roofer, HVAC contractor"
+            placeholder={companyTypePlaceholder}
             value={value.companyType}
             onChange={(event) => {
               const nextCompanyType = event.target.value;
@@ -44,8 +99,7 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
           />
         </div>
         <p id="company-type-help" className="text-xs font-normal leading-5 text-slate-500">
-          Tailored to Google Business listings: try dentist, orthodontist, plumber, roofer, HVAC
-          contractor, real estate agent, attorney, urgent care, mechanic, or commercial cleaning.
+          {companyTypeHelp}
         </p>
       </label>
 

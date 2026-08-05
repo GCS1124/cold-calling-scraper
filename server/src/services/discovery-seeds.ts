@@ -29,6 +29,71 @@ const uniqueSeeds = (values: string[]) => {
   return seeds;
 };
 
+const timezoneDiscoverySeeds: Record<UsTimeZoneCode, string[]> = {
+  ET: [
+    'New York, NY',
+    'Miami, FL',
+    'Atlanta, GA',
+    'Charlotte, NC',
+    'Philadelphia, PA',
+    'Boston, MA',
+    'Washington, DC',
+    'Columbus, OH',
+    'Raleigh, NC',
+    'Tampa, FL',
+    'Orlando, FL',
+    'Detroit, MI',
+    'Pittsburgh, PA',
+    'Baltimore, MD',
+    'Richmond, VA',
+    'Jacksonville, FL',
+  ],
+  CT: [
+    'Chicago, IL',
+    'Houston, TX',
+    'Dallas, TX',
+    'Austin, TX',
+    'San Antonio, TX',
+    'Minneapolis, MN',
+    'Nashville, TN',
+    'New Orleans, LA',
+    'Milwaukee, WI',
+    'Kansas City, MO',
+    'Oklahoma City, OK',
+    'Omaha, NE',
+    'Memphis, TN',
+    'Birmingham, AL',
+    'Louisville, KY',
+    'St. Louis, MO',
+  ],
+  MT: [
+    'Denver, CO',
+    'Phoenix, AZ',
+    'Salt Lake City, UT',
+    'Albuquerque, NM',
+    'Las Vegas, NV',
+    'Boise, ID',
+    'Colorado Springs, CO',
+    'Tucson, AZ',
+    'Billings, MT',
+    'Cheyenne, WY',
+  ],
+  PT: [
+    'Los Angeles, CA',
+    'San Diego, CA',
+    'San Francisco, CA',
+    'San Jose, CA',
+    'Sacramento, CA',
+    'Seattle, WA',
+    'Portland, OR',
+    'Oakland, CA',
+    'Fresno, CA',
+    'Las Vegas, NV',
+  ],
+  AKT: ['Anchorage, AK', 'Fairbanks, AK', 'Juneau, AK', 'Wasilla, AK'],
+  HAT: ['Honolulu, HI', 'Hilo, HI', 'Kailua, HI', 'Kapolei, HI'],
+};
+
 const buildCityStateSeeds = (location: NormalizedUsLocation) => {
   const city = location.city.trim() || location.label.split(',')[0]?.trim() || location.label;
   const stateName = location.stateCode ? usStateNames[location.stateCode as UsStateCode] : '';
@@ -59,7 +124,10 @@ export const buildDiscoverySeeds = (location: NormalizedUsLocation) => {
   }
 
   if (location.mode === 'timezone' && location.timeZoneCode) {
-    return [...(timezoneStateQueries[location.timeZoneCode as UsTimeZoneCode] ?? [])];
+    return uniqueSeeds([
+      ...(timezoneDiscoverySeeds[location.timeZoneCode as UsTimeZoneCode] ?? []),
+      ...(timezoneStateQueries[location.timeZoneCode as UsTimeZoneCode] ?? []),
+    ]);
   }
 
   if (location.mode === 'local' && location.label.includes(',')) {

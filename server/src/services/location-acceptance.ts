@@ -364,17 +364,20 @@ const isPointInsideBoundingBox = (
 };
 
 const matchesTimezoneLocation = (
+  lead: LeadLocationCandidate,
   evidence: ParsedAddressEvidence | null,
-  timeZoneCode: UsTimeZoneCode,
+  location: NormalizedUsLocation,
 ) => {
-  if (!evidence?.stateCode) {
-    return false;
+  if (location.timeZoneCode && evidence?.stateCode) {
+    const allowedStates = timezoneStateQueries[location.timeZoneCode] ?? [];
+    const stateName = usStateNames[evidence.stateCode];
+
+    if (allowedStates.includes(stateName)) {
+      return true;
+    }
   }
 
-  const allowedStates = timezoneStateQueries[timeZoneCode] ?? [];
-  const stateName = usStateNames[evidence.stateCode];
-
-  return allowedStates.includes(stateName);
+  return matchesCoordinateLocation(lead, location);
 };
 
 const matchesCoordinateLocation = (
@@ -472,7 +475,7 @@ export const leadMatchesLocation = (
       return false;
     }
 
-    return matchesTimezoneLocation(evidence, location.timeZoneCode);
+    return matchesTimezoneLocation(lead, evidence, location);
   }
 
   if (location.mode === 'state') {

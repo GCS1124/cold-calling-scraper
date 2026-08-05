@@ -3,6 +3,28 @@ export type CompanyTypeSuggestion = {
   keywords: string[];
 };
 
+export const sourceModeOptions = [
+  {
+    code: 'gmb',
+    label: 'GMB',
+    hint: 'Google Business',
+  },
+  {
+    code: 'linkedin',
+    label: 'LinkedIn',
+    hint: 'Free profiles',
+  },
+] as const;
+
+export type SearchSourceMode = (typeof sourceModeOptions)[number]['code'];
+
+export const sourceModeLabelsByCode = Object.fromEntries(
+  sourceModeOptions.map((option) => [
+    option.code,
+    option.code === 'gmb' ? 'Google Business Profile' : 'LinkedIn',
+  ]),
+) as Record<SearchSourceMode, string>;
+
 export const companyTypeSuggestions: CompanyTypeSuggestion[] = [
   {
     value: 'Dentist',

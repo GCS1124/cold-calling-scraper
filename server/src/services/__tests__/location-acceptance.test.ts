@@ -149,9 +149,14 @@ describe('location-acceptance', () => {
     expect(leadMatchesLocation(inZoneLead, centralTimeLocation)).toBe(true);
     expect(leadMatchesLocation(outOfZoneLead, centralTimeLocation)).toBe(false);
     expect(leadMatchesLocation(missingStateEvidence, centralTimeLocation)).toBe(false);
-    expect(leadMatchesLocation(coordinateOnlyLead, centralTimeLocation)).toBe(false);
-    expect(filterLeadsForLocation([inZoneLead, outOfZoneLead, missingStateEvidence], centralTimeLocation)).toHaveLength(
-      1,
+    expect(leadMatchesLocation(coordinateOnlyLead, centralTimeLocation)).toBe(true);
+    expect(
+      filterLeadsForLocation(
+        [inZoneLead, outOfZoneLead, missingStateEvidence, coordinateOnlyLead],
+        centralTimeLocation,
+      ),
+    ).toHaveLength(
+      2,
     );
   });
 

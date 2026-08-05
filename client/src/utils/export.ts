@@ -24,7 +24,10 @@ export type ExportColumn = (typeof exportColumns)[number];
 const toExportRows = (leads: Lead[], columns: ExportColumn[]) =>
   leads.map((lead) =>
     columns.reduce<Record<string, string | number>>((row, column) => {
-      row[column] = lead[column] ?? '';
+      row[column] =
+        column === 'website'
+          ? lead.website || lead.listingUrl || ''
+          : lead[column] ?? '';
       return row;
     }, {}),
   );

@@ -104,6 +104,11 @@ const isLikelyBusinessEmail = (value: string) => {
   }
 
   const [, domain = ''] = value.toLowerCase().split('@');
+  const topLevelLabel = domain.split('.').filter(Boolean).at(-1) ?? '';
+
+  if (topLevelLabel.length > 12) {
+    return false;
+  }
 
   return !freeEmailDomains.has(domain);
 };
@@ -131,8 +136,14 @@ const normalizeWebsite = (value?: string) => {
     }
 
     url.hash = '';
+    const pathname =
+      url.pathname !== '/' && url.pathname.endsWith('/')
+        ? url.pathname.slice(0, -1)
+        : url.pathname === '/'
+          ? ''
+          : url.pathname;
 
-    return url.toString();
+    return `${url.protocol}//${url.host}${pathname}${url.search}`;
   } catch {
     return '';
   }
@@ -194,6 +205,10 @@ const getSourceScore = (lead: Lead) => {
     return 90;
   }
 
+  if (hasSource(lead, 'LinkedIn')) {
+    return 78;
+  }
+
   if (hasSource(lead, 'Website Crawl')) {
     return 75;
   }
@@ -238,6 +253,7 @@ const scoreLead = (lead: Lead) => {
 
   if (hasSource(lead, 'Google Places')) score += 12;
   if (hasSource(lead, 'Google Maps')) score += 12;
+  if (hasSource(lead, 'LinkedIn')) score += 10;
   if (hasSource(lead, 'Website Crawl')) score += 8;
   if (hasSource(lead, 'OpenStreetMap')) score += 5;
 
@@ -298,8 +314,8 @@ const getRejectionReason = ({
     return undefined;
   }
 
-  if (hasEmail && !verifiedEmail) {
-    return undefined;
+  if (lead.email?.trim() && !verifiedEmail) {
+    return 'missing_email';
   }
 
   return undefined;
@@ -315,7 +331,7 @@ export const enrichLead = (lead: Lead): Lead => {
   const verifiedEmail = isLikelyBusinessEmail(email);
 
   const hasPhone = isValidUsPhone(mobile);
-  const hasWebsite = Boolean(website);
+  const hasWebsite = Boolean(website || lead.listingUrl?.trim());
 
   const sourceScore = getSourceScore({
     ...lead,

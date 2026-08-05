@@ -29,6 +29,7 @@ export const formatLocationLabel = (location: SearchLocation) => {
 
 export const flattenSearchRequest = (request: PublicSearchRequest): SearchRequest => ({
   companyType: request.companyType.trim(),
+  sourceMode: request.sourceMode ?? 'gmb',
   city: serializeLocationValue(request.location),
   count: Math.max(request.count, 50),
   filters: request.filters,

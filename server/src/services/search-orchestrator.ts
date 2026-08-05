@@ -13,11 +13,17 @@ import { enrichLeads } from './lead-validation';
 import { googlePlacesProvider } from '../providers/google-places';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
 import { discoverUsLeadsFromGoogleMaps } from './google-maps-discovery';
+import { discoverUsLeadsFromLinkedinSearch } from './linkedin-search';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
 import { buildDiscoverySeeds } from './discovery-seeds';
+import {
+  leadSourceModeLabels,
+  normalizeLeadSourceMode,
+  type LeadSourceMode,
+} from './search-source-mode';
 
 type SearchJob = {
   searchId: string;
@@ -54,6 +60,11 @@ type SearchDeps = {
     queryLimit?: number;
     deadlineMs?: number;
   }) => Promise<Lead[]>;
+  discoverLinkedinLeads?: (args: {
+    request: SearchRequest;
+    location: NormalizedUsLocation;
+    deadlineMs?: number;
+  }) => Promise<Lead[]>;
   discoverOsmLeads?: (args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
@@ -67,6 +78,7 @@ type SearchDeps = {
 const jobTtlMs = 15 * 60 * 1000;
 const googleDiscoveryTimeoutMs = 20000;
 const googleMapsDiscoveryTimeoutMs = 20000;
+const linkedinDiscoveryTimeoutMs = 30000;
 const osmDiscoveryTimeoutMs = 20000;
 const maxCandidatePool = 3000;
 const getDiscoveryStallMs = (requestedCount: number) =>
@@ -107,6 +119,7 @@ const rankDiscoveryCandidates = (leads: Lead[]) =>
     const leftSignal =
       Number(left.source.includes('Google Places')) * 6 +
       Number(left.source.includes('Google Maps')) * 6 +
+      Number(left.source.includes('LinkedIn')) * 4 +
       Number(left.hasWebsite) * 5 +
       Number(left.hasPhone) * 5 +
       Number(Boolean(left.address)) * 2 +
@@ -115,6 +128,7 @@ const rankDiscoveryCandidates = (leads: Lead[]) =>
     const rightSignal =
       Number(right.source.includes('Google Places')) * 6 +
       Number(right.source.includes('Google Maps')) * 6 +
+      Number(right.source.includes('LinkedIn')) * 4 +
       Number(right.hasWebsite) * 5 +
       Number(right.hasPhone) * 5 +
       Number(Boolean(right.address)) * 2 +
@@ -197,6 +211,38 @@ const upsertLeads = (job: SearchJob, incoming: Lead[], now: () => number) => {
     job.lastProgressAt = now();
   }
   refreshProgress(job);
+};
+
+const runLinkedinDiscovery = async (
+  job: SearchJob,
+  request: SearchRequest,
+  location: NormalizedUsLocation,
+  discoverLinkedinLeads: NonNullable<SearchDeps['discoverLinkedinLeads']>,
+  now: () => number,
+) => {
+  job.progress.currentSource = leadSourceModeLabels.linkedin;
+
+  const linkedinLeads = await withTimeout(
+    discoverLinkedinLeads({
+      request,
+      location,
+      deadlineMs: Date.now() + linkedinDiscoveryTimeoutMs,
+    }),
+    linkedinDiscoveryTimeoutMs,
+    'LinkedIn discovery timed out before the batch completed',
+  );
+
+  if (linkedinLeads.length) {
+    upsertLeads(job, linkedinLeads, now);
+    job.progress.batchesCompleted += 1;
+    return;
+  }
+
+  job.providerWarnings.push({
+    providerId: 'linkedin-search',
+    providerName: 'LinkedIn',
+    message: `No public LinkedIn profiles were returned for ${location.label}.`,
+  });
 };
 
 const runRegionalDiscovery = async (
@@ -283,12 +329,7 @@ const runRegionalDiscovery = async (
     })(),
   ]);
 
-  if (
-    job.progress.foundCount < request.count &&
-    discoveryLocation.mode === 'local' &&
-    discoveryLocation.label.includes(',') &&
-    discoverGoogleMapsLeads
-  ) {
+  if (job.progress.foundCount < request.count && discoverGoogleMapsLeads) {
     try {
       const remainingCount = request.count - job.progress.foundCount;
       const googleMapsLeads = await withTimeout(
@@ -330,6 +371,9 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
   const discoverGoogleMapsLeads =
     deps.discoverGoogleMapsLeads ??
     (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromGoogleMaps);
+  const discoverLinkedinLeads =
+    deps.discoverLinkedinLeads ??
+    (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
   const discoverOsmLeads = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
   const now = deps.now ?? Date.now;
   const idFactory = deps.idFactory ?? randomUUID;
@@ -350,6 +394,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
   const processJob = async (job: SearchJob) => {
     job.status = 'discovering';
     job.progress.currentSource = 'Nominatim';
+    const sourceMode: LeadSourceMode = normalizeLeadSourceMode(job.request.sourceMode);
 
     let location: NormalizedUsLocation;
     try {
@@ -367,6 +412,39 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         message:
           error instanceof Error ? error.message : 'US location normalization failed',
       });
+      return;
+    }
+
+    job.progress.currentSource = leadSourceModeLabels[sourceMode];
+
+    if (sourceMode === 'linkedin') {
+      if (!discoverLinkedinLeads) {
+        markFailed(job, {
+          providerId: 'linkedin-search',
+          providerName: 'LinkedIn',
+          message: 'LinkedIn discovery is not configured for this environment.',
+        });
+        return;
+      }
+
+      try {
+        await runLinkedinDiscovery(job, job.request, location, discoverLinkedinLeads, now);
+      } catch (error) {
+        markFailed(job, {
+          providerId: 'linkedin-search',
+          providerName: 'LinkedIn',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'LinkedIn discovery failed',
+        });
+        return;
+      }
+
+      refreshProgress(job);
+      job.status = 'complete';
+      job.progress.currentSource = 'Complete';
+      refreshProgress(job);
       return;
     }
 

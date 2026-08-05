@@ -6,6 +6,7 @@ const normalizeText = (value: string) => value.trim().replace(/\s+/g, ' ');
 
 export const createSearchDraft = (): SearchDraft => ({
   companyType: '',
+  sourceMode: 'gmb',
   locationMode: 'timezone',
   timeZone: '',
   city: '',
@@ -50,6 +51,7 @@ export const buildSearchRequestFromDraft = (draft: SearchDraft): SearchRequest =
 
     return {
       companyType: draft.companyType.trim(),
+      sourceMode: draft.sourceMode,
       location: {
         mode: 'timezone',
         timeZone: draft.timeZone as TimeZoneCode,
@@ -68,6 +70,7 @@ export const buildSearchRequestFromDraft = (draft: SearchDraft): SearchRequest =
 
   return {
     companyType: draft.companyType.trim(),
+    sourceMode: draft.sourceMode,
     location: {
       mode: 'cityState',
       city: normalizeText(draft.city),

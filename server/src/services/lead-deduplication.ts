@@ -34,6 +34,29 @@ const toDomain = (value?: string) => {
   }
 };
 
+const normalizeListingUrl = (value?: string) => {
+  const trimmed = value?.trim() ?? '';
+
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+    url.hash = '';
+    const pathname =
+      url.pathname !== '/' && url.pathname.endsWith('/')
+        ? url.pathname.slice(0, -1)
+        : url.pathname === '/'
+          ? ''
+          : url.pathname;
+
+    return `${url.protocol}//${url.host.replace(/^www\./, '')}${pathname}${url.search}`;
+  } catch {
+    return trimmed.toLowerCase();
+  }
+};
+
 const toPhoneKey = (value?: string) => {
   const digits = (value ?? '').replace(/\D/g, '');
   if (digits.length === 11 && digits.startsWith('1')) {
@@ -58,6 +81,10 @@ const buildIdentityKeys = (lead: Lead) => {
     keys.push(`phone:${phone}`);
   }
 
+  if (lead.listingUrl?.trim()) {
+    keys.push(`listing:${normalizeListingUrl(lead.listingUrl)}`);
+  }
+
   if (nameKey && cityKey) {
     keys.push(`name-city:${nameKey}|${cityKey}`);
   }
@@ -76,6 +103,7 @@ const mergeGroup = (group: Lead[]) => {
     mobile: pickValue(...sorted.map((lead) => lead.mobile)),
     email: pickValue(...sorted.map((lead) => lead.email)),
     website: pickValue(...sorted.map((lead) => lead.website)),
+    listingUrl: pickValue(...sorted.map((lead) => lead.listingUrl)),
     address: pickValue(...sorted.map((lead) => lead.address)),
     source: sources.join(', '),
     confidence: Math.max(...sorted.map((lead) => lead.confidence)),

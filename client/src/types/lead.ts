@@ -1,4 +1,4 @@
-import type { TimeZoneCode } from '../data/search-options';
+import type { SearchSourceMode, TimeZoneCode } from '../data/search-options';
 import type { UsStateCode } from '../data/us-states';
 
 export type Lead = {
@@ -47,6 +47,7 @@ export type SearchRequest = {
   companyType: string;
   location: SearchLocation;
   count: number;
+  sourceMode?: SearchSourceMode;
   filters?: {
     hasEmail?: boolean;
     hasPhone?: boolean;
@@ -57,6 +58,7 @@ export type SearchRequest = {
 
 export type SearchDraft = {
   companyType: string;
+  sourceMode: SearchSourceMode;
   locationMode: SearchLocation['mode'];
   timeZone: TimeZoneCode | '';
   city: string;
