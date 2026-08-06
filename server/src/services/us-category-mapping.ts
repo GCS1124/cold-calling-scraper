@@ -6,6 +6,7 @@ export type CategoryProfile = {
   tagClauses: string[];
   searchTerms: string[];
   warnings: ProviderWarning[];
+  aliases?: string[];
 };
 
 type CategoryProfileBase = Omit<CategoryProfile, 'warnings'> & {
@@ -649,6 +650,40 @@ const categoryProfiles: Record<string, CategoryProfileBase> = {
     ],
   },
 
+  'ecommerce brands': {
+    key: 'ecommerce-brands',
+    label: 'Ecommerce Brands',
+    tagClauses: [
+      '["office"="company"]',
+      makeNameRegexClause(['ecommerce', 'e-commerce', 'd2c', 'direct to consumer', 'online store', 'shopify']),
+    ],
+    searchTerms: [
+      'shopify store',
+      'online store',
+      'ecommerce brand',
+      'ecommerce company',
+      'direct-to-consumer brand',
+      'd2c brand',
+      'consumer brand',
+      'direct to consumer brand',
+    ],
+    aliases: [
+      'ecommerce',
+      'e-commerce',
+      'ecommerce brand',
+      'ecommerce brands',
+      'online store',
+      'online stores',
+      'shopify store',
+      'shopify stores',
+      'd2c',
+      'd2c brand',
+      'direct to consumer',
+      'direct-to-consumer brand',
+      'consumer brand',
+    ],
+  },
+
   consultants: {
     key: 'consultants',
     label: 'Consultants',
@@ -794,6 +829,7 @@ export const resolveCategoryProfile = (companyType: string): CategoryProfile => 
       label: exact.label,
       tagClauses: exact.tagClauses,
       searchTerms: exact.searchTerms.length ? exact.searchTerms : [exact.label],
+      aliases: exact.aliases,
       warnings: [],
     };
   }
@@ -808,6 +844,7 @@ export const resolveCategoryProfile = (companyType: string): CategoryProfile => 
       label: partial.label,
       tagClauses: partial.tagClauses,
       searchTerms: partial.searchTerms.length ? partial.searchTerms : [partial.label],
+      aliases: partial.aliases,
       warnings: [
         {
           providerId: 'osm-category-map',
@@ -827,6 +864,7 @@ export const getSupportedCategories = (): CategoryProfile[] => {
     label: profile.label,
     tagClauses: profile.tagClauses,
     searchTerms: profile.searchTerms,
+    aliases: profile.aliases,
     warnings: [],
   }));
 };

@@ -245,8 +245,7 @@ describe('createVercelSearchServiceWithDeps', () => {
           {
             providerId: 'linkedin-search-brave',
             providerName: 'Brave Search',
-            message:
-              'Brave Search returned a blocked or rate-limited page while searching public LinkedIn profiles for "site:linkedin.com/in/ founder Austin TX -jobs -company -school -posts -learning".',
+            message: 'Brave Search returned a blocked or rate-limited page while searching public LinkedIn profiles.',
           },
         ],
         blocked: true,

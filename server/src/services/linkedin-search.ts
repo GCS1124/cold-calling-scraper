@@ -20,13 +20,18 @@ type LinkedInCandidate = {
   snippet: string;
 };
 
+type LinkedInRoleTerms = {
+  primary: string[];
+  category: string[];
+};
+
 export type LinkedInDiscoveryResult = {
   leads: Lead[];
   warnings: ProviderWarning[];
   blocked: boolean;
 };
 
-const maxQueries = 4;
+const maxQueries = 12;
 const searchTimeoutMs = 4500;
 const sourceLabel = 'LinkedIn';
 const providerId = 'linkedin-search';
@@ -119,6 +124,108 @@ const normalizeQueryTerm = (value: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const buildCompanyTerms = (request: SearchRequest, profile: ReturnType<typeof resolveCategoryProfile>) =>
+  unique([
+    ...profile.searchTerms,
+    ...(profile.aliases ?? []),
+    request.companyType,
+    profile.label,
+  ]).slice(0, 8);
+
+const selectPrimaryCompanyTerm = (request: SearchRequest, companyTerms: string[]) => {
+  const requestedTerm = normalizeQueryTerm(request.companyType);
+
+  if (requestedTerm && (requestedTerm.includes(' ') || requestedTerm.length > 4)) {
+    return requestedTerm;
+  }
+
+  return (
+    companyTerms.find((term) => term.includes(' ') || term.length > 5) ??
+    requestedTerm ??
+    companyTerms[0] ??
+    ''
+  );
+};
+
+const selectSecondaryCompanyTerm = (companyTerms: string[], primaryCompany: string) =>
+  companyTerms.find(
+    (term) => term !== primaryCompany && (term.includes(' ') || term.length > 5),
+  ) ??
+  companyTerms.find((term) => term !== primaryCompany) ??
+  primaryCompany;
+
+const buildLocationTerms = (location: NormalizedUsLocation) =>
+  unique([
+    normalizeQueryTerm(location.label),
+    normalizeQueryTerm(location.city || location.label),
+    ...buildDiscoverySeeds(location).slice(0, 5).map(normalizeQueryTerm),
+  ]).slice(0, 5);
+
+const buildRoleTerms = (request: SearchRequest, profile: ReturnType<typeof resolveCategoryProfile>): LinkedInRoleTerms => {
+  const normalizedContext = normalizeText(
+    [request.companyType, profile.label, ...profile.searchTerms.slice(0, 6), ...(profile.aliases ?? []).slice(0, 6)].join(
+      ' ',
+    ),
+  ).toLowerCase();
+
+  const primaryRoles = [
+    'founder',
+    'owner',
+    'business owner',
+    'owner operator',
+    'ceo',
+    'co-founder',
+    'president',
+    'managing partner',
+    'principal',
+    'director',
+  ];
+
+  const categoryRoles: string[] = [];
+
+  if (/(dentist|dental|orthodont|periodont|oral surgeon|clinic|urgent care|medical|veterin|health care|healthcare)/i.test(normalizedContext)) {
+    categoryRoles.push('practice owner', 'clinic owner', 'office manager', 'practice manager', 'medical director', 'dental director');
+  }
+
+  if (/(hvac|plumb|electric|roof|clean|landscap|pest|move|auto repair|mechanic|car wash|service contractor|trade)/i.test(normalizedContext)) {
+    categoryRoles.push('general manager', 'operations manager', 'service manager', 'field manager', 'franchise owner');
+  }
+
+  if (/(law|attorney|account|insurance|real estate|marketing|consult|software|saas|tech|agency)/i.test(normalizedContext)) {
+    categoryRoles.push('partner', 'vice president', 'head of growth', 'head of operations');
+  }
+
+  if (/(restaurant|cafe|bakery|bar|hotel|grocery|clothing|electronics|furniture|salon|gym|school|college|day care|daycare)/i.test(normalizedContext)) {
+    categoryRoles.push('operator', 'store manager', 'general manager', 'franchise owner');
+  }
+
+  if (/(ecommerce|e-commerce|d2c|direct to consumer|shopify|online store|brand)/i.test(normalizedContext)) {
+    categoryRoles.push('brand founder', 'ecommerce manager', 'head of ecommerce', 'd2c founder', 'brand owner');
+  }
+
+  return {
+    primary: unique(primaryRoles).slice(0, 10),
+    category: unique(categoryRoles).slice(0, 12),
+  };
+};
+
+const buildLinkedInQuery = (company: string, location: string, role?: string) =>
+  normalizeText(
+    [
+      'site:linkedin.com/in/',
+      role,
+      company,
+      location,
+      '-jobs',
+      '-company',
+      '-school',
+      '-posts',
+      '-learning',
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+
 const normalizeLinkedInProfileUrl = (value?: string) => {
   const trimmed = value?.trim() ?? '';
 
@@ -174,41 +281,38 @@ const hasLinkedInProfileSignals = (value: string) =>
 
 const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocation) => {
   const profile = resolveCategoryProfile(request.companyType);
-  const companyTerms = unique([
-    request.companyType,
-    profile.searchTerms[0] ?? request.companyType,
-    profile.searchTerms[1] ?? request.companyType,
-    profile.searchTerms[2] ?? request.companyType,
-  ]).slice(0, 3);
-  const locationTerms = unique([
-    normalizeQueryTerm(location.label),
-    normalizeQueryTerm(location.city || location.label),
-    ...buildDiscoverySeeds(location).slice(0, 3).map(normalizeQueryTerm),
-  ]).slice(0, 3);
-  const roleTerms = [
-    'founder',
-    'owner',
-    'ceo',
-    'principal',
-    'partner',
-    'director',
-  ];
+  const companyTerms = buildCompanyTerms(request, profile);
+  const locationTerms = buildLocationTerms(location);
+  const { primary: genericRoleTerms, category: categoryRoleTerms } = buildRoleTerms(request, profile);
 
-  const primaryCompany = companyTerms[0] ?? normalizeQueryTerm(request.companyType);
-  const secondaryCompany = companyTerms[1] ?? primaryCompany;
+  const primaryCompany = selectPrimaryCompanyTerm(request, companyTerms);
+  const secondaryCompany = selectSecondaryCompanyTerm(companyTerms, primaryCompany);
   const primaryLocation = locationTerms[0] ?? normalizeQueryTerm(location.label);
   const secondaryLocation = locationTerms[1] ?? primaryLocation;
 
-  return unique([
-    `site:linkedin.com/in/ ${roleTerms[0]} ${primaryCompany} ${primaryLocation} -jobs -company -school -posts -learning`,
-    `site:linkedin.com/in/ ${roleTerms[1]} ${primaryCompany} ${primaryLocation} -jobs -company -school -posts -learning`,
-    `site:linkedin.com/in/ ${roleTerms[2]} ${primaryCompany} ${primaryLocation} -jobs -company -school -posts -learning`,
-    `site:linkedin.com/in/ ${roleTerms[3]} ${secondaryCompany} ${primaryLocation} -jobs -company -school -posts -learning`,
-    `site:linkedin.com/in/ ${roleTerms[4]} ${secondaryCompany} ${primaryLocation} -jobs -company -school -posts -learning`,
-    `site:linkedin.com/in/ ${roleTerms[5]} ${primaryCompany} ${secondaryLocation} -jobs -company -school -posts -learning`,
-    `site:linkedin.com/in/ ${roleTerms[6]} ${primaryCompany} ${secondaryLocation} -jobs -company -school -posts -learning`,
-    `site:linkedin.com/in/ ${roleTerms[7]} ${secondaryCompany} ${secondaryLocation} -jobs -company -school -posts -learning`,
-  ]).slice(0, maxQueries);
+  const prioritizedRoleTerms = unique([...categoryRoleTerms, ...genericRoleTerms]);
+
+  const companyQueries = unique([
+    buildLinkedInQuery(primaryCompany, primaryLocation),
+    buildLinkedInQuery(secondaryCompany, primaryLocation),
+    buildLinkedInQuery(primaryCompany, secondaryLocation),
+    ...companyTerms.slice(2, 5).map((company) => buildLinkedInQuery(company, primaryLocation)),
+  ]);
+
+  const locationQueries = locationTerms
+    .slice(2, 5)
+    .map((term) => buildLinkedInQuery(primaryCompany, term));
+
+  const queryCandidates = unique([
+    ...prioritizedRoleTerms.slice(0, 4).map((role) => buildLinkedInQuery(primaryCompany, primaryLocation, role)),
+    ...companyQueries,
+    ...prioritizedRoleTerms.slice(4, 8).map((role) => buildLinkedInQuery(primaryCompany, primaryLocation, role)),
+    ...locationQueries,
+  ]);
+
+  const queryBudget = Math.min(maxQueries, Math.max(9, Math.ceil(request.count / 50) + 5));
+
+  return queryCandidates.slice(0, queryBudget);
 };
 
 const fetchTextWithTimeout = async (url: string, timeoutMs: number) => {
@@ -374,7 +478,7 @@ const collectSearchResults = async (query: string, remainingResults: number) => 
 const parseLinkedInTitle = (title: string, profileUrl: string) => {
   const cleaned = normalizeText(
     decodeHtmlEntities(title)
-      .replace(/^(?:LinkedIn\s+)?linkedin\.com\s*›\s*in\s*›\s*[^ ]+\s+/i, '')
+      .replace(/^(?:LinkedIn\s+)?(?:[a-z0-9-]+\.)?linkedin\.com\s*›\s*in\s*›\s*[^ ]+\s+/i, '')
       .replace(/\s*[|]\s*Professional Profile\s*[|]\s*LinkedIn.*$/i, '')
       .replace(/\s*[|]\s*LinkedIn.*$/i, '')
       .replace(/\s*-\s*LinkedIn.*$/i, ''),

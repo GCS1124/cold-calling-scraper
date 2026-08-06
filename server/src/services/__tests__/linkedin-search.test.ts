@@ -27,6 +27,35 @@ const makeResponse = (body: string, status = 200) =>
     },
   });
 
+const linkedInProfileBody = `Title: LinkedIn search results
+
+Markdown Content:
+1. [Jordan Lee - Founder at Sun Trail Goods | LinkedIn](https://www.linkedin.com/in/jordan-lee-sun-trail/)
+Founder at Sun Trail Goods in Austin, Texas.
+`;
+
+const makeQueryCaptureFetch = (body: string) => {
+  const queries = new Set<string>();
+
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const parsed = new URL(url);
+    const query = parsed.searchParams.get('q');
+
+    if (query) {
+      queries.add(query);
+    }
+
+    if (url.includes('search.brave.com') || url.includes('bing.com')) {
+      return makeResponse(body);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  return { fetchMock, queries };
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -157,5 +186,56 @@ Markdown Content:
     expect(result.blocked).toBe(false);
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]?.message).toContain('No public LinkedIn profiles');
+  });
+
+  it('expands ecommerce brand searches across store and D2C synonyms', async () => {
+    const { fetchMock, queries } = makeQueryCaptureFetch(linkedInProfileBody);
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: {
+        companyType: 'Ecommerce brand',
+        city: 'Austin',
+        count: 350,
+      },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.blocked).toBe(false);
+    expect(result.leads).toHaveLength(1);
+
+    const queryList = [...queries];
+    expect(queryList.length).toBeGreaterThanOrEqual(9);
+    expect(queryList.some((query) => query.includes('shopify store'))).toBe(true);
+    expect(queryList.some((query) => query.includes('direct-to-consumer brand'))).toBe(true);
+    expect(queryList.some((query) => /brand founder|owner/i.test(query))).toBe(true);
+  });
+
+  it('expands HVAC searches with service and field manager roles', async () => {
+    const { fetchMock, queries } = makeQueryCaptureFetch(linkedInProfileBody);
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: {
+        companyType: 'HVAC contractor',
+        city: 'Austin',
+        count: 350,
+      },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.blocked).toBe(false);
+    expect(result.leads).toHaveLength(1);
+
+    const queryList = [...queries];
+    expect(queryList.length).toBeGreaterThanOrEqual(9);
+    expect(queryList.some((query) => query.includes('hvac contractor'))).toBe(true);
+    expect(
+      queryList.some((query) => /service manager|field manager|franchise owner/i.test(query)),
+    ).toBe(true);
   });
 });

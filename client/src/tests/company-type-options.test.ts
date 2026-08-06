@@ -25,6 +25,8 @@ describe('company type options', () => {
         'Marketing Agencies',
         'Commercial cleaning',
         'Cleaning Services',
+        'Ecommerce brand',
+        'Ecommerce Brands',
       ]),
     );
   });

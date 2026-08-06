@@ -35,4 +35,21 @@ describe('resolveCategoryProfile', () => {
       expect.arrayContaining(['commercial cleaning', 'commercial cleaner', 'maid service']),
     );
   });
+
+  it('maps ecommerce brand keywords to the ecommerce profile', () => {
+    const profile = resolveCategoryProfile('Ecommerce brand');
+
+    expect(profile.label).toBe('Ecommerce Brands');
+    expect(profile.searchTerms).toEqual(
+      expect.arrayContaining([
+        'shopify store',
+        'online store',
+        'ecommerce brand',
+        'direct-to-consumer brand',
+      ]),
+    );
+    expect(profile.aliases).toEqual(
+      expect.arrayContaining(['shopify store', 'd2c brand', 'consumer brand']),
+    );
+  });
 });
