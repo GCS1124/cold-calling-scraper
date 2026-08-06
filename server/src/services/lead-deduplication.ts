@@ -44,6 +44,9 @@ const normalizeListingUrl = (value?: string) => {
   try {
     const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
     url.hash = '';
+    if (url.hostname.endsWith('linkedin.com')) {
+      url.hostname = 'linkedin.com';
+    }
     const pathname =
       url.pathname !== '/' && url.pathname.endsWith('/')
         ? url.pathname.slice(0, -1)

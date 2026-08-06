@@ -199,17 +199,21 @@ describe('createVercelSearchServiceWithDeps', () => {
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
       normalizeLocation: vi.fn().mockResolvedValue(localLocation),
-      discoverLinkedinLeads: vi.fn().mockResolvedValue([
-        makeLead({
-          id: 'linkedin-lead-1',
-          name: 'Mark Sweeney',
-          source: 'LinkedIn',
-          website: '',
-          listingUrl: 'https://www.linkedin.com/in/mark-sweeney-austin',
-          hasWebsite: true,
-          sourceScore: 82,
-        }),
-      ]),
+      discoverLinkedinLeads: vi.fn().mockResolvedValue({
+        leads: [
+          makeLead({
+            id: 'linkedin-lead-1',
+            name: 'Mark Sweeney',
+            source: 'LinkedIn',
+            website: '',
+            listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
+            hasWebsite: true,
+            sourceScore: 82,
+          }),
+        ],
+        warnings: [],
+        blocked: false,
+      }),
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
       idFactory: () => 'search-linkedin-1',
       now: () => 1000,
@@ -229,6 +233,43 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.leads).toHaveLength(1);
     expect(snapshot?.leads[0]?.listingUrl).toContain('/in/');
     expect(snapshot?.meta.providerWarnings).toHaveLength(0);
+  });
+
+  it('completes LinkedIn searches gracefully when public profile pages are blocked', async () => {
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      discoverLinkedinLeads: vi.fn().mockResolvedValue({
+        leads: [],
+        warnings: [
+          {
+            providerId: 'linkedin-search-brave',
+            providerName: 'Brave Search',
+            message:
+              'Brave Search returned a blocked or rate-limited page while searching public LinkedIn profiles for "site:linkedin.com/in/ founder Austin TX -jobs -company -school -posts -learning".',
+          },
+        ],
+        blocked: true,
+      }),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-linkedin-blocked',
+      now: () => 1000,
+    });
+
+    const response = await service.startSearch({
+      companyType: 'Founder',
+      city: 'Austin, TX',
+      count: 50,
+      sourceMode: 'linkedin',
+    });
+
+    const snapshot = await service.getSearch(response.searchId);
+
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.meta.progress.currentSource).toBe('Complete');
+    expect(snapshot?.leads).toHaveLength(0);
+    expect(snapshot?.meta.providerWarnings.some((warning) => warning.providerName === 'Brave Search')).toBe(true);
+    expect(snapshot?.meta.providerWarnings.some((warning) => warning.providerName === 'LinkedIn')).toBe(true);
   });
 
   it('keeps structured email and address data from OSM without crawlers', async () => {

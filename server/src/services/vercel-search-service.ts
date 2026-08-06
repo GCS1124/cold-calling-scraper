@@ -6,7 +6,10 @@ import { deduplicateLeads } from './lead-deduplication';
 import { enrichLead } from './lead-validation';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
 import { discoverUsLeadsFromGoogleMaps } from './google-maps-discovery';
-import { discoverUsLeadsFromLinkedinSearch } from './linkedin-search';
+import {
+  discoverUsLeadsFromLinkedinSearch,
+  type LinkedInDiscoveryResult,
+} from './linkedin-search';
 import { googlePlacesProvider } from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
@@ -46,7 +49,7 @@ type VercelSearchServiceDeps = {
     request: SearchRequest;
     location: NormalizedUsLocation;
     deadlineMs?: number;
-  }) => Promise<Lead[]>;
+  }) => Promise<LinkedInDiscoveryResult>;
   discoverOsmLeads?: typeof discoverUsLeadsFromOsm;
   enrichWebsiteLead?: (lead: Lead) => Promise<unknown>;
   now?: () => number;
@@ -163,23 +166,31 @@ const runLinkedinDiscovery = async (
 ) => {
   job.progress.currentSource = leadSourceModeLabels.linkedin;
 
-  const linkedinLeads = await discoverLinkedinLeads({
+  const linkedinResult = await discoverLinkedinLeads({
     request,
     location,
     deadlineMs: now() + getLinkedinTimeoutMs(request.count),
   });
 
-  if (linkedinLeads.length) {
-    mergeLeads(job, linkedinLeads, now);
-    job.progress.batchesCompleted += 1;
+  for (const warning of linkedinResult.warnings) {
+    appendWarningOnce(job, warning);
+  }
+
+  if (!linkedinResult.leads.length) {
+    if (linkedinResult.blocked) {
+      appendWarningOnce(job, {
+        providerId: 'linkedin-search',
+        providerName: 'LinkedIn',
+        message:
+          'LinkedIn search providers were blocked or rate-limited, so no public profiles were returned.',
+      });
+    }
+
     return;
   }
 
-  appendWarningOnce(job, {
-    providerId: 'linkedin-search',
-    providerName: 'LinkedIn',
-    message: `No public LinkedIn profiles were returned for ${location.label}.`,
-  });
+  mergeLeads(job, linkedinResult.leads, now);
+  job.progress.batchesCompleted += 1;
 };
 
 const buildQuery = (companyType: string, location: NormalizedUsLocation) =>

@@ -150,18 +150,22 @@ describe('createSearchService', () => {
     const service = createSearchService({
       idFactory: () => 'search-linkedin-1',
       normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
-      discoverLinkedinLeads: vi.fn().mockResolvedValue([
-        {
-          ...sampleLead,
-          id: 'linkedin-lead-1',
-          name: 'Mark Sweeney',
-          source: 'LinkedIn',
-          website: '',
-          listingUrl: 'https://www.linkedin.com/in/mark-sweeney-austin',
-          hasWebsite: true,
-          sourceScore: 82,
-        },
-      ]),
+      discoverLinkedinLeads: vi.fn().mockResolvedValue({
+        leads: [
+          {
+            ...sampleLead,
+            id: 'linkedin-lead-1',
+            name: 'Mark Sweeney',
+            source: 'LinkedIn',
+            website: '',
+            listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
+            hasWebsite: true,
+            sourceScore: 82,
+          },
+        ],
+        warnings: [],
+        blocked: false,
+      }),
       schedule: (task) => {
         backgroundTask = task;
       },
@@ -189,6 +193,92 @@ describe('createSearchService', () => {
     expect(completed?.leads).toHaveLength(1);
     expect(completed?.leads[0]?.listingUrl).toContain('/in/');
     expect(completed?.meta.providerWarnings).toHaveLength(0);
+  });
+
+  it('completes a LinkedIn search gracefully when public profile pages are blocked', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+
+    const service = createSearchService({
+      idFactory: () => 'search-linkedin-blocked',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverLinkedinLeads: vi.fn().mockResolvedValue({
+        leads: [],
+        warnings: [
+          {
+            providerId: 'linkedin-search-brave',
+            providerName: 'Brave Search',
+            message:
+              'Brave Search returned a blocked or rate-limited page while searching public LinkedIn profiles for "site:linkedin.com/in/ founder Austin TX -jobs -company -school -posts -learning".',
+          },
+        ],
+        blocked: true,
+      }),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    const started = await service.startSearch({
+      companyType: 'Founder',
+      city: 'Austin',
+      count: 50,
+      sourceMode: 'linkedin',
+    });
+
+    expect(started.meta.status).toBe('queued');
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-linkedin-blocked');
+
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.meta.progress.currentSource).toBe('Complete');
+    expect(completed?.leads).toHaveLength(0);
+    expect(completed?.meta.providerWarnings.some((warning) => warning.providerName === 'Brave Search')).toBe(true);
+    expect(
+      completed?.meta.providerWarnings.some((warning) => warning.providerName === 'LinkedIn'),
+    ).toBe(true);
+  });
+
+  it('completes a LinkedIn search gracefully when the orchestrator timeout expires', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+
+    const service = createSearchService({
+      idFactory: () => 'search-linkedin-timeout',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverLinkedinLeads: vi.fn().mockRejectedValue(
+        new Error('LinkedIn discovery timed out before the batch completed'),
+      ),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    const started = await service.startSearch({
+      companyType: 'Founder',
+      city: 'Austin',
+      count: 50,
+      sourceMode: 'linkedin',
+    });
+
+    expect(started.meta.status).toBe('queued');
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-linkedin-timeout');
+
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.meta.progress.currentSource).toBe('Complete');
+    expect(completed?.leads).toHaveLength(0);
+    expect(completed?.meta.providerWarnings.some((warning) => warning.providerName === 'LinkedIn')).toBe(true);
   });
 
   it('fans out Austin city-state searches across local seed variants before finishing', async () => {

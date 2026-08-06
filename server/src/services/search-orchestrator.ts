@@ -13,7 +13,10 @@ import { enrichLeads } from './lead-validation';
 import { googlePlacesProvider } from '../providers/google-places';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
 import { discoverUsLeadsFromGoogleMaps } from './google-maps-discovery';
-import { discoverUsLeadsFromLinkedinSearch } from './linkedin-search';
+import {
+  discoverUsLeadsFromLinkedinSearch,
+  type LinkedInDiscoveryResult,
+} from './linkedin-search';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
@@ -64,7 +67,7 @@ type SearchDeps = {
     request: SearchRequest;
     location: NormalizedUsLocation;
     deadlineMs?: number;
-  }) => Promise<Lead[]>;
+  }) => Promise<LinkedInDiscoveryResult>;
   discoverOsmLeads?: (args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
@@ -191,6 +194,20 @@ const dedupeWithCount = (leads: Lead[]) => {
   };
 };
 
+const appendUniqueWarnings = (job: SearchJob, warnings: ProviderWarning[]) => {
+  for (const warning of warnings) {
+    if (
+      job.providerWarnings.some(
+        (item) => item.providerId === warning.providerId && item.message === warning.message,
+      )
+    ) {
+      continue;
+    }
+
+    job.providerWarnings.push(warning);
+  }
+};
+
 const refreshProgress = (job: SearchJob) => {
   job.progress.discovered = job.leads.length;
   job.progress.totalCandidates = job.leads.length;
@@ -222,27 +239,51 @@ const runLinkedinDiscovery = async (
 ) => {
   job.progress.currentSource = leadSourceModeLabels.linkedin;
 
-  const linkedinLeads = await withTimeout(
-    discoverLinkedinLeads({
-      request,
-      location,
-      deadlineMs: Date.now() + linkedinDiscoveryTimeoutMs,
-    }),
-    linkedinDiscoveryTimeoutMs,
-    'LinkedIn discovery timed out before the batch completed',
-  );
+  let linkedinResult: LinkedInDiscoveryResult;
+  try {
+    linkedinResult = await withTimeout(
+      discoverLinkedinLeads({
+        request,
+        location,
+        deadlineMs: Date.now() + linkedinDiscoveryTimeoutMs,
+      }),
+      linkedinDiscoveryTimeoutMs,
+      'LinkedIn discovery timed out before the batch completed',
+    );
+  } catch (error) {
+    if (error instanceof Error && /timed out/i.test(error.message)) {
+      appendUniqueWarnings(job, [
+        {
+          providerId: 'linkedin-search',
+          providerName: 'LinkedIn',
+          message: error.message,
+        },
+      ]);
+      return;
+    }
 
-  if (linkedinLeads.length) {
-    upsertLeads(job, linkedinLeads, now);
-    job.progress.batchesCompleted += 1;
+    throw error;
+  }
+
+  appendUniqueWarnings(job, linkedinResult.warnings);
+
+  if (!linkedinResult.leads.length) {
+    if (linkedinResult.blocked) {
+      appendUniqueWarnings(job, [
+        {
+          providerId: 'linkedin-search',
+          providerName: 'LinkedIn',
+          message:
+            'LinkedIn search providers were blocked or rate-limited, so no public profiles were returned.',
+        },
+      ]);
+    }
+
     return;
   }
 
-  job.providerWarnings.push({
-    providerId: 'linkedin-search',
-    providerName: 'LinkedIn',
-    message: `No public LinkedIn profiles were returned for ${location.label}.`,
-  });
+  upsertLeads(job, linkedinResult.leads, now);
+  job.progress.batchesCompleted += 1;
 };
 
 const runRegionalDiscovery = async (

@@ -1,0 +1,4 @@
+[ 4059460ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:5174/?token=7kiu-TBawQ5c' failed: The operation couldn’t be completed. Socket is not connected @ :0
+[ 4061534ms] [LOG] [vite] server connection lost. Polling for restart... @ http://127.0.0.1:5174/@vite/client:968
+[55315758ms] [ERROR] Failed to load resource: Could not connect to the server. @ http://127.0.0.1:5174/api/search:0
+[55319571ms] [ERROR] Failed to load resource: Could not connect to the server. @ http://127.0.0.1:5174/api/search:0
