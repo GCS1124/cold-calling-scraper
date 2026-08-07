@@ -4,6 +4,7 @@ import type { Lead } from '../types/lead';
 import type { ProviderWarning, SearchRequest } from '../types/search';
 import type { NormalizedUsLocation } from './us-location';
 import { buildDiscoverySeeds } from './discovery-seeds';
+import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 
 type SearchResult = {
@@ -31,7 +32,7 @@ export type LinkedInDiscoveryResult = {
   blocked: boolean;
 };
 
-const maxQueries = 12;
+const maxQueries = 14;
 const searchTimeoutMs = 4500;
 const sourceLabel = 'LinkedIn';
 const providerId = 'linkedin-search';
@@ -226,6 +227,19 @@ const buildLinkedInQuery = (company: string, location: string, role?: string) =>
       .join(' '),
   );
 
+const buildLinkedInQueryFromPhrase = (phrase: string) =>
+  normalizeText(
+    [
+      'site:linkedin.com/in/',
+      phrase,
+      '-jobs',
+      '-company',
+      '-school',
+      '-posts',
+      '-learning',
+    ].join(' '),
+  );
+
 const normalizeLinkedInProfileUrl = (value?: string) => {
   const trimmed = value?.trim() ?? '';
 
@@ -281,6 +295,9 @@ const hasLinkedInProfileSignals = (value: string) =>
 
 const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocation) => {
   const profile = resolveCategoryProfile(request.companyType);
+  const discoveryQueries = buildDiscoveryQueryVariants(request.companyType, location, profile)
+    .slice(0, 10)
+    .map(buildLinkedInQueryFromPhrase);
   const companyTerms = buildCompanyTerms(request, profile);
   const locationTerms = buildLocationTerms(location);
   const { primary: genericRoleTerms, category: categoryRoleTerms } = buildRoleTerms(request, profile);
@@ -305,14 +322,37 @@ const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocati
 
   const queryCandidates = unique([
     ...prioritizedRoleTerms.slice(0, 4).map((role) => buildLinkedInQuery(primaryCompany, primaryLocation, role)),
+    ...discoveryQueries.slice(0, 4),
     ...companyQueries,
     ...prioritizedRoleTerms.slice(4, 8).map((role) => buildLinkedInQuery(primaryCompany, primaryLocation, role)),
+    ...discoveryQueries.slice(4, 10),
     ...locationQueries,
   ]);
 
-  const queryBudget = Math.min(maxQueries, Math.max(9, Math.ceil(request.count / 50) + 5));
+  const queryBudget = Math.min(maxQueries, Math.max(10, Math.ceil(request.count / 40) + 6));
 
   return queryCandidates.slice(0, queryBudget);
+};
+
+const buildFallbackQueryVariants = (request: SearchRequest, location: NormalizedUsLocation) => {
+  const profile = resolveCategoryProfile(request.companyType);
+  const locationTerms = buildLocationTerms(location);
+  const { primary: genericRoleTerms, category: categoryRoleTerms } = buildRoleTerms(request, profile);
+  const prioritizedRoleTerms = unique([...categoryRoleTerms, ...genericRoleTerms]);
+  const primaryLocation = locationTerms[0] ?? normalizeQueryTerm(location.label);
+  const secondaryLocations = locationTerms.slice(1, 4).filter((term) => term !== primaryLocation);
+
+  const fallbackCandidates = unique([
+    ...prioritizedRoleTerms.slice(0, 6).map((role) => buildLinkedInQueryFromPhrase(`${role} ${primaryLocation}`)),
+    ...prioritizedRoleTerms.slice(0, 4).flatMap((role) =>
+      secondaryLocations.map((term) => buildLinkedInQueryFromPhrase(`${role} ${term}`)),
+    ),
+    ...prioritizedRoleTerms.slice(6, 10).map((role) => buildLinkedInQueryFromPhrase(`${role} ${primaryLocation}`)),
+  ]);
+
+  const fallbackBudget = Math.min(maxQueries, Math.max(8, Math.ceil(request.count / 60) + 4));
+
+  return fallbackCandidates.slice(0, fallbackBudget);
 };
 
 const fetchTextWithTimeout = async (url: string, timeoutMs: number) => {
@@ -526,6 +566,7 @@ const buildLeadFromCandidate = (
 ): Lead => ({
   id: createId(candidate.profileUrl || `${candidate.name}-${candidate.headline ?? ''}`),
   name: normalizeText(candidate.name || slugToName(candidate.profileUrl) || candidate.profileUrl),
+  headline: candidate.headline,
   mobile: '',
   email: '',
   website: '',
@@ -562,21 +603,19 @@ const pushUniqueWarning = (warnings: ProviderWarning[], warning: ProviderWarning
   warnings.push(warning);
 };
 
-export const discoverUsLeadsFromLinkedinSearch = async ({
-  request,
-  location,
-  deadlineMs,
+const runLinkedInQuerySet = async ({
+  queries,
+  candidates,
+  warnings,
+  maxResults,
+  deadline,
 }: {
-  request: SearchRequest;
-  location: NormalizedUsLocation;
-  deadlineMs?: number;
-}): Promise<LinkedInDiscoveryResult> => {
-  const start = Date.now();
-  const deadline = deadlineMs ?? start + 28_000;
-  const queries = buildQueryVariants(request, location);
-  const maxResults = Number(process.env.LINKEDIN_SEARCH_MAX_RESULTS ?? request.count);
-  const candidates = new Map<string, LinkedInCandidate>();
-  const warnings: ProviderWarning[] = [];
+  queries: string[];
+  candidates: Map<string, LinkedInCandidate>;
+  warnings: ProviderWarning[];
+  maxResults: number;
+  deadline: number;
+}) => {
   let blocked = false;
 
   for (const query of queries) {
@@ -608,6 +647,45 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
         snippet: normalizeText(result.snippet),
       });
     }
+  }
+
+  return blocked;
+};
+
+export const discoverUsLeadsFromLinkedinSearch = async ({
+  request,
+  location,
+  deadlineMs,
+}: {
+  request: SearchRequest;
+  location: NormalizedUsLocation;
+  deadlineMs?: number;
+}): Promise<LinkedInDiscoveryResult> => {
+  const start = Date.now();
+  const deadline = deadlineMs ?? start + 28_000;
+  const queries = buildQueryVariants(request, location);
+  const fallbackQueries = buildFallbackQueryVariants(request, location);
+  const maxResults = Number(process.env.LINKEDIN_SEARCH_MAX_RESULTS ?? request.count);
+  const candidates = new Map<string, LinkedInCandidate>();
+  const warnings: ProviderWarning[] = [];
+  let blocked = false;
+
+  blocked ||= await runLinkedInQuerySet({
+    queries,
+    candidates,
+    warnings,
+    maxResults,
+    deadline,
+  });
+
+  if (!candidates.size) {
+    blocked ||= await runLinkedInQuerySet({
+      queries: fallbackQueries,
+      candidates,
+      warnings,
+      maxResults,
+      deadline,
+    });
   }
 
   const leads = [...candidates.values()].map((candidate) =>

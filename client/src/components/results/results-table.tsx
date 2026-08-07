@@ -51,7 +51,7 @@ export function ResultsTable({
               <th className="px-4 py-3">Company</th>
               <th className="px-4 py-3">Phone</th>
               <th className="px-4 py-3">Email</th>
-              <th className="px-4 py-3">Website</th>
+              <th className="px-4 py-3">Website / Profile</th>
               <th className="px-4 py-3">Address</th>
               <th className="px-4 py-3">Source</th>
               <th className="px-4 py-3">Actions</th>

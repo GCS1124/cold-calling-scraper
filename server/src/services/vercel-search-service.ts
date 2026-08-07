@@ -10,6 +10,7 @@ import {
   discoverUsLeadsFromLinkedinSearch,
   type LinkedInDiscoveryResult,
 } from './linkedin-search';
+import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
 import { googlePlacesProvider } from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
@@ -50,6 +51,7 @@ type VercelSearchServiceDeps = {
     location: NormalizedUsLocation;
     deadlineMs?: number;
   }) => Promise<LinkedInDiscoveryResult>;
+  enrichLinkedinLeads?: typeof enrichLinkedinLeadsWithPublicContacts;
   discoverOsmLeads?: typeof discoverUsLeadsFromOsm;
   enrichWebsiteLead?: (lead: Lead) => Promise<unknown>;
   now?: () => number;
@@ -70,10 +72,12 @@ const getGooglePlacesTimeoutMs = (requestedCount: number) =>
   requestedCount >= 50 ? 20_000 : 8_000;
 const getGoogleMapsTimeoutMs = (requestedCount: number) =>
   requestedCount >= 50 ? 15_000 : 8_000;
-const getLinkedinTimeoutMs = (requestedCount: number) =>
-  requestedCount >= 50 ? 30_000 : 20_000;
+const getLinkedinProfileDiscoveryWindowMs = (requestedCount: number) =>
+  requestedCount >= 50 ? 25_000 : 18_000;
+const getLinkedinContactEnrichmentWindowMs = (requestedCount: number) =>
+  requestedCount >= 50 ? 22_000 : 14_000;
 const getMaxTickDurationMs = (requestedCount: number) =>
-  requestedCount >= 50 ? 40_000 : 15_000;
+  requestedCount >= 50 ? 55_000 : 35_000;
 
 const withNow = () => Date.now();
 
@@ -145,11 +149,18 @@ const dedupeWithCount = (leads: Lead[]) => {
 const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
   rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
 
-const mergeLeads = (job: SearchJobRecord, incoming: Lead[], now: () => number) => {
+const mergeLeads = (
+  job: SearchJobRecord,
+  incoming: Lead[],
+  now: () => number,
+  countDuplicates = true,
+) => {
   const previousCount = job.leads.length;
   const merged = [...job.leads, ...incoming.map(normalizeLead)];
   const { leads, duplicatesRemoved } = dedupeWithCount(merged);
-  job.progress.duplicatesRemoved += duplicatesRemoved;
+  if (countDuplicates) {
+    job.progress.duplicatesRemoved += duplicatesRemoved;
+  }
   job.leads = trimCandidatePool(leads, job.request.count);
   if (job.leads.length > previousCount) {
     job.lastProgressAt = now();
@@ -162,6 +173,7 @@ const runLinkedinDiscovery = async (
   request: SearchRequest,
   location: NormalizedUsLocation,
   discoverLinkedinLeads: NonNullable<VercelSearchServiceDeps['discoverLinkedinLeads']>,
+  enrichLinkedinLeads: VercelSearchServiceDeps['enrichLinkedinLeads'],
   now: () => number,
 ) => {
   job.progress.currentSource = leadSourceModeLabels.linkedin;
@@ -169,7 +181,7 @@ const runLinkedinDiscovery = async (
   const linkedinResult = await discoverLinkedinLeads({
     request,
     location,
-    deadlineMs: now() + getLinkedinTimeoutMs(request.count),
+    deadlineMs: now() + getLinkedinProfileDiscoveryWindowMs(request.count),
   });
 
   for (const warning of linkedinResult.warnings) {
@@ -190,6 +202,31 @@ const runLinkedinDiscovery = async (
   }
 
   mergeLeads(job, linkedinResult.leads, now);
+
+  if (enrichLinkedinLeads) {
+    job.status = 'enriching';
+    job.progress.discovered = linkedinResult.leads.length;
+    job.progress.totalCandidates = linkedinResult.leads.length;
+
+    const contactResult = await enrichLinkedinLeads({
+      leads: linkedinResult.leads,
+      request,
+      location,
+      deadlineMs: now() + getLinkedinContactEnrichmentWindowMs(request.count),
+      onProgress: (completed) => {
+        job.progress.enriched = completed;
+        job.updatedAt = now();
+      },
+    });
+
+    for (const warning of contactResult.warnings) {
+      appendWarningOnce(job, warning);
+    }
+
+    job.progress.enriched = contactResult.enrichedCount;
+    mergeLeads(job, contactResult.leads, now, false);
+  }
+
   job.progress.batchesCompleted += 1;
 };
 
@@ -315,7 +352,10 @@ const tickJob = async (
   job: SearchJobRecord,
   store: ReturnType<typeof createSearchJobStore>,
   deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'now'>> &
-    Pick<VercelSearchServiceDeps, 'discoverGoogleMapsLeads' | 'discoverLinkedinLeads'>,
+    Pick<
+      VercelSearchServiceDeps,
+      'discoverGoogleMapsLeads' | 'discoverLinkedinLeads' | 'enrichLinkedinLeads'
+    >,
 ): Promise<SearchJobRecord> => {
   let targetLocation = job.targetLocation as NormalizedUsLocation | undefined;
 
@@ -380,6 +420,7 @@ const tickJob = async (
         job.request,
         targetLocation,
         discoverLinkedinLeads,
+        deps.enrichLinkedinLeads,
         deps.now,
       );
     } catch (error) {
@@ -508,6 +549,9 @@ export const createVercelSearchServiceWithDeps = (
   const discoverLinkedinLeads =
     deps.discoverLinkedinLeads ??
     (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
+  const enrichLinkedinLeads =
+    deps.enrichLinkedinLeads ??
+    (deps.discoverLinkedinLeads ? undefined : enrichLinkedinLeadsWithPublicContacts);
   const discoverOsm = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
@@ -558,6 +602,7 @@ export const createVercelSearchServiceWithDeps = (
         normalizeLocation,
         discoverGoogleMapsLeads,
         discoverLinkedinLeads,
+        enrichLinkedinLeads,
         discoverOsmLeads: discoverOsm,
         now,
       });

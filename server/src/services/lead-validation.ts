@@ -149,6 +149,20 @@ const normalizeWebsite = (value?: string) => {
   }
 };
 
+const isLinkedInProfileListing = (value?: string) => {
+  if (!value?.trim()) {
+    return false;
+  }
+
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    return url.hostname.replace(/^www\./i, '').endsWith('linkedin.com') &&
+      /^\/in\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+};
+
 const normalizeUsPhone = (value?: string) => {
   const trimmed = value?.trim() ?? '';
 
@@ -331,7 +345,9 @@ export const enrichLead = (lead: Lead): Lead => {
   const verifiedEmail = isLikelyBusinessEmail(email);
 
   const hasPhone = isValidUsPhone(mobile);
-  const hasWebsite = Boolean(website || lead.listingUrl?.trim());
+  const hasWebsite = Boolean(
+    website || (lead.listingUrl?.trim() && !isLinkedInProfileListing(lead.listingUrl)),
+  );
 
   const sourceScore = getSourceScore({
     ...lead,

@@ -34,7 +34,13 @@ Markdown Content:
 Founder at Sun Trail Goods in Austin, Texas.
 `;
 
-const makeQueryCaptureFetch = (body: string) => {
+type QueryRoute = {
+  match: (query: string) => boolean;
+  body: string;
+  status?: number;
+};
+
+const makeQueryCaptureFetch = (body: string, routes: QueryRoute[] = []) => {
   const queries = new Set<string>();
 
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -47,6 +53,11 @@ const makeQueryCaptureFetch = (body: string) => {
     }
 
     if (url.includes('search.brave.com') || url.includes('bing.com')) {
+      const routedBody = routes.find((route) => query && route.match(query));
+      if (routedBody) {
+        return makeResponse(routedBody.body, routedBody.status ?? 200);
+      }
+
       return makeResponse(body);
     }
 
@@ -207,20 +218,25 @@ Markdown Content:
     expect(result.leads).toHaveLength(1);
 
     const queryList = [...queries];
-    expect(queryList.length).toBeGreaterThanOrEqual(9);
+    expect(queryList.length).toBeGreaterThanOrEqual(10);
+    expect(
+      queryList.some((query) =>
+        query.includes('site:linkedin.com/in/ Ecommerce brand in Austin, TX'),
+      ),
+    ).toBe(true);
     expect(queryList.some((query) => query.includes('shopify store'))).toBe(true);
     expect(queryList.some((query) => query.includes('direct-to-consumer brand'))).toBe(true);
     expect(queryList.some((query) => /brand founder|owner/i.test(query))).toBe(true);
   });
 
-  it('expands HVAC searches with service and field manager roles', async () => {
+  it('mixes LinkedIn role queries with the broader discovery planner for service categories', async () => {
     const { fetchMock, queries } = makeQueryCaptureFetch(linkedInProfileBody);
 
     vi.stubGlobal('fetch', fetchMock as typeof fetch);
 
     const result = await discoverUsLeadsFromLinkedinSearch({
       request: {
-        companyType: 'HVAC contractor',
+        companyType: 'HVAC Contractors',
         city: 'Austin',
         count: 350,
       },
@@ -232,10 +248,69 @@ Markdown Content:
     expect(result.leads).toHaveLength(1);
 
     const queryList = [...queries];
-    expect(queryList.length).toBeGreaterThanOrEqual(9);
-    expect(queryList.some((query) => query.includes('hvac contractor'))).toBe(true);
+    expect(queryList.length).toBeGreaterThanOrEqual(10);
+    expect(
+      queryList.some((query) =>
+        query.includes('site:linkedin.com/in/ HVAC Contractors in Austin, TX'),
+      ),
+    ).toBe(true);
     expect(
       queryList.some((query) => /service manager|field manager|franchise owner/i.test(query)),
+    ).toBe(true);
+  });
+
+  it('falls back to role-plus-location LinkedIn searches when the broader discovery pass is empty', async () => {
+    const { fetchMock, queries } = makeQueryCaptureFetch(
+      `Title: linkedin founder austin search results
+
+Markdown Content:
+1. Some unrelated business result
+2. Another unrelated result
+`,
+      [
+        {
+          match: (query) =>
+            /site:linkedin\.com\/in\/\s+(?:practice owner|clinic owner|office manager|founder|owner) Austin TX/i.test(query) &&
+            !/\bDentist\b/i.test(query),
+          body: linkedInProfileBody,
+        },
+      ],
+    );
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: {
+        companyType: 'Dentist',
+        city: 'Austin',
+        count: 50,
+      },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.blocked).toBe(false);
+    expect(result.warnings).toHaveLength(0);
+    expect(result.leads).toHaveLength(1);
+
+    const queryList = [...queries];
+    expect(queryList.length).toBeGreaterThan(10);
+    expect(queryList.some((query) => query.includes('Dentist'))).toBe(true);
+    expect(
+      queryList.some(
+        (query) =>
+          query.includes('site:linkedin.com/in/ practice owner Austin TX') &&
+          !query.includes('Dentist'),
+      ),
+    ).toBe(true);
+    expect(
+      queryList.some(
+        (query) =>
+          query.includes('site:linkedin.com/in/') &&
+          /Austin TX/.test(query) &&
+          !/\bDentist\b/i.test(query) &&
+          /practice owner|clinic owner|office manager|founder|owner/i.test(query),
+      ),
     ).toBe(true);
   });
 });

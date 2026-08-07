@@ -63,4 +63,24 @@ describe('deduplicateLeads', () => {
     expect(leads[0]?.source).toContain('OpenStreetMap');
     expect(leads[0]?.mobile).toBe('5125550101');
   });
+
+  it('flattens repeated source tags when enriched records are merged', () => {
+    const leads = deduplicateLeads([
+      makeLead({
+        id: 'lead-a',
+        listingUrl: 'https://linkedin.com/in/alpha-dental',
+        source: 'LinkedIn',
+      }),
+      makeLead({
+        id: 'lead-b',
+        listingUrl: 'https://linkedin.com/in/alpha-dental',
+        source: 'LinkedIn, Public Web, Website Crawl',
+        mobile: '5125550101',
+        hasPhone: true,
+      }),
+    ]);
+
+    expect(leads).toHaveLength(1);
+    expect(leads[0]?.source).toBe('LinkedIn, Public Web, Website Crawl');
+  });
 });

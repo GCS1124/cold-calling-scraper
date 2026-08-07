@@ -63,6 +63,31 @@ describe('enrichLead', () => {
     expect(enriched.verifiedEmail).toBe(false);
     expect(enriched.rejectionReason).toBe('missing_email');
   });
+
+  it('does not count a LinkedIn profile listing as a business website', () => {
+    const enriched = enrichLead({
+      id: 'linkedin-lead',
+      name: 'Jordan Lee',
+      mobile: '',
+      email: '',
+      website: '',
+      address: '',
+      category: 'Dentist',
+      city: 'Austin, TX',
+      source: 'LinkedIn',
+      confidence: 80,
+      listingUrl: 'https://linkedin.com/in/jordan-lee',
+      hasEmail: false,
+      hasPhone: false,
+      hasWebsite: true,
+      verifiedPhone: false,
+      verifiedEmail: false,
+      scrapedAt: '2026-04-21T00:00:00.000Z',
+    });
+
+    expect(enriched.hasWebsite).toBe(false);
+    expect(enriched.website).toBe('');
+  });
 });
 
 describe('deduplicateLeads', () => {

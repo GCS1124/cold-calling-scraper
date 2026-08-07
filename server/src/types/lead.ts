@@ -1,6 +1,7 @@
 export type Lead = {
   id: string;
   name: string;
+  headline?: string;
   mobile?: string;
   email?: string;
   website?: string;

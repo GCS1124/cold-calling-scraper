@@ -74,7 +74,7 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
 
         <p className="text-xs font-normal leading-5 text-slate-500">
           {isLinkedInMode
-            ? `${sourceModeLabelsByCode.linkedin} uses free public profile search.`
+            ? `${sourceModeLabelsByCode.linkedin} searches public profiles only. Phone numbers and emails are collected only from public business websites.`
             : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
         </p>
       </fieldset>

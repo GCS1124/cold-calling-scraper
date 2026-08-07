@@ -98,7 +98,16 @@ const buildIdentityKeys = (lead: Lead) => {
 const mergeGroup = (group: Lead[]) => {
   const sorted = [...group].sort((left, right) => right.confidence - left.confidence);
   const shortestNamed = [...group].sort((left, right) => left.name.length - right.name.length)[0] ?? sorted[0];
-  const sources = [...new Set(group.map((lead) => lead.source))];
+  const sources = [
+    ...new Set(
+      group.flatMap((lead) =>
+        lead.source
+          .split(',')
+          .map((source) => source.trim())
+          .filter(Boolean),
+      ),
+    ),
+  ];
 
   return {
     ...sorted[0],

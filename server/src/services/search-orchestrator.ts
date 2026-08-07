@@ -17,6 +17,7 @@ import {
   discoverUsLeadsFromLinkedinSearch,
   type LinkedInDiscoveryResult,
 } from './linkedin-search';
+import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
@@ -49,6 +50,7 @@ type SearchService = {
 type SearchDeps = {
   normalizeLocation?: (rawLocation: string) => Promise<NormalizedUsLocation>;
   enrichLead?: (lead: Lead) => Lead | Promise<Lead>;
+  enrichLinkedinLeads?: typeof enrichLinkedinLeadsWithPublicContacts;
   discoverGoogleLeads?: typeof googlePlacesProvider | ((args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
@@ -81,7 +83,9 @@ type SearchDeps = {
 const jobTtlMs = 15 * 60 * 1000;
 const googleDiscoveryTimeoutMs = 20000;
 const googleMapsDiscoveryTimeoutMs = 20000;
-const linkedinDiscoveryTimeoutMs = 30000;
+const linkedinDiscoveryTimeoutMs = 90000;
+const linkedinProfileDiscoveryWindowMs = 30000;
+const linkedinContactEnrichmentWindowMs = 55000;
 const osmDiscoveryTimeoutMs = 20000;
 const maxCandidatePool = 3000;
 const getDiscoveryStallMs = (requestedCount: number) =>
@@ -218,11 +222,18 @@ const refreshProgress = (job: SearchJob) => {
 const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
   rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
 
-const upsertLeads = (job: SearchJob, incoming: Lead[], now: () => number) => {
+const upsertLeads = (
+  job: SearchJob,
+  incoming: Lead[],
+  now: () => number,
+  countDuplicates = true,
+) => {
   const previousCount = job.leads.length;
   const merged = [...job.leads, ...enrichLeads(incoming)];
   const { leads, duplicatesRemoved } = dedupeWithCount(merged);
-  job.progress.duplicatesRemoved += duplicatesRemoved;
+  if (countDuplicates) {
+    job.progress.duplicatesRemoved += duplicatesRemoved;
+  }
   job.leads = trimCandidatePool(leads, job.request.count);
   if (job.leads.length > previousCount) {
     job.lastProgressAt = now();
@@ -235,6 +246,7 @@ const runLinkedinDiscovery = async (
   request: SearchRequest,
   location: NormalizedUsLocation,
   discoverLinkedinLeads: NonNullable<SearchDeps['discoverLinkedinLeads']>,
+  enrichLinkedinLeads: SearchDeps['enrichLinkedinLeads'],
   now: () => number,
 ) => {
   job.progress.currentSource = leadSourceModeLabels.linkedin;
@@ -245,7 +257,7 @@ const runLinkedinDiscovery = async (
       discoverLinkedinLeads({
         request,
         location,
-        deadlineMs: Date.now() + linkedinDiscoveryTimeoutMs,
+        deadlineMs: Date.now() + linkedinProfileDiscoveryWindowMs,
       }),
       linkedinDiscoveryTimeoutMs,
       'LinkedIn discovery timed out before the batch completed',
@@ -283,6 +295,31 @@ const runLinkedinDiscovery = async (
   }
 
   upsertLeads(job, linkedinResult.leads, now);
+
+  if (enrichLinkedinLeads) {
+    job.status = 'enriching';
+    job.progress.discovered = linkedinResult.leads.length;
+    job.progress.totalCandidates = linkedinResult.leads.length;
+
+    const contactResult = await withTimeout(
+      enrichLinkedinLeads({
+        leads: linkedinResult.leads,
+        request,
+        location,
+        deadlineMs: Date.now() + linkedinContactEnrichmentWindowMs,
+        onProgress: (completed) => {
+          job.progress.enriched = completed;
+        },
+      }),
+      linkedinContactEnrichmentWindowMs,
+      'LinkedIn contact enrichment timed out before the batch completed',
+    );
+
+    appendUniqueWarnings(job, contactResult.warnings);
+    job.progress.enriched = contactResult.enrichedCount;
+    upsertLeads(job, contactResult.leads, now, false);
+  }
+
   job.progress.batchesCompleted += 1;
 };
 
@@ -415,6 +452,9 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
   const discoverLinkedinLeads =
     deps.discoverLinkedinLeads ??
     (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
+  const enrichLinkedinLeads =
+    deps.enrichLinkedinLeads ??
+    (deps.discoverLinkedinLeads ? undefined : enrichLinkedinLeadsWithPublicContacts);
   const discoverOsmLeads = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
   const now = deps.now ?? Date.now;
   const idFactory = deps.idFactory ?? randomUUID;
@@ -469,7 +509,14 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       }
 
       try {
-        await runLinkedinDiscovery(job, job.request, location, discoverLinkedinLeads, now);
+        await runLinkedinDiscovery(
+          job,
+          job.request,
+          location,
+          discoverLinkedinLeads,
+          enrichLinkedinLeads,
+          now,
+        );
       } catch (error) {
         markFailed(job, {
           providerId: 'linkedin-search',

@@ -195,6 +195,71 @@ describe('createSearchService', () => {
     expect(completed?.meta.providerWarnings).toHaveLength(0);
   });
 
+  it('merges public LinkedIn contact enrichment into the completed lead', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+    const enrichLinkedinLeads = vi.fn().mockImplementation(async ({ leads }) => ({
+      leads: leads.map((lead: Lead) => ({
+        ...lead,
+        mobile: '+1 512 555 0199',
+        email: 'hello@markdental.com',
+        website: 'https://markdental.com',
+        hasEmail: true,
+        hasPhone: true,
+        hasWebsite: true,
+        verifiedEmail: true,
+        verifiedPhone: true,
+        source: `${lead.source}, Public Web, Website Crawl`,
+      })),
+      warnings: [],
+      enrichedCount: leads.length,
+    }));
+
+    const service = createSearchService({
+      idFactory: () => 'search-linkedin-enriched',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverLinkedinLeads: vi.fn().mockResolvedValue({
+        leads: [
+          {
+            ...sampleLead,
+            id: 'linkedin-enriched-lead',
+            name: 'Mark Sweeney',
+            source: 'LinkedIn',
+            website: '',
+            listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
+          },
+        ],
+        warnings: [],
+        blocked: false,
+      }),
+      enrichLinkedinLeads,
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin',
+      count: 50,
+      sourceMode: 'linkedin',
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-linkedin-enriched');
+
+    expect(enrichLinkedinLeads).toHaveBeenCalledTimes(1);
+    expect(completed?.leads[0]?.email).toBe('hello@markdental.com');
+    expect(completed?.leads[0]?.mobile).toBe('+1 512 555 0199');
+    expect(completed?.leads[0]?.website).toBe('https://markdental.com');
+    expect(completed?.leads[0]?.source).toContain('Website Crawl');
+    expect(completed?.meta.progress.duplicatesRemoved).toBe(0);
+  });
+
   it('completes a LinkedIn search gracefully when public profile pages are blocked', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 

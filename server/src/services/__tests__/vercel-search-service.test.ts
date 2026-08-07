@@ -235,6 +235,62 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.meta.providerWarnings).toHaveLength(0);
   });
 
+  it('persists public LinkedIn contact enrichment in the Vercel search job', async () => {
+    const enrichLinkedinLeads = vi.fn().mockImplementation(async ({ leads }) => ({
+      leads: leads.map((lead: Lead) => ({
+        ...lead,
+        mobile: '+1 512 555 0199',
+        email: 'hello@markdental.com',
+        website: 'https://markdental.com',
+        hasEmail: true,
+        hasPhone: true,
+        hasWebsite: true,
+        verifiedEmail: true,
+        verifiedPhone: true,
+        source: `${lead.source}, Public Web, Website Crawl`,
+      })),
+      warnings: [],
+      enrichedCount: leads.length,
+    }));
+
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      discoverLinkedinLeads: vi.fn().mockResolvedValue({
+        leads: [makeLead({
+          id: 'linkedin-enriched-lead',
+          name: 'Mark Sweeney',
+          source: 'LinkedIn',
+          website: '',
+          listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
+        })],
+        warnings: [],
+        blocked: false,
+      }),
+      enrichLinkedinLeads,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-linkedin-enriched',
+      now: () => 1000,
+    });
+
+    const response = await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin, TX',
+      count: 50,
+      sourceMode: 'linkedin',
+    });
+
+    const snapshot = await service.getSearch(response.searchId);
+
+    expect(enrichLinkedinLeads).toHaveBeenCalledTimes(1);
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.leads[0]?.email).toBe('hello@markdental.com');
+    expect(snapshot?.leads[0]?.mobile).toBe('+1 512 555 0199');
+    expect(snapshot?.leads[0]?.website).toBe('https://markdental.com');
+    expect(snapshot?.leads[0]?.source).toContain('Website Crawl');
+    expect(snapshot?.meta.progress.duplicatesRemoved).toBe(0);
+  });
+
   it('completes LinkedIn searches gracefully when public profile pages are blocked', async () => {
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
