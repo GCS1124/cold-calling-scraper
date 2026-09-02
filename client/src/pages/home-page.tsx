@@ -158,6 +158,12 @@ export function HomePage({ searchApi }: HomePageProps) {
   const publicQueriesAttempted = result?.meta.progress.publicQueriesAttempted;
   const publicProvidersChecked = result?.meta.progress.publicProvidersChecked;
   const aiProviderCoverage = result?.meta.progress.providerCoverage ?? [];
+  const displayedProviderWarnings =
+    activeSourceMode === 'ai'
+      ? (result?.meta.providerWarnings ?? []).filter(
+          (warning) => warning.providerId !== 'ai-mode-policy',
+        )
+      : result?.meta.providerWarnings ?? [];
   const linkedinQuality = useMemo(() => {
     const linkedinLeads = (result?.leads ?? []).filter((lead) =>
       lead.source.toLowerCase().includes('linkedin'),
@@ -794,16 +800,20 @@ export function HomePage({ searchApi }: HomePageProps) {
                 </div>
               ) : null}
 
-              {result.meta.providerWarnings.length ? (
+              {displayedProviderWarnings.length ? (
                 <div className="mt-5 rounded-2xl border border-amber-200 bg-white/80 p-4 text-sm text-amber-950">
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
                     <div>
                       <p className="font-bold">
-                        {linkedinDiscoveryBlocked ? 'Provider access blocked' : 'Provider notices'}
+                        {linkedinDiscoveryBlocked
+                          ? 'Provider access blocked'
+                          : activeSourceMode === 'ai'
+                            ? 'Public source notices'
+                            : 'Provider notices'}
                       </p>
                       <ul className="mt-2 space-y-1.5 leading-5 text-amber-900/80">
-                        {result.meta.providerWarnings.map((warning) => (
+                        {displayedProviderWarnings.map((warning) => (
                           <li key={`${warning.providerId}-${warning.message}`}>
                             <span className="font-semibold">{warning.providerName}:</span>{' '}
                             {warning.message}
@@ -825,7 +835,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                 </div>
               ) : null}
 
-              {canRetryEmptyLinkedInSearch && !result.meta.providerWarnings.length ? (
+              {canRetryEmptyLinkedInSearch && !displayedProviderWarnings.length ? (
                 <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-blue-200 bg-blue-50/80 p-4 text-sm text-blue-950 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="font-bold">No public profiles returned</p>
