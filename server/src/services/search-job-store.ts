@@ -32,6 +32,9 @@ export type SearchJobRecord = {
   providerWarnings: ProviderWarning[];
   searchSeeds: string[];
   nextSeedIndex: number;
+  /** Stable lead ids used to resume public LinkedIn contact enrichment in batches. */
+  enrichmentQueue?: string[];
+  enrichmentCursor?: number;
   discoveryComplete: boolean;
   googleMapsUnavailable?: boolean;
   lastProgressAt: number;
@@ -72,7 +75,7 @@ export const isSearchPersistenceError = (
   (error instanceof Error &&
     (error as Error & { code?: unknown }).code === 'SEARCH_PERSISTENCE_UNAVAILABLE');
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 const DEFAULT_JOB_TTL_MS = 1000 * 60 * 60 * 6;
 const MEMORY_MAX_JOBS = Number(process.env.SEARCH_JOB_MEMORY_MAX_JOBS ?? 500);
@@ -248,6 +251,12 @@ const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
       uniqueStrings(Array.isArray(job.searchSeeds) ? job.searchSeeds : []).length,
       Math.max(0, Math.floor(Number(job.nextSeedIndex ?? 0))),
     ),
+    enrichmentQueue: Array.isArray(job.enrichmentQueue)
+      ? uniqueStrings(job.enrichmentQueue)
+      : undefined,
+    enrichmentCursor: Number.isFinite(job.enrichmentCursor)
+      ? Math.max(0, Math.floor(job.enrichmentCursor as number))
+      : undefined,
     discoveryComplete: Boolean(job.discoveryComplete),
     lastProgressAt: Number.isFinite(job.lastProgressAt)
       ? job.lastProgressAt
@@ -295,6 +304,8 @@ const migrateJobPayload = (payload: unknown): SearchJobRecord | null => {
       : [],
     searchSeeds: Array.isArray(raw.searchSeeds) ? raw.searchSeeds : [],
     nextSeedIndex: Number(raw.nextSeedIndex ?? 0),
+    enrichmentQueue: Array.isArray(raw.enrichmentQueue) ? raw.enrichmentQueue : undefined,
+    enrichmentCursor: Number(raw.enrichmentCursor ?? 0),
     discoveryComplete: Boolean(raw.discoveryComplete),
     googleMapsUnavailable: Boolean(raw.googleMapsUnavailable),
     lastProgressAt: Number(raw.lastProgressAt ?? nowMs()),

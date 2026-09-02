@@ -100,6 +100,8 @@ const getLinkedinProfileDiscoveryWindowMs = (requestedCount: number) =>
   requestedCount >= 50 ? 30_000 : 20_000;
 const getLinkedinContactEnrichmentWindowMs = (requestedCount: number) =>
   requestedCount >= 50 ? 24_000 : 14_000;
+const getLinkedinContactEnrichmentBatchSize = (requestedCount: number) =>
+  requestedCount >= 100 ? 18 : 12;
 const getAiDiscoveryWindowMs = (requestedCount: number) =>
   requestedCount >= 50 ? 36_000 : 30_000;
 const getMaxTickDurationMs = (requestedCount: number) =>
@@ -256,13 +258,37 @@ const runLinkedinEnrichment = async (
   job.progress.discovered = job.leads.length;
   job.progress.totalCandidates = job.leads.length;
 
+  const enrichmentQueue =
+    job.enrichmentQueue?.length ? job.enrichmentQueue : job.leads.map((lead) => lead.id);
+  const enrichmentCursor = Math.min(
+    enrichmentQueue.length,
+    Math.max(0, job.enrichmentCursor ?? 0),
+  );
+  const batchIds = enrichmentQueue.slice(
+    enrichmentCursor,
+    enrichmentCursor + getLinkedinContactEnrichmentBatchSize(request.count),
+  );
+  const batch = batchIds
+    .map((id) => job.leads.find((lead) => lead.id === id))
+    .filter((lead): lead is Lead => Boolean(lead));
+
+  job.enrichmentQueue = enrichmentQueue;
+
+  if (!batch.length) {
+    job.enrichmentCursor = enrichmentCursor + batchIds.length;
+    return job.enrichmentCursor >= enrichmentQueue.length;
+  }
+
   const contactResult = await enrichLinkedinLeads({
-    leads: job.leads,
+    leads: batch,
     request,
     location,
     deadlineMs: now() + getLinkedinContactEnrichmentWindowMs(request.count),
     onProgress: (completed) => {
-      job.progress.enriched = completed;
+      job.progress.enriched = Math.min(
+        enrichmentQueue.length,
+        enrichmentCursor + completed,
+      );
       job.updatedAt = now();
     },
   });
@@ -273,6 +299,14 @@ const runLinkedinEnrichment = async (
 
   job.progress.enriched = contactResult.enrichedCount;
   mergeLeads(job, contactResult.leads, now, false);
+
+  job.enrichmentCursor = enrichmentCursor + batchIds.length;
+  job.progress.enriched = Math.min(
+    enrichmentQueue.length,
+    job.enrichmentCursor,
+  );
+
+  return job.enrichmentCursor >= enrichmentQueue.length;
 };
 
 const runAiDiscovery = async (
@@ -538,6 +572,8 @@ const tickJob = async (
       return job;
     }
 
+    let linkedinEnrichmentComplete = true;
+
     try {
       if (job.status !== 'enriching') {
         job.status = 'discovering';
@@ -549,7 +585,7 @@ const tickJob = async (
       }
 
       if (job.status === 'enriching' && deps.enrichLinkedinLeads && job.leads.length) {
-        await runLinkedinEnrichment(
+        linkedinEnrichmentComplete = await runLinkedinEnrichment(
           job,
           job.request,
           targetLocation,
@@ -566,6 +602,8 @@ const tickJob = async (
         );
 
         if (deps.enrichLinkedinLeads && job.leads.length) {
+          job.enrichmentQueue = job.leads.map((lead) => lead.id);
+          job.enrichmentCursor = 0;
           job.status = 'enriching';
           job.progress.currentSource = 'Public Contact Enrichment';
           job.updatedAt = withNow();
@@ -588,6 +626,15 @@ const tickJob = async (
       await store.upsert(job);
       return job;
     }
+
+    if (!linkedinEnrichmentComplete) {
+      job.status = 'enriching';
+      job.progress.currentSource = 'Public Contact Enrichment';
+      job.updatedAt = withNow();
+      await store.upsert(job);
+      return job;
+    }
+
     job.discoveryComplete = true;
     finalizeLeads(job);
     job.status = 'complete';

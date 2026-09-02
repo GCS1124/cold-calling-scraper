@@ -442,6 +442,78 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.meta.progress.duplicatesRemoved).toBe(0);
   });
 
+  it('resumes public LinkedIn contact enrichment in durable batches', async () => {
+    const leads = Array.from({ length: 14 }, (_, index) =>
+      makeLead({
+        id: `linkedin-batch-${index}`,
+        name: `Mark Sweeney ${index}`,
+        source: 'LinkedIn',
+        website: '',
+        listingUrl: `https://linkedin.com/in/mark-sweeney-${index}`,
+      }),
+    );
+    const enrichmentBatchSizes: number[] = [];
+    const enrichLinkedinLeads = vi.fn().mockImplementation(
+      async ({ leads: batch, onProgress }) => {
+        enrichmentBatchSizes.push(batch.length);
+        onProgress?.(batch.length);
+
+        return {
+          leads: batch.map((lead: Lead) => ({
+            ...lead,
+            mobile: `+1 512 555 ${String(1900 + Number(lead.id.split('-').pop())).padStart(4, '0')}`,
+            email: `hello-${lead.id}@markdental.com`,
+            website: `https://markdental-${lead.id}.com`,
+            hasEmail: true,
+            hasPhone: true,
+            hasWebsite: true,
+            verifiedEmail: true,
+            verifiedPhone: true,
+            source: `${lead.source}, Public Web, Website Crawl`,
+          })),
+          warnings: [],
+          enrichedCount: batch.length,
+        };
+      },
+    );
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      discoverLinkedinLeads: vi.fn().mockResolvedValue({
+        leads,
+        warnings: [],
+        blocked: false,
+      }),
+      enrichLinkedinLeads,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-linkedin-batches',
+      now: () => 1000,
+    });
+
+    const response = await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin, TX',
+      count: 50,
+      sourceMode: 'linkedin',
+    });
+
+    const discoveringSnapshot = await service.getSearch(response.searchId);
+    expect(discoveringSnapshot?.meta.status).toBe('enriching');
+    expect(discoveringSnapshot?.meta.progress.enriched).toBe(0);
+
+    const firstBatchSnapshot = await service.getSearch(response.searchId);
+    expect(firstBatchSnapshot?.meta.status).toBe('enriching');
+    expect(firstBatchSnapshot?.meta.progress.enriched).toBe(12);
+    expect(enrichmentBatchSizes).toEqual([12]);
+
+    const completedSnapshot = await service.getSearch(response.searchId);
+    expect(completedSnapshot?.meta.status).toBe('complete');
+    expect(completedSnapshot?.meta.progress.enriched).toBe(14);
+    expect(enrichmentBatchSizes).toEqual([12, 2]);
+    expect(completedSnapshot?.leads).toHaveLength(14);
+    expect(completedSnapshot?.leads.every((lead) => lead.hasEmail && lead.hasPhone)).toBe(true);
+  });
+
   it('completes LinkedIn searches gracefully when public profile pages are blocked', async () => {
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
