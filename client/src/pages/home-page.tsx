@@ -135,6 +135,19 @@ export function HomePage({ searchApi }: HomePageProps) {
   const publicQueriesAttempted = result?.meta.progress.publicQueriesAttempted;
   const publicProvidersChecked = result?.meta.progress.publicProvidersChecked;
   const aiProviderCoverage = result?.meta.progress.providerCoverage ?? [];
+  const linkedinQuality = useMemo(() => {
+    const linkedinLeads = (result?.leads ?? []).filter((lead) =>
+      lead.source.toLowerCase().includes('linkedin'),
+    );
+
+    return {
+      highFit: linkedinLeads.filter((lead) => lead.confidence >= 85).length,
+      corroborated: linkedinLeads.filter(
+        (lead) => (lead.matchSignals?.publicSources ?? 0) > 1,
+      ).length,
+      roleSignals: linkedinLeads.filter((lead) => lead.matchSignals?.roleMatched).length,
+    };
+  }, [result?.leads]);
   const linkedinDiscoveryBlocked = Boolean(
     result &&
       activeSourceMode === 'linkedin' &&
@@ -178,9 +191,11 @@ export function HomePage({ searchApi }: HomePageProps) {
             ? 'Search failed'
             : linkedinDiscoveryBlocked
               ? 'LinkedIn discovery blocked'
-            : resultsExhausted
-              ? 'Discovery complete'
-              : 'Search complete'
+              : activeSourceMode === 'linkedin'
+                ? 'Public LinkedIn discovery complete'
+                : resultsExhausted
+                  ? 'Discovery complete'
+                  : 'Search complete'
     : '';
 
   const statusDescription = result
@@ -196,13 +211,15 @@ export function HomePage({ searchApi }: HomePageProps) {
               ? 'Adding emails, phone numbers, websites, and source details.'
               : result.meta.status === 'failed'
                   ? 'The search could not be completed. Adjust the query and try again.'
-                  : linkedinDiscoveryBlocked
-                    ? 'Free public-search providers temporarily blocked this request. No unverified or fabricated leads were added.'
-                    : activeSourceMode === 'ai'
-                      ? 'Free public AI matching finished. Results were deduplicated, and contact details were kept only when publicly listed.'
-                      : resultsExhausted
-                        ? 'We verified the available businesses and stopped once the discovery sources stopped returning new results.'
-                        : 'Your leads are ready to review, filter, copy, and export.'
+                    : linkedinDiscoveryBlocked
+                      ? 'Free public-search providers temporarily blocked this request. No unverified or fabricated leads were added.'
+                      : activeSourceMode === 'linkedin'
+                        ? 'Profiles were ranked using public category, role, location, and cross-source signals. Contact fields are populated only from public websites.'
+                        : activeSourceMode === 'ai'
+                          ? 'Free public AI matching finished. Results were deduplicated, and contact details were kept only when publicly listed.'
+                          : resultsExhausted
+                            ? 'We verified the available businesses and stopped once the discovery sources stopped returning new results.'
+                            : 'Your leads are ready to review, filter, copy, and export.'
     : '';
 
   const emptyStateMessage =
@@ -604,9 +621,9 @@ export function HomePage({ searchApi }: HomePageProps) {
                       </p>
                     </div>
                     {publicQueriesAttempted || publicProvidersChecked ? (
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
-                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">
-                        Public search coverage
+                      <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">
+                          Public search coverage
                         </p>
                         <p className="mt-2 text-sm font-semibold text-slate-900">
                           {publicQueriesAttempted ?? 0} query paths
@@ -616,6 +633,48 @@ export function HomePage({ searchApi }: HomePageProps) {
                         </p>
                       </div>
                     ) : null}
+                    <div className="rounded-2xl border border-slate-200 bg-white/75 p-4 md:col-span-2">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                            Match intelligence
+                          </p>
+                          <p className="mt-1 text-sm leading-5 text-slate-600">
+                            Transparent ranking from public category, role, location, and source
+                            signals. This is not private LinkedIn or Premium data.
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                          Public signals
+                        </span>
+                      </div>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                        <div className="rounded-xl bg-slate-50 px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                            High-fit score
+                          </p>
+                          <p className="mt-1 text-lg font-black text-slate-950">
+                            {linkedinQuality.highFit}
+                          </p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                            Cross-source
+                          </p>
+                          <p className="mt-1 text-lg font-black text-slate-950">
+                            {linkedinQuality.corroborated}
+                          </p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                            Role signals
+                          </p>
+                          <p className="mt-1 text-lg font-black text-slate-950">
+                            {linkedinQuality.roleSignals}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 ) : null}
 

@@ -750,6 +750,12 @@ describe('App', () => {
           website: '',
           source: 'LinkedIn',
           listingUrl: 'https://linkedin.com/in/public-linkedin-dentist',
+          matchSignals: {
+            queryMatches: 3,
+            publicSources: 2,
+            roleMatched: true,
+            locationMatched: true,
+          },
           hasEmail: false,
           hasPhone: false,
           hasWebsite: false,
@@ -798,6 +804,9 @@ describe('App', () => {
     expect(content).toContain('12 query paths');
     expect(content).toContain('3 public search sources');
     expect(content).toContain('Public match');
+    expect(content).toContain('Match intelligence');
+    expect(content).toContain('Cross-source');
+    expect(content).toContain('Role signals');
     expect(content).toMatch(/0\s*\/\s*1/);
     expect(content).toMatch(/Missing Email\s*1/);
     expect(content).toMatch(/Missing Phone\s*1/);
