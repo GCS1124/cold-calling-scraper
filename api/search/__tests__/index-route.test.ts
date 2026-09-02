@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { waitUntil } from '@vercel/functions';
+import { runStatelessLinkedinSearch } from '../../../server/src/services/linkedin-stateless-search.js';
 import { vercelSearchService } from '../../../server/src/services/vercel-search-service.js';
 
 vi.mock('../../../api/_lib/vercel-search-service.js', () => ({
@@ -12,6 +13,10 @@ vi.mock('../../../server/src/services/vercel-search-service.js', () => ({
     startSearch: vi.fn(),
     advanceSearch: vi.fn(),
   },
+}));
+
+vi.mock('../../../server/src/services/linkedin-stateless-search.js', () => ({
+  runStatelessLinkedinSearch: vi.fn(),
 }));
 
 vi.mock('@vercel/functions', () => ({
@@ -121,7 +126,7 @@ describe('/api/search', () => {
         method: 'POST',
         body: {
           companyType: 'Dentist',
-          sourceMode: 'linkedin',
+          sourceMode: 'gmb',
           location: { mode: 'timezone', timeZone: 'EST' },
           count: 50,
         },
@@ -134,5 +139,66 @@ describe('/api/search', () => {
       error: 'Search persistence is not configured.',
       code: 'SEARCH_PERSISTENCE_UNAVAILABLE',
     });
+  });
+
+  it('returns a completed public LinkedIn response without durable storage', async () => {
+    const error = Object.assign(
+      new Error('Search persistence is not configured.'),
+      { code: 'SEARCH_PERSISTENCE_UNAVAILABLE' },
+    );
+    const statelessResponse = {
+      searchId: 'linkedin-stateless-search',
+      leads: [],
+      meta: {
+        query: 'Dentist in Eastern Time',
+        locationLabel: 'Eastern Time',
+        status: 'complete' as const,
+        progress: {
+          discovered: 0,
+          enriched: 0,
+          totalCandidates: 0,
+          requestedCount: 50,
+          foundCount: 0,
+          duplicatesRemoved: 0,
+          currentSource: 'Complete',
+          batchesCompleted: 1,
+          estimatedRemaining: 50,
+        },
+        totals: {
+          total: 0,
+          withEmail: 0,
+          withPhone: 0,
+          withWebsite: 0,
+        },
+        providerWarnings: [],
+      },
+    };
+    vi.mocked(vercelSearchService.startSearch).mockRejectedValue(error);
+    vi.mocked(runStatelessLinkedinSearch).mockResolvedValue(statelessResponse);
+    const { response, state } = createResponse();
+
+    await handler(
+      {
+        method: 'POST',
+        body: {
+          companyType: 'Dentist',
+          sourceMode: 'linkedin',
+          location: { mode: 'timezone', timeZone: 'EST' },
+          count: 50,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(200);
+    expect(state.body).toEqual(statelessResponse);
+    expect(runStatelessLinkedinSearch).toHaveBeenCalledWith({
+      companyType: 'Dentist',
+      sourceMode: 'linkedin',
+      city: 'EST',
+      count: 50,
+      filters: undefined,
+    });
+    expect(waitUntil).not.toHaveBeenCalled();
   });
 });

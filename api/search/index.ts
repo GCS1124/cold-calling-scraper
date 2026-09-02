@@ -3,6 +3,7 @@ import { waitUntil } from '@vercel/functions';
 import { searchRequestSchema } from '../_lib/search-contract.js';
 import { getVercelSearchService } from '../_lib/vercel-search-service.js';
 import { flattenSearchRequest } from '../../server/src/utils/search-location.js';
+import { runStatelessLinkedinSearch } from '../../server/src/services/linkedin-stateless-search.js';
 
 const isSearchPersistenceFailure = (error: unknown) =>
   error instanceof Error &&
@@ -14,11 +15,14 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
+  let flattenedRequest: ReturnType<typeof flattenSearchRequest> | undefined;
+
   try {
     res.setHeader?.('Cache-Control', 'no-store, max-age=0');
     const payload = searchRequestSchema.parse(req.body);
+    flattenedRequest = flattenSearchRequest(payload);
     const service = await getVercelSearchService();
-    const response = await service.startSearch(flattenSearchRequest(payload));
+    const response = await service.startSearch(flattenedRequest);
 
     waitUntil(
       service.advanceSearch(response.searchId).catch((error) => {
@@ -34,6 +38,20 @@ export default async function handler(req: any, res: any) {
         details: error.flatten(),
       });
       return;
+    }
+
+    if (isSearchPersistenceFailure(error) && flattenedRequest?.sourceMode === 'linkedin') {
+      try {
+        const response = await runStatelessLinkedinSearch(flattenedRequest);
+        res.status(200).json(response);
+        return;
+      } catch (fallbackError) {
+        console.error('[api/search] stateless LinkedIn fallback failed', fallbackError);
+        res.status(502).json({
+          error: 'Public LinkedIn search could not be completed. Please try again.',
+        });
+        return;
+      }
     }
 
     if (isSearchPersistenceFailure(error)) {
