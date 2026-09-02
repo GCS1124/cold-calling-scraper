@@ -1,4 +1,4 @@
-import { Building2, BriefcaseBusiness, LoaderCircle, Search } from 'lucide-react';
+import { BriefcaseBusiness, Building2, LoaderCircle, Search, Sparkles } from 'lucide-react';
 import type { Dispatch, FormEvent, SetStateAction } from 'react';
 
 import {
@@ -27,12 +27,15 @@ export function SearchForm({
   onSubmit,
 }: SearchFormProps) {
   const isLinkedInMode = value.sourceMode === 'linkedin';
-  const companyTypePlaceholder = isLinkedInMode
+  const isAiMode = value.sourceMode === 'ai';
+  const companyTypePlaceholder = isLinkedInMode || isAiMode
     ? 'dentist, HVAC contractor, dental clinic'
     : 'dentist, plumber, roofer, HVAC contractor';
   const companyTypeHelp = isLinkedInMode
     ? 'Enter a business category. Public LinkedIn discovery expands it across founders, owners, CEOs, and relevant decision-makers.'
-    : 'Tailored to Google Business listings: try dentist, orthodontist, plumber, roofer, HVAC contractor, real estate agent, attorney, urgent care, mechanic, or commercial cleaning.';
+    : isAiMode
+      ? 'Free AI mode expands the category into decision-maker searches, merges public results, and checks only publicly listed business contacts.'
+      : 'Tailored to Google Business listings: try dentist, orthodontist, plumber, roofer, HVAC contractor, real estate agent, attorney, urgent care, mechanic, or commercial cleaning.';
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -74,6 +77,8 @@ export function SearchForm({
                 <span className="flex items-center gap-2 text-sm font-semibold">
                   {option.code === 'gmb' ? (
                     <Building2 className="h-4 w-4" />
+                  ) : option.code === 'ai' ? (
+                    <Sparkles className="h-4 w-4" />
                   ) : (
                     <BriefcaseBusiness className="h-4 w-4" />
                   )}
@@ -90,7 +95,9 @@ export function SearchForm({
         <p className="text-xs font-normal leading-5 text-slate-500">
           {isLinkedInMode
             ? `${sourceModeLabelsByCode.linkedin} searches public profiles only. Phone numbers and emails are collected only from public business websites.`
-            : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
+            : isAiMode
+              ? 'AI mode is free-only: no paid databases, private profiles, login sessions, or contact-reveal credits are used.'
+              : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
         </p>
       </fieldset>
 

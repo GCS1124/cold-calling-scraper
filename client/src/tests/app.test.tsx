@@ -205,6 +205,43 @@ const emptyLinkedinResponse: SearchResponse = {
   },
 };
 
+const aiModeResponse: SearchResponse = {
+  ...completedResponse,
+  searchId: 'search-ai-mode',
+  meta: {
+    ...completedResponse.meta,
+    query: 'Dentist in Eastern Time',
+    progress: {
+      ...completedResponse.meta.progress,
+      providerCoverage: [
+        {
+          providerId: 'apollo-audit',
+          providerName: 'Apollo',
+          status: 'not_configured',
+          leadCount: 0,
+          message: 'Not used in free mode.',
+        },
+        {
+          providerId: 'linkedin-public-search',
+          providerName: 'Public LinkedIn Search',
+          status: 'returned',
+          leadCount: 2,
+        },
+      ],
+      aiAssistance: 'disabled',
+      publicQueriesAttempted: 16,
+      publicProvidersChecked: 3,
+    },
+    providerWarnings: [
+      {
+        providerId: 'ai-mode-policy',
+        providerName: 'AI mode',
+        message: 'Free AI mode does not use paid databases.',
+      },
+    ],
+  },
+};
+
 const cleanupTasks: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
@@ -541,6 +578,42 @@ describe('App', () => {
     await unmount();
   });
 
+  it('submits free AI mode and renders provider coverage honestly', async () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(aiModeResponse),
+      getSearch: vi.fn().mockResolvedValue(aiModeResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await clickElement(getButton(container, /ai mode/i));
+    expect(normalizedText(container)).toContain('Free public discovery');
+    expect(normalizedText(container)).toContain('no paid databases');
+    await typeValue(getCompanyTypeInput(container), 'Dentist');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+
+    expect(searchApi.startSearch).toHaveBeenCalledWith({
+      companyType: 'Dentist',
+      sourceMode: 'ai',
+      location: {
+        mode: 'timezone',
+        timeZone: 'EST',
+      },
+      count: 50,
+    });
+
+    await waitForText(container, /free ai mode coverage/i, 6000);
+    const content = normalizedText(container);
+    expect(content).toContain('No paid sources');
+    expect(content).toContain('Public LinkedIn Search');
+    expect(content).toContain('Apollo');
+    expect(content).toContain('Not used');
+    expect(content).toContain('AI query assistance is off so this mode stays free');
+
+    await unmount();
+  });
+
   it('clears results when switching the lead source mode', async () => {
     const searchApi: SearchApi = {
       startSearch: vi.fn().mockResolvedValue(completedResponse),
@@ -691,6 +764,9 @@ describe('App', () => {
           ...completedResponse.meta.progress,
           discovered: 1,
           enriched: 1,
+          publicContactsFound: 0,
+          publicQueriesAttempted: 12,
+          publicProvidersChecked: 3,
           totalCandidates: 1,
           foundCount: 1,
           estimatedRemaining: 49,
@@ -717,6 +793,12 @@ describe('App', () => {
 
     await waitForText(container, /discovery complete/i, 6000);
     const content = normalizedText(container);
+    expect(content).toContain('Public contact coverage');
+    expect(content).toContain('Public search coverage');
+    expect(content).toContain('12 query paths');
+    expect(content).toContain('3 public search sources');
+    expect(content).toContain('Public match');
+    expect(content).toMatch(/0\s*\/\s*1/);
     expect(content).toMatch(/Missing Email\s*1/);
     expect(content).toMatch(/Missing Phone\s*1/);
 

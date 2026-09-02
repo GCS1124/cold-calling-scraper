@@ -16,6 +16,10 @@ type SearchResult = {
   snippet: string;
 };
 
+type CollectedSearchResult = SearchResult & {
+  providerName: string;
+};
+
 type SearchSource = {
   name: string;
   label: string;
@@ -45,7 +49,10 @@ type LinkedInCandidate = {
   profileUrl: string;
   website?: string;
   snippet: string;
+  baseRelevanceScore: number;
   relevanceScore: number;
+  matchedQueries: string[];
+  matchedProviders: string[];
   location?: PublicProfileLocation;
 };
 
@@ -63,6 +70,12 @@ export type LinkedInDiscoveryResult = {
   leads: Lead[];
   warnings: ProviderWarning[];
   blocked: boolean;
+  coverage?: {
+    queriesAttempted: number;
+    providersChecked: number;
+    providersPaused: number;
+    acceptedCandidates: number;
+  };
 };
 
 const readBoundedNumber = (
@@ -92,7 +105,9 @@ const searchTimeoutMs = readBoundedNumber(
   500,
   15_000,
 );
-const queryBatchSize = 2;
+// Keep the healthy phase fast while retaining a small cap on outbound public
+// search traffic. Once a provider fails, runLinkedInQuerySet serializes work.
+const queryBatchSize = 3;
 const providerFailureThreshold = 2;
 const queryCacheTtlMs = 15 * 60 * 1000;
 const maxQueryCacheEntries = 300;
@@ -1081,7 +1096,10 @@ const matchesEvidence = (searchable: string, terms: string[]) =>
   });
 
 const scoreCandidateRelevance = (
-  candidate: Omit<LinkedInCandidate, 'relevanceScore'>,
+  candidate: Pick<
+    LinkedInCandidate,
+    'title' | 'name' | 'headline' | 'profileUrl' | 'website' | 'snippet' | 'location'
+  >,
   request: SearchRequest,
   location: NormalizedUsLocation,
 ) => {
@@ -1169,6 +1187,10 @@ const scoreCandidateRelevance = (
 
   return Math.min(score, 100);
 };
+
+const calculateEvidenceBoost = (queryMatches: number, providerMatches: number) =>
+  Math.min(8, Math.max(0, queryMatches - 1) * 2) +
+  Math.min(6, Math.max(0, providerMatches - 1) * 3);
 
 const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocation) => {
   const profile = resolveCategoryProfile(request.companyType);
@@ -1507,12 +1529,12 @@ const collectSearchResults = async (
   );
 
   if (!availableSources.length) {
-    return [] as SearchResult[];
+    return [] as CollectedSearchResult[];
   }
 
   const remainingTimeMs = deadline - Date.now();
   if (remainingTimeMs <= 0) {
-    return [] as SearchResult[];
+    return [] as CollectedSearchResult[];
   }
 
   const requestTimeoutMs = Math.min(searchTimeoutMs, remainingTimeMs);
@@ -1527,7 +1549,7 @@ const collectSearchResults = async (
       outcome: await searchProvider(source, query, requestTimeoutMs, page),
     })),
   );
-  const collected: SearchResult[] = [];
+  const collected: CollectedSearchResult[] = [];
   const seenUrls = new Set<string>();
 
   for (const { source, outcome } of resultSets) {
@@ -1548,12 +1570,14 @@ const collectSearchResults = async (
         break;
       }
 
-      if (seenUrls.has(result.url)) {
+      const profileUrl = normalizeLinkedInProfileUrl(result.url);
+      const dedupeKey = profileUrl ?? result.url;
+      if (seenUrls.has(dedupeKey)) {
         continue;
       }
 
-      seenUrls.add(result.url);
-      collected.push(result);
+      seenUrls.add(dedupeKey);
+      collected.push({ ...result, providerName: source.name });
     }
   }
 
@@ -1712,7 +1736,9 @@ const runLinkedInQuerySet = async ({
 }) => {
   let queriesAttempted = 0;
 
-  const addQueryResults = (queryResults: SearchResult[]) => {
+  const addQueryResults = (queryResults: CollectedSearchResult[], query: string) => {
+    const queryKey = query.toLowerCase();
+
     for (const result of queryResults) {
       if (Date.now() >= deadline || candidates.size >= maxResults) {
         break;
@@ -1749,6 +1775,14 @@ const runLinkedInQuerySet = async ({
 
       const existing = candidates.get(profileUrl);
       if (existing) {
+        const matchedQueries = existing.matchedQueries.includes(queryKey)
+          ? existing.matchedQueries
+          : [...existing.matchedQueries, queryKey];
+        const matchedProviders = existing.matchedProviders.includes(result.providerName)
+          ? existing.matchedProviders
+          : [...existing.matchedProviders, result.providerName];
+        const baseRelevanceScore = Math.max(existing.baseRelevanceScore, relevanceScore);
+
         candidates.set(profileUrl, {
           ...existing,
           title:
@@ -1765,14 +1799,24 @@ const runLinkedInQuerySet = async ({
               ? candidateWithoutScore.snippet
               : existing.snippet,
           location: candidateWithoutScore.location ?? existing.location,
-          relevanceScore: Math.max(existing.relevanceScore, relevanceScore),
+          baseRelevanceScore,
+          matchedQueries,
+          matchedProviders,
+          relevanceScore: Math.min(
+            100,
+            baseRelevanceScore +
+              calculateEvidenceBoost(matchedQueries.length, matchedProviders.length),
+          ),
         });
         continue;
       }
 
       candidates.set(profileUrl, {
         ...candidateWithoutScore,
+        baseRelevanceScore: relevanceScore,
         relevanceScore,
+        matchedQueries: [queryKey],
+        matchedProviders: [result.providerName],
       });
     }
   };
@@ -1810,7 +1854,9 @@ const runLinkedInQuerySet = async ({
 
     // Preserve query order while merging concurrent responses for deterministic
     // ranking and stable duplicate handling.
-    resultSets.forEach(addQueryResults);
+    resultSets.forEach((queryResults, index) =>
+      addQueryResults(queryResults, batch[index] ?? ''),
+    );
     batchStart += batch.length;
   }
 
@@ -1854,8 +1900,11 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
     providerHealth,
   });
 
+  let fallbackQueriesAttempted = 0;
+  let secondPageQueriesAttempted = 0;
+
   if (candidates.size < maxResults && Date.now() < deadline) {
-    await runLinkedInQuerySet({
+    fallbackQueriesAttempted = await runLinkedInQuerySet({
       queries: fallbackQueries,
       candidates,
       maxResults,
@@ -1875,7 +1924,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
     Date.now() < deadline &&
     [...providerHealth.values()].some((health) => !health.disabled)
   ) {
-    await runLinkedInQuerySet({
+    secondPageQueriesAttempted = await runLinkedInQuerySet({
       queries: queries.slice(0, 5),
       candidates,
       maxResults,
@@ -1912,6 +1961,14 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
     leads,
     warnings,
     blocked,
+    coverage: {
+      queriesAttempted:
+        primaryQueriesAttempted + fallbackQueriesAttempted + secondPageQueriesAttempted,
+      providersChecked: [...providerHealth.values()].filter((health) => health.attempts > 0)
+        .length,
+      providersPaused: [...providerHealth.values()].filter((health) => health.disabled).length,
+      acceptedCandidates: candidates.size,
+    },
   };
 };
 

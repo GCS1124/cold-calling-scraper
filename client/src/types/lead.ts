@@ -85,6 +85,17 @@ export type SearchResponse = {
     progress: {
       discovered: number;
       enriched: number;
+      publicContactsFound?: number;
+      publicQueriesAttempted?: number;
+      publicProvidersChecked?: number;
+      providerCoverage?: Array<{
+        providerId: string;
+        providerName: string;
+        status: 'configured' | 'not_configured' | 'returned' | 'failed';
+        leadCount: number;
+        message?: string;
+      }>;
+      aiAssistance?: 'enabled' | 'disabled' | 'failed';
       totalCandidates: number;
       requestedCount: number;
       foundCount: number;

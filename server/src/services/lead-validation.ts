@@ -161,7 +161,7 @@ const isLinkedInProfileListing = (value?: string) => {
 
     return (
       (hostname === 'linkedin.com' || hostname.endsWith('.linkedin.com')) &&
-      /^\/in\//i.test(url.pathname)
+      /^\/(?:in|pub)\//i.test(url.pathname)
     );
   } catch {
     return false;

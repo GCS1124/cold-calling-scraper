@@ -14,6 +14,11 @@ export const sourceModeOptions = [
     label: 'LinkedIn',
     hint: 'Free public profiles',
   },
+  {
+    code: 'ai',
+    label: 'AI mode',
+    hint: 'Free public discovery',
+  },
 ] as const;
 
 export type SearchSourceMode = (typeof sourceModeOptions)[number]['code'];
@@ -21,7 +26,11 @@ export type SearchSourceMode = (typeof sourceModeOptions)[number]['code'];
 export const sourceModeLabelsByCode = Object.fromEntries(
   sourceModeOptions.map((option) => [
     option.code,
-    option.code === 'gmb' ? 'Google Business Profile' : 'LinkedIn',
+    option.code === 'gmb'
+      ? 'Google Business Profile'
+      : option.code === 'linkedin'
+        ? 'LinkedIn'
+        : 'AI mode',
   ]),
 ) as Record<SearchSourceMode, string>;
 

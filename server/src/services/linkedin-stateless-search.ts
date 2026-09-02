@@ -39,6 +39,7 @@ const buildResponse = ({
   discovered,
   enriched,
   warnings,
+  coverage,
 }: {
   searchId: string;
   request: SearchRequest;
@@ -47,6 +48,7 @@ const buildResponse = ({
   discovered: number;
   enriched: number;
   warnings: ProviderWarning[];
+  coverage?: LinkedInDiscoveryResult['coverage'];
 }): SearchResponse => {
   const visibleLeads = deduplicateLeads(leads).slice(0, request.count);
 
@@ -60,6 +62,11 @@ const buildResponse = ({
       progress: {
         discovered,
         enriched,
+        publicContactsFound: visibleLeads.filter(
+          (lead) => lead.hasEmail || lead.hasPhone,
+        ).length,
+        publicQueriesAttempted: coverage?.queriesAttempted,
+        publicProvidersChecked: coverage?.providersChecked,
         totalCandidates: visibleLeads.length,
         requestedCount: request.count,
         foundCount: visibleLeads.length,
@@ -190,5 +197,6 @@ export const runStatelessLinkedinSearch = async (
     discovered,
     enriched,
     warnings,
+    coverage: discoveryResult.coverage,
   });
 };

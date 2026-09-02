@@ -142,9 +142,17 @@ describe('searchApi', () => {
 
     try {
       const pending = searchApi.getSearch('search-1');
+      const failure = pending.then(
+        () => {
+          throw new Error('Expected snapshot polling to fail');
+        },
+        (error) => {
+          expect(error).toMatchObject({ retryable: true });
+        },
+      );
       await vi.runAllTimersAsync();
 
-      await expect(pending).rejects.toMatchObject({ retryable: true });
+      await failure;
       expect(globalThis.fetch).toHaveBeenCalledTimes(4);
     } finally {
       vi.useRealTimers();
@@ -172,10 +180,18 @@ describe('searchApi', () => {
 
     try {
       const pending = searchApi.getSearch('search-1');
+      const failure = pending.then(
+        () => {
+          throw new Error('Expected gateway polling to fail');
+        },
+        (error) => {
+          expect(error).toBeInstanceOf(SearchApiError);
+          expect(error).toMatchObject({ retryable: true });
+        },
+      );
       await vi.runAllTimersAsync();
 
-      await expect(pending).rejects.toBeInstanceOf(SearchApiError);
-      await expect(pending).rejects.toMatchObject({ retryable: true });
+      await failure;
       expect(globalThis.fetch).toHaveBeenCalledTimes(4);
     } finally {
       vi.useRealTimers();

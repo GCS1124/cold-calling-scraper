@@ -33,6 +33,7 @@ export type SearchJobRecord = {
   searchSeeds: string[];
   nextSeedIndex: number;
   discoveryComplete: boolean;
+  googleMapsUnavailable?: boolean;
   lastProgressAt: number;
   expiresAt: number;
   createdAt: number;
@@ -295,6 +296,7 @@ const migrateJobPayload = (payload: unknown): SearchJobRecord | null => {
     searchSeeds: Array.isArray(raw.searchSeeds) ? raw.searchSeeds : [],
     nextSeedIndex: Number(raw.nextSeedIndex ?? 0),
     discoveryComplete: Boolean(raw.discoveryComplete),
+    googleMapsUnavailable: Boolean(raw.googleMapsUnavailable),
     lastProgressAt: Number(raw.lastProgressAt ?? nowMs()),
     expiresAt: Number(raw.expiresAt ?? nowMs() + DEFAULT_JOB_TTL_MS),
     createdAt: Number(raw.createdAt ?? nowMs()),

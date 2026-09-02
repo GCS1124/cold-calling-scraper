@@ -115,6 +115,7 @@ export function HomePage({ searchApi }: HomePageProps) {
       withEmail: deferredLeads.filter((lead) => lead.hasEmail).length,
       withPhone: deferredLeads.filter((lead) => lead.hasPhone).length,
       withWebsite: deferredLeads.filter((lead) => lead.hasWebsite).length,
+      publicContacts: deferredLeads.filter((lead) => lead.hasEmail || lead.hasPhone).length,
       missingEmail: allLeads.filter((lead) => !lead.hasEmail).length,
       missingPhone: allLeads.filter((lead) => !lead.hasPhone).length,
     };
@@ -129,6 +130,11 @@ export function HomePage({ searchApi }: HomePageProps) {
     : 0;
 
   const requestedCount = result?.meta.progress.requestedCount ?? search.count;
+  const publicContactsFound =
+    result?.meta.progress.publicContactsFound ?? summary.publicContacts;
+  const publicQueriesAttempted = result?.meta.progress.publicQueriesAttempted;
+  const publicProvidersChecked = result?.meta.progress.publicProvidersChecked;
+  const aiProviderCoverage = result?.meta.progress.providerCoverage ?? [];
   const linkedinDiscoveryBlocked = Boolean(
     result &&
       activeSourceMode === 'linkedin' &&
@@ -165,7 +171,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     ? result.meta.status === 'queued'
       ? `Queued ${result.meta.progress.requestedCount} leads`
       : result.meta.status === 'discovering'
-        ? `Finding ${activeSourceMode === 'linkedin' ? 'prospects' : 'leads'} in ${result.meta.locationLabel}`
+        ? `Finding ${activeSourceMode === 'linkedin' ? 'prospects' : activeSourceMode === 'ai' ? 'AI-matched leads' : 'leads'} in ${result.meta.locationLabel}`
         : result.meta.status === 'enriching'
           ? 'Collecting contact details'
           : result.meta.status === 'failed'
@@ -183,16 +189,20 @@ export function HomePage({ searchApi }: HomePageProps) {
       : result.meta.status === 'discovering'
         ? activeSourceMode === 'linkedin'
           ? 'Searching public LinkedIn profiles, capturing matched prospects, and removing duplicates.'
-          : 'Scanning matching businesses and removing duplicates.'
+          : activeSourceMode === 'ai'
+            ? 'Running free public discovery in parallel, merging duplicates, and keeping source limitations visible.'
+            : 'Scanning matching businesses and removing duplicates.'
           : result.meta.status === 'enriching'
               ? 'Adding emails, phone numbers, websites, and source details.'
               : result.meta.status === 'failed'
                   ? 'The search could not be completed. Adjust the query and try again.'
                   : linkedinDiscoveryBlocked
                     ? 'Free public-search providers temporarily blocked this request. No unverified or fabricated leads were added.'
-                  : resultsExhausted
-              ? 'We verified the available businesses and stopped once the discovery sources stopped returning new results.'
-              : 'Your leads are ready to review, filter, copy, and export.'
+                    : activeSourceMode === 'ai'
+                      ? 'Free public AI matching finished. Results were deduplicated, and contact details were kept only when publicly listed.'
+                      : resultsExhausted
+                        ? 'We verified the available businesses and stopped once the discovery sources stopped returning new results.'
+                        : 'Your leads are ready to review, filter, copy, and export.'
     : '';
 
   const emptyStateMessage =
@@ -200,6 +210,8 @@ export function HomePage({ searchApi }: HomePageProps) {
       ? result.meta.status === 'complete'
         ? linkedinDiscoveryBlocked
           ? 'LinkedIn discovery was blocked by the free public-search providers. Try again later or switch location.'
+          : activeSourceMode === 'ai'
+            ? 'Free AI mode found no verified public leads. Try a broader category or location; paid sources are not used.'
           : 'No leads were found for this search. Try a broader company type or different location.'
         : 'Still finding leads.'
       : 'No leads match the current filters.';
@@ -431,13 +443,15 @@ export function HomePage({ searchApi }: HomePageProps) {
                   Build your lead list
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Choose GMB or LinkedIn, then enter a business type, location, and lead count.
+                  Choose GMB, LinkedIn, or free AI mode, then enter a business type, location, and lead count.
                 </p>
               </div>
 
               <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700 sm:flex">
                 {activeSourceMode === 'linkedin' ? (
                   <BriefcaseBusiness className="h-6 w-6" />
+                ) : activeSourceMode === 'ai' ? (
+                  <Sparkles className="h-6 w-6" />
                 ) : (
                   <MapPin className="h-6 w-6" />
                 )}
@@ -567,8 +581,103 @@ export function HomePage({ searchApi }: HomePageProps) {
                     <p className="text-xs font-semibold text-slate-500">Selected</p>
                     <p className="mt-1 text-xl font-black text-slate-950">{selectedIds.length}</p>
                   </div>
+                  </div>
                 </div>
-              </div>
+
+                {activeSourceMode === 'linkedin' ? (
+                  <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
+                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/75 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                          Public contact coverage
+                        </p>
+                        <p className="mt-1 text-sm leading-5 text-slate-600">
+                          Validated emails or phone numbers found in public web results. Private or
+                          Premium LinkedIn data is not accessed.
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-lg font-black text-slate-950">
+                        {publicContactsFound}{' '}
+                        <span className="text-sm font-semibold text-slate-500">
+                          / {result.meta.progress.foundCount}
+                        </span>
+                      </p>
+                    </div>
+                    {publicQueriesAttempted || publicProvidersChecked ? (
+                      <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">
+                          Public search coverage
+                        </p>
+                        <p className="mt-2 text-sm font-semibold text-slate-900">
+                          {publicQueriesAttempted ?? 0} query paths
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-slate-600">
+                          Checked across {publicProvidersChecked ?? 0} public search sources.
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {activeSourceMode === 'ai' ? (
+                  <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">
+                          Free AI mode coverage
+                        </p>
+                        <p className="mt-1 text-sm leading-5 text-slate-600">
+                          Public LinkedIn discovery and public website checks are merged and deduplicated. Commercial databases are audited but never called.
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-bold text-blue-700 shadow-sm">
+                        No paid sources
+                      </span>
+                    </div>
+
+                    {aiProviderCoverage.length ? (
+                      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {aiProviderCoverage.map((provider) => {
+                          const statusLabel =
+                            provider.status === 'not_configured'
+                              ? 'Not used'
+                              : provider.status === 'returned'
+                                ? `${provider.leadCount} leads`
+                                : provider.status === 'failed'
+                                  ? 'Unavailable'
+                                  : 'Ready';
+                          const statusClass =
+                            provider.status === 'returned'
+                              ? 'text-emerald-700'
+                              : provider.status === 'failed'
+                                ? 'text-amber-700'
+                                : 'text-slate-500';
+
+                          return (
+                            <div
+                              className="rounded-xl border border-white/80 bg-white/80 p-3"
+                              key={provider.providerId}
+                              title={provider.message}
+                            >
+                              <p className="truncate text-sm font-bold text-slate-900">
+                                {provider.providerName}
+                              </p>
+                              <p className={`mt-1 text-xs font-semibold ${statusClass}`}>
+                                {statusLabel}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    <p className="mt-3 text-xs leading-5 text-slate-500">
+                      {result.meta.progress.aiAssistance === 'enabled'
+                        ? 'AI query assistance enabled.'
+                        : 'AI query assistance is off so this mode stays free. Matching uses local category and role intelligence.'}
+                    </p>
+                  </div>
+                ) : null}
 
               {isWaiting ? (
                 <div className="mt-5">
@@ -626,7 +735,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                           type="button"
                         >
                           <Search className="h-4 w-4" />
-                          Try public search again
+                          {activeSourceMode === 'ai' ? 'Try free search again' : 'Try public search again'}
                         </button>
                       ) : null}
                     </div>

@@ -12,12 +12,19 @@ import { deduplicateLeads } from './lead-deduplication';
 import { enrichLeads } from './lead-validation';
 import { googlePlacesProvider } from '../providers/google-places';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
-import { discoverUsLeadsFromGoogleMaps } from './google-maps-discovery';
+import {
+  discoverUsLeadsFromGoogleMaps,
+  formatGoogleMapsFailure,
+} from './google-maps-discovery';
 import {
   discoverUsLeadsFromLinkedinSearch,
   type LinkedInDiscoveryResult,
 } from './linkedin-search';
 import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
+import {
+  discoverUsLeadsFromAiMode,
+  type AiDiscoveryResult,
+} from './ai-lead-discovery';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
@@ -40,6 +47,7 @@ type SearchJob = {
   providerWarnings: ProviderWarning[];
   expiresAt: number;
   lastProgressAt: number;
+  googleMapsUnavailable?: boolean;
 };
 
 type SearchService = {
@@ -70,6 +78,11 @@ type SearchDeps = {
     location: NormalizedUsLocation;
     deadlineMs?: number;
   }) => Promise<LinkedInDiscoveryResult>;
+  discoverAiLeads?: (args: {
+    request: SearchRequest;
+    location: NormalizedUsLocation;
+    deadlineMs?: number;
+  }) => Promise<AiDiscoveryResult>;
   discoverOsmLeads?: (args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
@@ -82,10 +95,13 @@ type SearchDeps = {
 
 const jobTtlMs = 15 * 60 * 1000;
 const googleDiscoveryTimeoutMs = 20000;
-const googleMapsDiscoveryTimeoutMs = 20000;
+// Maps is a fallback after Places and OSM. Keep a failed browser attempt from
+// holding every regional pass open for the full discovery window.
+const googleMapsDiscoveryTimeoutMs = 8_000;
 const linkedinDiscoveryTimeoutMs = 90000;
 const linkedinProfileDiscoveryWindowMs = 30000;
 const linkedinContactEnrichmentWindowMs = 55000;
+const aiDiscoveryTimeoutMs = 40000;
 const osmDiscoveryTimeoutMs = 20000;
 const maxCandidatePool = 3000;
 const getDiscoveryStallMs = (requestedCount: number) =>
@@ -159,6 +175,7 @@ const computeTotals = (leads: Lead[]) => ({
 const createProgress = (requestedCount: number): SearchProgress => ({
   discovered: 0,
   enriched: 0,
+  publicContactsFound: 0,
   totalCandidates: 0,
   requestedCount,
   foundCount: 0,
@@ -216,6 +233,9 @@ const refreshProgress = (job: SearchJob) => {
   job.progress.discovered = job.leads.length;
   job.progress.totalCandidates = job.leads.length;
   job.progress.foundCount = job.leads.length;
+  job.progress.publicContactsFound = job.leads.filter(
+    (lead) => lead.hasEmail || lead.hasPhone,
+  ).length;
   job.progress.estimatedRemaining = Math.max(0, job.request.count - job.leads.length);
 };
 
@@ -284,6 +304,11 @@ const runLinkedinDiscovery = async (
 
   appendUniqueWarnings(job, linkedinResult.warnings);
 
+  if (linkedinResult.coverage) {
+    job.progress.publicQueriesAttempted = linkedinResult.coverage.queriesAttempted;
+    job.progress.publicProvidersChecked = linkedinResult.coverage.providersChecked;
+  }
+
   if (!linkedinResult.leads.length) {
     if (linkedinResult.blocked) {
       appendUniqueWarnings(job, [
@@ -336,6 +361,51 @@ const runLinkedinDiscovery = async (
         },
       ]);
     }
+  }
+
+  job.progress.batchesCompleted += 1;
+};
+
+const runAiDiscovery = async (
+  job: SearchJob,
+  request: SearchRequest,
+  location: NormalizedUsLocation,
+  discoverAiLeads: NonNullable<SearchDeps['discoverAiLeads']>,
+  now: () => number,
+) => {
+  job.progress.currentSource = leadSourceModeLabels.ai;
+
+  try {
+    const result = await withTimeout(
+      discoverAiLeads({
+        request,
+        location,
+        deadlineMs: Date.now() + aiDiscoveryTimeoutMs,
+      }),
+      aiDiscoveryTimeoutMs,
+      'Free AI discovery timed out; any completed public results were preserved.',
+    );
+
+    appendUniqueWarnings(job, result.warnings);
+    job.progress.providerCoverage = result.coverage;
+    job.progress.aiAssistance = result.aiAssistance;
+    job.progress.enriched = result.enrichedCount;
+    if (result.publicCoverage) {
+      job.progress.publicQueriesAttempted = result.publicCoverage.queriesAttempted;
+      job.progress.publicProvidersChecked = result.publicCoverage.providersChecked;
+    }
+    upsertLeads(job, result.leads, now);
+  } catch (error) {
+    appendUniqueWarnings(job, [
+      {
+        providerId: 'ai-mode',
+        providerName: 'AI mode',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Free AI discovery failed. No unverified leads were added.',
+      },
+    ]);
   }
 
   job.progress.batchesCompleted += 1;
@@ -425,6 +495,8 @@ const runRegionalDiscovery = async (
     })(),
   ]);
 
+  let googleMapsUnavailable = false;
+
   if (job.progress.foundCount < request.count && discoverGoogleMapsLeads) {
     try {
       const remainingCount = request.count - job.progress.foundCount;
@@ -448,16 +520,18 @@ const runRegionalDiscovery = async (
       job.progress.batchesCompleted += 1;
       job.progress.currentSource = 'Google Maps API';
     } catch (error) {
+      googleMapsUnavailable = true;
       appendUniqueWarnings(job, [{
         providerId: 'google-maps',
         providerName: 'Google Maps',
-        message:
-          error instanceof Error
-            ? error.message
-            : 'Google Maps discovery failed',
+        message: formatGoogleMapsFailure(error),
       }]);
     }
   }
+
+  return {
+    googleMapsUnavailable,
+  };
 };
 
 export const createSearchService = (deps: SearchDeps = {}): SearchService => {
@@ -470,6 +544,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
   const discoverLinkedinLeads =
     deps.discoverLinkedinLeads ??
     (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
+  const discoverAiLeads = deps.discoverAiLeads ?? discoverUsLeadsFromAiMode;
   const enrichLinkedinLeads =
     deps.enrichLinkedinLeads ??
     (deps.discoverLinkedinLeads ? undefined : enrichLinkedinLeadsWithPublicContacts);
@@ -494,6 +569,15 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     job.status = 'discovering';
     job.progress.currentSource = 'Nominatim';
     const sourceMode: LeadSourceMode = normalizeLeadSourceMode(job.request.sourceMode);
+    const guardedDiscoverGoogleMapsLeads = discoverGoogleMapsLeads
+      ? async (args: Parameters<NonNullable<SearchDeps['discoverGoogleMapsLeads']>>[0]) => {
+          if (job.googleMapsUnavailable) {
+            return [];
+          }
+
+          return discoverGoogleMapsLeads(args);
+        }
+      : undefined;
 
     let location: NormalizedUsLocation;
     try {
@@ -555,6 +639,16 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       return;
     }
 
+    if (sourceMode === 'ai') {
+      await runAiDiscovery(job, job.request, location, discoverAiLeads, now);
+      finalizeLeads(job);
+      refreshProgress(job);
+      job.status = 'complete';
+      job.progress.currentSource = 'Complete';
+      refreshProgress(job);
+      return;
+    }
+
     const profile = resolveCategoryProfile(job.request.companyType);
     job.providerWarnings.push(...profile.warnings);
 
@@ -594,17 +688,35 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         break;
       }
 
-      await runRegionalDiscovery(
+      const foundCountBeforeRegional = job.progress.foundCount;
+      const regionalResult = await runRegionalDiscovery(
         job,
         job.request,
         location,
         regionalLocation,
         profile,
         discoverGoogleLeads,
-        discoverGoogleMapsLeads,
+        guardedDiscoverGoogleMapsLeads,
         discoverOsmLeads,
         now,
       );
+
+      if (regionalResult.googleMapsUnavailable) {
+        job.googleMapsUnavailable = true;
+      }
+
+      if (
+        job.googleMapsUnavailable &&
+        job.progress.foundCount === foundCountBeforeRegional
+      ) {
+        appendUniqueWarnings(job, [{
+          providerId: 'discovery-limit',
+          providerName: 'Discovery',
+          message:
+            'Google Maps fallback was unavailable and other sources returned no new businesses. Search completed with the available results.',
+        }]);
+        break;
+      }
 
       if (
         job.progress.foundCount < job.request.count &&

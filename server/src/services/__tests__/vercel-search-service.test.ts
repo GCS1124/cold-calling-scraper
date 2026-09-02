@@ -660,6 +660,46 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.leads[0]?.address ?? '').toBe('');
   });
 
+  it('persists a failed Google Maps fallback across service instances', async () => {
+    const discoverGoogleMapsLeads = vi.fn().mockRejectedValue(
+      new Error('page.goto: net::ERR_INSUFFICIENT_RESOURCES at https://www.google.com/maps/...'),
+    );
+    const store = createSearchJobStore();
+    const createService = () =>
+      createVercelSearchServiceWithDeps({
+        store,
+        normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+        googlePlaces: {
+          id: 'google-places',
+          name: 'Google Places',
+          fetchLeads: vi.fn().mockResolvedValue([
+            makeLead({
+              id: 'lead-existing-after-maps-failure',
+              name: 'Existing HVAC Result',
+            }),
+          ]),
+        } as never,
+        discoverGoogleMapsLeads,
+        discoverOsmLeads: vi.fn().mockResolvedValue([]),
+        now: () => 1000,
+      });
+
+    const first = createService();
+    const response = await first.startSearch({
+      companyType: 'HVAC Contractors',
+      city: 'Austin, TX',
+      count: 50,
+    });
+
+    await first.getSearch(response.searchId);
+    expect((await store.get(response.searchId))?.googleMapsUnavailable).toBe(true);
+
+    const second = createService();
+    await second.getSearch(response.searchId);
+
+    expect(discoverGoogleMapsLeads).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps timezone Google Maps leads when coordinates fall inside the timezone boundary', async () => {
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
@@ -895,5 +935,78 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.meta.status).toBe('complete');
     expect(snapshot?.meta.providerWarnings.some((warning) => warning.providerId === 'discovery-limit')).toBe(true);
     expect(googleCalls.length).toBeGreaterThan(1);
+  });
+
+  it('runs free AI mode without calling the GMB discovery providers', async () => {
+    const googleFetchLeads = vi.fn().mockResolvedValue([makeLead({ id: 'gmb-should-not-run' })]);
+    const googlePlaces = {
+      id: 'google-places',
+      name: 'Google Places',
+      fetchLeads: googleFetchLeads,
+    } as never;
+    const discoverOsmLeads = vi.fn().mockResolvedValue([makeLead({ id: 'osm-should-not-run' })]);
+    const discoverAiLeads = vi.fn().mockResolvedValue({
+      leads: [
+        makeLead({
+          id: 'ai-public-1',
+          source: 'LinkedIn, Public Profile',
+        }),
+      ],
+      warnings: [
+        {
+          providerId: 'ai-mode-policy',
+          providerName: 'AI mode',
+          message: 'Free-only public discovery.',
+        },
+      ],
+      coverage: [
+        {
+          providerId: 'apollo-audit',
+          providerName: 'Apollo',
+          status: 'not_configured' as const,
+          leadCount: 0,
+          message: 'Not used in free mode.',
+        },
+        {
+          providerId: 'linkedin-public-search',
+          providerName: 'Public LinkedIn Search',
+          status: 'returned' as const,
+          leadCount: 1,
+        },
+      ],
+      aiAssistance: 'disabled' as const,
+      enrichedCount: 0,
+      publicCoverage: {
+        queriesAttempted: 10,
+        providersChecked: 3,
+        providersPaused: 0,
+        acceptedCandidates: 1,
+      },
+    });
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      googlePlaces,
+      discoverOsmLeads,
+      discoverAiLeads,
+      idFactory: () => 'search-ai-mode',
+      now: () => 1000,
+    });
+
+    const started = await service.startSearch({
+      companyType: 'HVAC contractor',
+      city: 'Austin, TX',
+      count: 50,
+      sourceMode: 'ai',
+    });
+    const snapshot = await service.getSearch(started.searchId);
+
+    expect(discoverAiLeads).toHaveBeenCalledTimes(1);
+    expect(googleFetchLeads).not.toHaveBeenCalled();
+    expect(discoverOsmLeads).not.toHaveBeenCalled();
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.meta.progress.providerCoverage?.[0]?.providerName).toBe('Apollo');
+    expect(snapshot?.meta.progress.publicQueriesAttempted).toBe(10);
+    expect(snapshot?.leads[0]?.source).toContain('LinkedIn');
   });
 });

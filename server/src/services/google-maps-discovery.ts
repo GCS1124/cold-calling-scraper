@@ -15,6 +15,22 @@ const toAbsoluteUrl = (value: string) =>
 
 const baseLaunchArgs = ['--disable-blink-features=AutomationControlled'];
 
+export const formatGoogleMapsFailure = (error: unknown) => {
+  const message = error instanceof Error ? error.message : 'Google Maps discovery failed';
+
+  if (/ERR_INSUFFICIENT_RESOURCES/i.test(message)) {
+    return 'Google Maps fallback hit a browser resource limit; existing results were preserved and discovery continued with other sources.';
+  }
+
+  if (/timed out|timeout/i.test(message)) {
+    return 'Google Maps fallback timed out; existing results were preserved and discovery continued with other sources.';
+  }
+
+  return message.length > 260
+    ? `${message.slice(0, 257).trimEnd()}...`
+    : message;
+};
+
 const isMissingBrowserExecutableError = (error: unknown) =>
   error instanceof Error &&
   /Executable doesn't exist|chrome-headless-shell|browserType\.launch/i.test(error.message);
@@ -131,13 +147,22 @@ const scrapeListingDetails = async (
   candidate: GoogleMapsCandidate,
   request: SearchRequest,
   locationLabel: string,
+  deadlineMs?: number,
 ): Promise<Lead> => {
   const page = await browser.newPage();
 
   try {
+    const remainingNavigationMs = deadlineMs
+      ? deadlineMs - Date.now()
+      : 30_000;
+
+    if (remainingNavigationMs <= 0) {
+      throw new Error('Google Maps discovery timed out before listing details completed');
+    }
+
     await page.goto(candidate.listingUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 30000,
+      timeout: Math.min(30_000, remainingNavigationMs),
     });
 
     const body = (await page.textContent('body')) ?? '';
@@ -344,7 +369,7 @@ export const discoverUsLeadsFromGoogleMaps = async ({
       const chunk = listingCandidates.slice(index, index + concurrency);
       const leads = await Promise.all(
         chunk.map((candidate) =>
-          scrapeListingDetails(detailBrowser, candidate, request, location.label),
+          scrapeListingDetails(detailBrowser, candidate, request, location.label, deadlineMs),
         ),
       );
       results.push(...leads);

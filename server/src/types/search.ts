@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import type { Lead } from './lead';
 
-const searchSourceModes = ['gmb', 'linkedin'] as const;
+const searchSourceModes = ['gmb', 'linkedin', 'ai'] as const;
 
 export const searchRequestSchema = z.object({
   companyType: z.string().trim().min(2).max(80),
@@ -27,6 +27,14 @@ export type ProviderWarning = {
   message: string;
 };
 
+export type ProviderCoverage = {
+  providerId: string;
+  providerName: string;
+  status: 'configured' | 'not_configured' | 'returned' | 'failed';
+  leadCount: number;
+  message?: string;
+};
+
 export type SearchStatus =
   | 'queued'
   | 'discovering'
@@ -37,6 +45,16 @@ export type SearchStatus =
 export type SearchProgress = {
   discovered: number;
   enriched: number;
+  /** Count of leads with a validated public email or phone number. */
+  publicContactsFound?: number;
+  /** Number of public LinkedIn query paths attempted during discovery. */
+  publicQueriesAttempted?: number;
+  /** Number of free public search sources contacted during discovery. */
+  publicProvidersChecked?: number;
+  /** Status of each provider involved in AI mode discovery. */
+  providerCoverage?: ProviderCoverage[];
+  /** Whether an optional model-assisted query layer was used. Free mode keeps this disabled. */
+  aiAssistance?: 'enabled' | 'disabled' | 'failed';
   totalCandidates: number;
   requestedCount: number;
   foundCount: number;

@@ -5,11 +5,16 @@ import type { ProviderWarning, SearchProgress, SearchRequest, SearchResponse, Se
 import { deduplicateLeads } from './lead-deduplication';
 import { enrichLead } from './lead-validation';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
+import { formatGoogleMapsFailure } from './google-maps-discovery';
 import {
   discoverUsLeadsFromLinkedinSearch,
   type LinkedInDiscoveryResult,
 } from './linkedin-search';
 import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
+import {
+  discoverUsLeadsFromAiMode,
+  type AiDiscoveryResult,
+} from './ai-lead-discovery';
 import { googlePlacesProvider } from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
@@ -52,6 +57,11 @@ type VercelSearchServiceDeps = {
     location: NormalizedUsLocation;
     deadlineMs?: number;
   }) => Promise<LinkedInDiscoveryResult>;
+  discoverAiLeads?: (args: {
+    request: SearchRequest;
+    location: NormalizedUsLocation;
+    deadlineMs?: number;
+  }) => Promise<AiDiscoveryResult>;
   enrichLinkedinLeads?: typeof enrichLinkedinLeadsWithPublicContacts;
   discoverOsmLeads?: (args: {
     request: { companyType: string; count: number };
@@ -85,11 +95,13 @@ const getPerSeedCount = (requestedCount: number) =>
 const getGooglePlacesTimeoutMs = (requestedCount: number) =>
   requestedCount >= 50 ? 20_000 : 8_000;
 const getGoogleMapsTimeoutMs = (requestedCount: number) =>
-  requestedCount >= 50 ? 15_000 : 8_000;
+  requestedCount >= 50 ? 8_000 : 5_000;
 const getLinkedinProfileDiscoveryWindowMs = (requestedCount: number) =>
   requestedCount >= 50 ? 30_000 : 20_000;
 const getLinkedinContactEnrichmentWindowMs = (requestedCount: number) =>
   requestedCount >= 50 ? 24_000 : 14_000;
+const getAiDiscoveryWindowMs = (requestedCount: number) =>
+  requestedCount >= 50 ? 36_000 : 30_000;
 const getMaxTickDurationMs = (requestedCount: number) =>
   requestedCount >= 50 ? 45_000 : 30_000;
 const processingLeaseMs = 70_000;
@@ -99,6 +111,7 @@ const withNow = () => Date.now();
 const createProgress = (requestedCount: number): SearchProgress => ({
   discovered: 0,
   enriched: 0,
+  publicContactsFound: 0,
   totalCandidates: 0,
   requestedCount,
   foundCount: 0,
@@ -136,6 +149,9 @@ const refreshProgress = (job: SearchJobRecord) => {
   job.progress.discovered = job.leads.length;
   job.progress.totalCandidates = job.leads.length;
   job.progress.foundCount = job.leads.length;
+  job.progress.publicContactsFound = job.leads.filter(
+    (lead) => lead.hasEmail || lead.hasPhone,
+  ).length;
   job.progress.estimatedRemaining = Math.max(0, job.request.count - job.leads.length);
 };
 
@@ -207,6 +223,11 @@ const runLinkedinDiscovery = async (
     appendWarningOnce(job, warning);
   }
 
+  if (linkedinResult.coverage) {
+    job.progress.publicQueriesAttempted = linkedinResult.coverage.queriesAttempted;
+    job.progress.publicProvidersChecked = linkedinResult.coverage.providersChecked;
+  }
+
   if (!linkedinResult.leads.length) {
     if (linkedinResult.blocked) {
       appendWarningOnce(job, {
@@ -252,6 +273,37 @@ const runLinkedinEnrichment = async (
 
   job.progress.enriched = contactResult.enrichedCount;
   mergeLeads(job, contactResult.leads, now, false);
+};
+
+const runAiDiscovery = async (
+  job: SearchJobRecord,
+  request: SearchRequest,
+  location: NormalizedUsLocation,
+  discoverAiLeads: NonNullable<VercelSearchServiceDeps['discoverAiLeads']>,
+  now: () => number,
+) => {
+  job.progress.currentSource = leadSourceModeLabels.ai;
+
+  const result = await discoverAiLeads({
+    request,
+    location,
+    deadlineMs: now() + getAiDiscoveryWindowMs(request.count),
+  });
+
+  for (const warning of result.warnings) {
+    appendWarningOnce(job, warning);
+  }
+
+  job.progress.providerCoverage = result.coverage;
+  job.progress.aiAssistance = result.aiAssistance;
+  job.progress.enriched = result.enrichedCount;
+  if (result.publicCoverage) {
+    job.progress.publicQueriesAttempted = result.publicCoverage.queriesAttempted;
+    job.progress.publicProvidersChecked = result.publicCoverage.providersChecked;
+  }
+
+  mergeLeads(job, result.leads, now);
+  job.progress.batchesCompleted += 1;
 };
 
 const buildQuery = (companyType: string, location: NormalizedUsLocation) =>
@@ -337,6 +389,7 @@ const discoverRegionLeads = async (
 
   const acceptedDiscoveryLeads = filterLeadsForLocation([...googleLeads, ...osmLeads], targetLocation);
   let googleMapsLeads: Lead[] = [];
+  let googleMapsUnavailable = false;
 
   if (acceptedDiscoveryLeads.length < request.count && discoverGoogleMapsLeads) {
     try {
@@ -358,11 +411,11 @@ const discoverRegionLeads = async (
         deadlineMs: googleMapsDeadlineMs,
       });
     } catch (error) {
+      googleMapsUnavailable = true;
       warnings.push({
         providerId: 'google-maps',
         providerName: 'Google Maps',
-        message:
-          error instanceof Error ? error.message : 'Google Maps discovery failed',
+        message: formatGoogleMapsFailure(error),
       });
     }
   }
@@ -370,6 +423,7 @@ const discoverRegionLeads = async (
   return {
     leads: filterLeadsForLocation([...acceptedDiscoveryLeads, ...googleMapsLeads], targetLocation),
     warnings,
+    googleMapsUnavailable,
   };
 };
 
@@ -379,7 +433,10 @@ const tickJob = async (
   deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'now'>> &
     Pick<
       VercelSearchServiceDeps,
-      'discoverGoogleMapsLeads' | 'discoverLinkedinLeads' | 'enrichLinkedinLeads'
+      | 'discoverGoogleMapsLeads'
+      | 'discoverLinkedinLeads'
+      | 'discoverAiLeads'
+      | 'enrichLinkedinLeads'
     >,
 ): Promise<SearchJobRecord> => {
   let targetLocation = job.targetLocation as NormalizedUsLocation | undefined;
@@ -409,6 +466,17 @@ const tickJob = async (
   }
 
   const sourceMode: LeadSourceMode = normalizeLeadSourceMode(job.request.sourceMode);
+  const discoverGoogleMapsForSearch = deps.discoverGoogleMapsLeads
+    ? async (
+        args: Parameters<NonNullable<VercelSearchServiceDeps['discoverGoogleMapsLeads']>>[0],
+      ) => {
+        if (job.googleMapsUnavailable) {
+          return [];
+        }
+
+        return deps.discoverGoogleMapsLeads?.(args) ?? [];
+      }
+    : undefined;
 
   if (shouldInitializeLocation) {
     job.locationLabel = targetLocation.label;
@@ -420,6 +488,36 @@ const tickJob = async (
     for (const warning of targetLocation.warnings) {
       appendWarningOnce(job, warning);
     }
+  }
+
+  if (sourceMode === 'ai') {
+    const discoverAiLeads = deps.discoverAiLeads ?? discoverUsLeadsFromAiMode;
+
+    try {
+      job.status = 'discovering';
+      job.progress.currentSource = leadSourceModeLabels.ai;
+      job.updatedAt = deps.now();
+      await store.upsert(job);
+      await runAiDiscovery(job, job.request, targetLocation, discoverAiLeads, deps.now);
+    } catch (error) {
+      appendWarningOnce(job, {
+        providerId: 'ai-mode',
+        providerName: 'AI mode',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Free AI discovery failed. No unverified leads were added.',
+      });
+    }
+
+    job.discoveryComplete = true;
+    finalizeLeads(job);
+    job.status = 'complete';
+    job.progress.currentSource = 'Complete';
+    refreshProgress(job);
+    job.updatedAt = withNow();
+    await store.upsert(job);
+    return job;
   }
 
   if (sourceMode === 'linkedin') {
@@ -532,12 +630,13 @@ const tickJob = async (
         continue;
       }
 
-      const { leads, warnings } = await discoverRegionLeads(
+      const foundCountBeforeRegional = job.progress.foundCount;
+      const { leads, warnings, googleMapsUnavailable } = await discoverRegionLeads(
         job.request,
         targetLocation,
         regionalLocation,
         deps.googlePlaces,
-        deps.discoverGoogleMapsLeads,
+        discoverGoogleMapsForSearch,
         deps.discoverOsmLeads,
         deps.now,
         resolveCategoryProfile(job.request.companyType),
@@ -546,6 +645,24 @@ const tickJob = async (
 
       job.providerWarnings.push(...warnings);
       mergeLeads(job, leads, deps.now);
+      if (googleMapsUnavailable) {
+        job.googleMapsUnavailable = true;
+      }
+
+      if (
+        job.googleMapsUnavailable &&
+        job.progress.foundCount === foundCountBeforeRegional
+      ) {
+        job.discoveryComplete = true;
+        appendWarningOnce(job, {
+          providerId: 'discovery-limit',
+          providerName: 'Discovery',
+          message:
+            'Google Maps fallback was unavailable and other sources returned no new businesses. Search completed with the available results.',
+        });
+        job.nextSeedIndex = job.searchSeeds.length;
+        break;
+      }
       job.nextSeedIndex += 1;
       job.progress.batchesCompleted += 1;
       processed += 1;
@@ -604,13 +721,13 @@ export const createVercelSearchServiceWithDeps = (
   const discoverLinkedinLeads =
     deps.discoverLinkedinLeads ??
     (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
+  const discoverAiLeads = deps.discoverAiLeads ?? discoverUsLeadsFromAiMode;
   const enrichLinkedinLeads =
     deps.enrichLinkedinLeads ??
     (deps.discoverLinkedinLeads ? undefined : enrichLinkedinLeadsWithPublicContacts);
   const discoverOsm = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
-
   const getStoredSearch = async (searchId: string) => {
     await store.ensureSchema();
 
@@ -651,6 +768,7 @@ export const createVercelSearchServiceWithDeps = (
       normalizeLocation,
       discoverGoogleMapsLeads,
       discoverLinkedinLeads,
+      discoverAiLeads,
       enrichLinkedinLeads,
       discoverOsmLeads: discoverOsm,
       now,

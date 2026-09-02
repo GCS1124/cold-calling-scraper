@@ -30,6 +30,16 @@ const runStatelessLinkedinSearchOnDemand = async (
   return runStatelessLinkedinSearch(request);
 };
 
+const runStatelessAiSearchOnDemand = async (
+  request: ReturnType<typeof flattenSearchRequest>,
+) => {
+  const { runStatelessAiSearch } = await import(
+    '../../server/src/services/ai-lead-discovery.js'
+  );
+
+  return runStatelessAiSearch(request);
+};
+
 export default async function handler(req: any, res: any) {
   if (req.method === 'GET') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -60,6 +70,23 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    if (
+      isVercelRuntime() &&
+      flattenedRequest.sourceMode === 'ai' &&
+      !hasDurableSearchStorage()
+    ) {
+      try {
+        const response = await runStatelessAiSearchOnDemand(flattenedRequest);
+        res.status(200).json(response);
+      } catch (error) {
+        console.error('[api/search] stateless AI search failed', error);
+        res.status(502).json({
+          error: 'Free AI search could not be completed. Please try again.',
+        });
+      }
+      return;
+    }
+
     const service = await getVercelSearchService();
     const response = await service.startSearch(flattenedRequest);
 
@@ -79,15 +106,24 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    if (isSearchPersistenceFailure(error) && flattenedRequest?.sourceMode === 'linkedin') {
+    if (
+      isSearchPersistenceFailure(error) &&
+      (flattenedRequest?.sourceMode === 'linkedin' || flattenedRequest?.sourceMode === 'ai')
+    ) {
       try {
-        const response = await runStatelessLinkedinSearchOnDemand(flattenedRequest);
+        const response =
+          flattenedRequest.sourceMode === 'ai'
+            ? await runStatelessAiSearchOnDemand(flattenedRequest)
+            : await runStatelessLinkedinSearchOnDemand(flattenedRequest);
         res.status(200).json(response);
         return;
       } catch (fallbackError) {
-        console.error('[api/search] stateless LinkedIn fallback failed', fallbackError);
+        console.error('[api/search] stateless public fallback failed', fallbackError);
         res.status(502).json({
-          error: 'Public LinkedIn search could not be completed. Please try again.',
+          error:
+            flattenedRequest.sourceMode === 'ai'
+              ? 'Free AI search could not be completed. Please try again.'
+              : 'Public LinkedIn search could not be completed. Please try again.',
         });
         return;
       }

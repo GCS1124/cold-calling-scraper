@@ -89,6 +89,31 @@ describe('enrichLead', () => {
     expect(enriched.website).toBe('');
   });
 
+  it('does not count a legacy LinkedIn public profile listing as a business website', () => {
+    const enriched = enrichLead({
+      id: 'linkedin-legacy-lead',
+      name: 'Olivia Wilson',
+      mobile: '',
+      email: '',
+      website: '',
+      address: '',
+      category: 'Dentist',
+      city: 'Austin, TX',
+      source: 'LinkedIn, Public Profile',
+      confidence: 80,
+      listingUrl: 'https://linkedin.com/pub/olivia-wilson',
+      hasEmail: false,
+      hasPhone: false,
+      hasWebsite: true,
+      verifiedPhone: false,
+      verifiedEmail: false,
+      scrapedAt: '2026-04-21T00:00:00.000Z',
+    });
+
+    expect(enriched.hasWebsite).toBe(false);
+    expect(enriched.website).toBe('');
+  });
+
   it('does not treat a lookalike domain as a LinkedIn profile listing', () => {
     const enriched = enrichLead({
       id: 'lookalike-linkedin-lead',

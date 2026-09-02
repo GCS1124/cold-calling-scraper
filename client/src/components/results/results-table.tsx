@@ -60,6 +60,7 @@ export function ResultsTable({
           <tbody>
             {leads.map((lead, index) => {
               const isSelected = selectedIds.includes(lead.id);
+              const isPublicLinkedInLead = lead.source.toLowerCase().includes('linkedin');
 
               return (
                 <tr className="border-t border-slate-100 transition hover:bg-blue-50/40" key={lead.id}>
@@ -88,6 +89,14 @@ export function ResultsTable({
                         {lead.headline}
                       </div>
                     ) : null}
+                    {isPublicLinkedInLead ? (
+                      <div className="mt-2 flex items-center gap-2 text-[11px] font-semibold">
+                        <span className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">
+                          Public match
+                        </span>
+                        <span className="text-slate-400">{lead.confidence}% confidence</span>
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-4 py-4">{lead.mobile || '—'}</td>
                   <td className="px-4 py-4">{lead.email || '—'}</td>
@@ -111,7 +120,13 @@ export function ResultsTable({
                     </span>
                   </td>
                   <td className="px-4 py-4">
-                    <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
+                    <span
+                      className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                        isPublicLinkedInLead
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'bg-emerald-50 text-emerald-700'
+                      }`}
+                    >
                       {lead.source}
                     </span>
                   </td>

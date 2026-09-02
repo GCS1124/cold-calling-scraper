@@ -147,6 +147,8 @@ Owner at Austin Dental Spa.
     expect(new Set(result.leads.map((lead) => lead.id)).size).toBe(result.leads.length);
     expect(result.leads[0]?.name).toContain('Mark Sweeney');
     expect(result.leads[0]?.listingUrl).toContain('/in/');
+    expect(result.coverage?.queriesAttempted).toBeGreaterThan(0);
+    expect(result.coverage?.providersChecked).toBe(3);
   });
 
   it('discovers legacy public LinkedIn /pub profiles', async () => {
@@ -195,6 +197,47 @@ Owner at Austin Dental Spa.
     expect(result.leads[0]?.listingUrl).toBe('https://linkedin.com/pub/olivia-wilson');
     expect(result.leads[0]?.source).toBe('LinkedIn, Public Profile');
     expect(queries.some((query) => query.includes('site:linkedin.com/pub/'))).toBe(true);
+  });
+
+  it('ranks profiles corroborated by multiple public providers above single-provider matches', async () => {
+    const corroboratedProfile = `1. [Morgan Chen - Owner at Austin Dental Care | LinkedIn](https://www.linkedin.com/in/morgan-chen-dental/)
+Dentist and practice owner in Austin, Texas.`;
+    const singleProviderProfile = `2. [Taylor Reed - Owner at Reed Dental | LinkedIn](https://www.linkedin.com/in/taylor-reed-dental/)
+Dentist and practice owner in Austin, Texas.`;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes('search.brave.com')) {
+        return makeResponse(
+          `Title: LinkedIn search results\n\nMarkdown Content:\n${corroboratedProfile}\n${singleProviderProfile}`,
+        );
+      }
+
+      if (url.includes('bing.com')) {
+        return makeResponse(
+          `Title: LinkedIn search results\n\nMarkdown Content:\n${corroboratedProfile}`,
+        );
+      }
+
+      if (url.includes('html.duckduckgo.com')) {
+        return makeResponse(emptyDuckDuckGoBody);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Dentist', city: 'Austin', count: 50 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads.map((lead) => lead.name)).toEqual([
+      'Morgan Chen',
+      'Taylor Reed',
+    ]);
   });
 
   it('parses native Bing HTML and keeps only matching public LinkedIn profiles', async () => {

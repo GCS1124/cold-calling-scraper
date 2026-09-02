@@ -677,6 +677,50 @@ describe('createSearchService', () => {
     expect(completed?.leads[0]?.source).toContain('Google Maps');
   });
 
+  it('pauses a failed Google Maps fallback for the rest of the search', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+    const discoverGoogleMapsLeads = vi.fn().mockRejectedValue(
+      new Error('page.goto: net::ERR_INSUFFICIENT_RESOURCES at https://www.google.com/maps/...'),
+    );
+
+    const service = createSearchService({
+      idFactory: () => 'search-maps-failure',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverGoogleLeads: vi.fn().mockResolvedValue([]),
+      discoverGoogleMapsLeads,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'HVAC Contractors',
+      city: 'Austin',
+      count: 50,
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    await (backgroundTask as () => Promise<void>)();
+    const completed = await service.getSearch('search-maps-failure');
+
+    expect(completed?.meta.status).toBe('complete');
+    expect(discoverGoogleMapsLeads).toHaveBeenCalledTimes(1);
+    expect(
+      completed?.meta.providerWarnings.some((warning) =>
+        warning.message.includes('browser resource limit'),
+      ),
+    ).toBe(true);
+    expect(
+      completed?.meta.providerWarnings.some((warning) =>
+        warning.message.includes('www.google.com/maps/...'),
+      ),
+    ).toBe(false);
+  });
+
   it('keeps Google Maps coordinate matches inside a timezone search', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 

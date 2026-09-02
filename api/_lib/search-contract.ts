@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { usStateCodes } from '../../server/src/data/us-states.js';
 
 const publicTimeZoneCodes = ['EST', 'CST', 'MST', 'PST'] as const;
-const publicSearchSourceModes = ['gmb', 'linkedin'] as const;
+const publicSearchSourceModes = ['gmb', 'linkedin', 'ai'] as const;
 
 const cityPattern = /^[\p{L}][\p{L}\s.'-]*$/u;
 
