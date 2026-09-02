@@ -150,6 +150,16 @@ Owner at Austin Dental Spa.
     expect(result.leads[0]?.publicEvidence).toMatchObject({
       profileTitle: expect.stringContaining('Mark Sweeney'),
       profileSnippet: expect.stringContaining('Owner at Austin Dental Spa'),
+      sources: expect.arrayContaining([
+        expect.objectContaining({
+          providerName: 'Brave Search',
+          profileTitle: expect.stringContaining('Mark Sweeney'),
+        }),
+        expect.objectContaining({
+          providerName: 'Bing',
+          profileSnippet: expect.stringContaining('Owner at Austin Dental Spa'),
+        }),
+      ]),
     });
     expect(result.leads[0]?.matchSignals).toMatchObject({
       queryMatches: expect.any(Number),
@@ -191,6 +201,14 @@ Owner at Austin Dental Spa.
     expect(result.leads[0]?.publicEvidence?.profileSnippet?.length).toBeLessThanOrEqual(360);
     expect(result.leads[0]?.publicEvidence?.profileTitle).toMatch(/\.\.\.$/);
     expect(result.leads[0]?.publicEvidence?.profileSnippet).toMatch(/\.\.\.$/);
+    expect(result.leads[0]?.publicEvidence?.sources).toHaveLength(2);
+    expect(
+      result.leads[0]?.publicEvidence?.sources?.every(
+        (source) =>
+          (source.profileTitle?.length ?? 0) <= 240 &&
+          (source.profileSnippet?.length ?? 0) <= 360,
+      ),
+    ).toBe(true);
   });
 
   it('discovers legacy public LinkedIn /pub profiles', async () => {

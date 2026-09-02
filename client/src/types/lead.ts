@@ -14,6 +14,11 @@ export type Lead = {
   publicEvidence?: {
     profileTitle?: string;
     profileSnippet?: string;
+    sources?: Array<{
+      providerName: string;
+      profileTitle?: string;
+      profileSnippet?: string;
+    }>;
   };
   address?: string;
   category: string;

@@ -261,6 +261,22 @@ export function ResultsTable({
                                 <p className="mt-2 text-[11px] leading-4 text-slate-500">
                                   Excerpt from a public search result. Verify the linked profile before outreach.
                                 </p>
+                                {lead.publicEvidence.sources?.length ? (
+                                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-700">
+                                      {lead.publicEvidence.sources.length} public result{' '}
+                                      {lead.publicEvidence.sources.length === 1 ? 'trace' : 'traces'}
+                                    </span>
+                                    {lead.publicEvidence.sources.map((source, index) => (
+                                      <span
+                                        className="rounded-full border border-blue-100 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600"
+                                        key={source.providerName + '-' + index}
+                                      >
+                                        {source.providerName}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
                               </div>
                             ) : null}
                             <div className="mt-4 grid gap-2 sm:grid-cols-3">

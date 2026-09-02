@@ -774,6 +774,18 @@ describe('App', () => {
           publicEvidence: {
             profileTitle: 'Public LinkedIn Dentist - Founder at Austin Dental Spa',
             profileSnippet: 'Dentist and practice owner in Austin, Texas.',
+            sources: [
+              {
+                providerName: 'Brave Search',
+                profileTitle: 'Public LinkedIn Dentist - Founder at Austin Dental Spa',
+                profileSnippet: 'Dentist and practice owner in Austin, Texas.',
+              },
+              {
+                providerName: 'Bing',
+                profileTitle: 'Public LinkedIn Dentist - Founder at Austin Dental Spa',
+                profileSnippet: 'Owner at Austin Dental Spa.',
+              },
+            ],
           },
           source: 'LinkedIn',
           listingUrl: 'https://linkedin.com/in/public-linkedin-dentist',
@@ -858,6 +870,9 @@ describe('App', () => {
     expect(expandedContent).toContain('Public contact source: austindentalspa.example/contact');
     expect(expandedContent).toContain('Public match excerpt');
     expect(expandedContent).toContain('Dentist and practice owner in Austin, Texas.');
+    expect(expandedContent).toContain('2 public result traces');
+    expect(expandedContent).toContain('Brave Search');
+    expect(expandedContent).toContain('Bing');
     expect(expandedContent).toContain('Category matched');
     expect(expandedContent).toContain('Role matched');
     expect(expandedContent).toContain('Location matched');

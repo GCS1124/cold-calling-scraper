@@ -42,6 +42,12 @@ type ProviderHealth = {
   lastMessage: string;
 };
 
+type LinkedInEvidenceSource = {
+  providerName: string;
+  title: string;
+  snippet: string;
+};
+
 type LinkedInCandidate = {
   title: string;
   name: string;
@@ -49,6 +55,7 @@ type LinkedInCandidate = {
   profileUrl: string;
   website?: string;
   snippet: string;
+  publicEvidence: LinkedInEvidenceSource[];
   baseRelevanceScore: number;
   relevanceScore: number;
   matchedQueries: string[];
@@ -1694,6 +1701,34 @@ const limitPublicEvidence = (value: string | undefined, maxLength: number) => {
     : normalized;
 };
 
+const mergePublicEvidence = (
+  existing: LinkedInEvidenceSource[],
+  incoming: LinkedInEvidenceSource[],
+) => {
+  const merged = new Map<string, LinkedInEvidenceSource>();
+
+  [...existing, ...incoming].forEach((evidence) => {
+    const key = evidence.providerName.toLowerCase();
+    const previous = merged.get(key);
+
+    if (!previous) {
+      merged.set(key, { ...evidence });
+      return;
+    }
+
+    merged.set(key, {
+      providerName: previous.providerName,
+      title: evidence.title.length > previous.title.length ? evidence.title : previous.title,
+      snippet:
+        evidence.snippet.length > previous.snippet.length
+          ? evidence.snippet
+          : previous.snippet,
+    });
+  });
+
+  return [...merged.values()];
+};
+
 const buildLeadFromCandidate = (
   candidate: LinkedInCandidate,
   request: SearchRequest,
@@ -1702,8 +1737,22 @@ const buildLeadFromCandidate = (
   const publicLocation = candidate.location;
   const profileTitle = limitPublicEvidence(candidate.title, 240);
   const profileSnippet = limitPublicEvidence(candidate.snippet, 360);
-  const publicEvidence = profileTitle || profileSnippet
-    ? { profileTitle, profileSnippet }
+  const publicEvidenceSources = candidate.publicEvidence
+    .map((evidence) => {
+      const profileTitle = limitPublicEvidence(evidence.title, 240);
+      const profileSnippet = limitPublicEvidence(evidence.snippet, 360);
+
+      return {
+        providerName:
+          searchSources.find((source) => source.name === evidence.providerName)?.label ??
+          evidence.providerName,
+        profileTitle,
+        profileSnippet,
+      };
+    })
+    .filter((evidence) => evidence.profileTitle || evidence.profileSnippet);
+  const publicEvidence = profileTitle || profileSnippet || publicEvidenceSources.length
+    ? { profileTitle, profileSnippet, sources: publicEvidenceSources }
     : undefined;
 
   return {
@@ -1805,6 +1854,13 @@ const runLinkedInQuerySet = async ({
         profileUrl,
         website: extractPublicWebsite(result.title, result.snippet),
         snippet: normalizeText(result.snippet),
+        publicEvidence: [
+          {
+            providerName: result.providerName,
+            title: normalizeText(result.title),
+            snippet: normalizeText(result.snippet),
+          },
+        ],
         location: extractPublicProfileLocation({
           title: result.title,
           headline,
@@ -1846,6 +1902,10 @@ const runLinkedInQuerySet = async ({
             candidateWithoutScore.snippet.length > existing.snippet.length
               ? candidateWithoutScore.snippet
               : existing.snippet,
+          publicEvidence: mergePublicEvidence(
+            existing.publicEvidence,
+            candidateWithoutScore.publicEvidence,
+          ),
           location: candidateWithoutScore.location ?? existing.location,
           baseRelevanceScore,
           matchedQueries,
