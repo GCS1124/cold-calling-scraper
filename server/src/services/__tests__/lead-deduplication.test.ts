@@ -83,4 +83,90 @@ describe('deduplicateLeads', () => {
     expect(leads).toHaveLength(1);
     expect(leads[0]?.source).toBe('LinkedIn, Public Web, Website Crawl');
   });
+
+  it('preserves public evidence and contact provenance across duplicate enrichment records', () => {
+    const leads = deduplicateLeads([
+      makeLead({
+        id: 'linkedin-discovery',
+        name: 'Alpha Dental',
+        listingUrl: 'https://www.linkedin.com/in/alpha-dental',
+        source: 'LinkedIn',
+        confidence: 70,
+        publicEvidence: {
+          profileTitle: 'Alpha Dental | Practice Owner',
+          profileSnippet: 'Public profile snippet for Alpha Dental.',
+          sources: [
+            {
+              providerName: 'Brave Search',
+              profileTitle: 'Alpha Dental | Practice Owner',
+              profileSnippet: 'Public profile snippet for Alpha Dental.',
+            },
+          ],
+        },
+        matchSignals: {
+          queryMatches: 2,
+          publicSources: 1,
+          publicProviderNames: ['Brave Search'],
+          categoryMatched: true,
+          roleMatched: true,
+          locationMatched: true,
+        },
+      }),
+      makeLead({
+        id: 'website-enrichment',
+        name: 'Alpha Dental LLC',
+        listingUrl: 'https://www.linkedin.com/in/alpha-dental',
+        source: 'Public Website Enrichment',
+        confidence: 58,
+        mobile: '5125550101',
+        email: 'hello@alpha-dental.com',
+        website: 'https://alpha-dental.com',
+        contactSourceUrl: 'https://alpha-dental.com/contact',
+        hasPhone: true,
+        hasEmail: true,
+        hasWebsite: true,
+        verifiedPhone: true,
+        verifiedEmail: true,
+        publicEvidence: {
+          profileSnippet: 'Longer public snippet with the business website.',
+          sources: [
+            {
+              providerName: 'Bing',
+              profileTitle: 'Alpha Dental official website',
+              profileSnippet: 'Longer public snippet with the business website.',
+            },
+          ],
+        },
+        matchSignals: {
+          queryMatches: 1,
+          publicSources: 1,
+          publicProviderNames: ['Bing'],
+          categoryMatched: true,
+          roleMatched: false,
+          locationMatched: true,
+        },
+      }),
+    ]);
+
+    expect(leads).toHaveLength(1);
+    expect(leads[0]?.email).toBe('hello@alpha-dental.com');
+    expect(leads[0]?.mobile).toBe('5125550101');
+    expect(leads[0]?.contactSourceUrl).toBe('https://alpha-dental.com/contact');
+    expect(leads[0]?.publicEvidence?.profileTitle).toBe('Alpha Dental | Practice Owner');
+    expect(leads[0]?.publicEvidence?.profileSnippet).toBe(
+      'Longer public snippet with the business website.',
+    );
+    expect(leads[0]?.publicEvidence?.sources?.map((source) => source.providerName)).toEqual([
+      'Brave Search',
+      'Bing',
+    ]);
+    expect(leads[0]?.matchSignals).toMatchObject({
+      queryMatches: 2,
+      publicSources: 2,
+      publicProviderNames: ['Brave Search', 'Bing'],
+      categoryMatched: true,
+      roleMatched: true,
+      locationMatched: true,
+    });
+  });
 });

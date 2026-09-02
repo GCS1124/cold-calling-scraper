@@ -19,6 +19,86 @@ const normalizeText = (value?: string) =>
 const pickValue = (...values: Array<string | undefined>) =>
   values.find((value) => Boolean(value?.trim())) ?? '';
 
+type PublicEvidence = NonNullable<Lead['publicEvidence']>;
+type PublicEvidenceSource = NonNullable<PublicEvidence['sources']>[number];
+
+const mergePublicEvidence = (group: Lead[]) => {
+  const evidence = group.flatMap((lead) => (lead.publicEvidence ? [lead.publicEvidence] : []));
+  const sources = new Map<string, PublicEvidenceSource>();
+
+  evidence.flatMap((entry) => entry.sources ?? []).forEach((source) => {
+    const key = normalizeText(source.providerName);
+    const previous = sources.get(key);
+
+    if (!previous) {
+      sources.set(key, { ...source });
+      return;
+    }
+
+    sources.set(key, {
+      providerName: previous.providerName,
+      profileTitle:
+        (source.profileTitle?.length ?? 0) > (previous.profileTitle?.length ?? 0)
+          ? source.profileTitle
+          : previous.profileTitle,
+      profileSnippet:
+        (source.profileSnippet?.length ?? 0) > (previous.profileSnippet?.length ?? 0)
+          ? source.profileSnippet
+          : previous.profileSnippet,
+    });
+  });
+
+  const profileTitle = pickValue(
+    ...evidence
+      .map((entry) => entry.profileTitle)
+      .sort((left, right) => (right?.length ?? 0) - (left?.length ?? 0)),
+  );
+  const profileSnippet = pickValue(
+    ...evidence
+      .map((entry) => entry.profileSnippet)
+      .sort((left, right) => (right?.length ?? 0) - (left?.length ?? 0)),
+  );
+
+  if (!profileTitle && !profileSnippet && sources.size === 0) {
+    return undefined;
+  }
+
+  return {
+    ...(profileTitle ? { profileTitle } : {}),
+    ...(profileSnippet ? { profileSnippet } : {}),
+    ...(sources.size > 0 ? { sources: [...sources.values()] } : {}),
+  } satisfies PublicEvidence;
+};
+
+const mergeMatchSignals = (group: Lead[]) => {
+  const signals = group.flatMap((lead) => (lead.matchSignals ? [lead.matchSignals] : []));
+
+  if (signals.length === 0) {
+    return undefined;
+  }
+
+  const publicProviderNames = [
+    ...new Map(
+      signals
+        .flatMap((signal) => signal.publicProviderNames ?? [])
+        .map((name) => [normalizeText(name), name] as const)
+        .filter(([key]) => Boolean(key)),
+    ).values(),
+  ];
+
+  return {
+    queryMatches: Math.max(...signals.map((signal) => signal.queryMatches)),
+    publicSources: Math.max(
+      ...signals.map((signal) => signal.publicSources),
+      publicProviderNames.length,
+    ),
+    ...(publicProviderNames.length > 0 ? { publicProviderNames } : {}),
+    categoryMatched: signals.some((signal) => signal.categoryMatched),
+    roleMatched: signals.some((signal) => signal.roleMatched),
+    locationMatched: signals.some((signal) => signal.locationMatched),
+  } satisfies NonNullable<Lead['matchSignals']>;
+};
+
 const toDomain = (value?: string) => {
   if (!value?.trim()) {
     return '';
@@ -112,13 +192,23 @@ const mergeGroup = (group: Lead[]) => {
   return {
     ...sorted[0],
     name: shortestNamed.name,
+    headline: pickValue(...sorted.map((lead) => lead.headline)),
     mobile: pickValue(...sorted.map((lead) => lead.mobile)),
     email: pickValue(...sorted.map((lead) => lead.email)),
     website: pickValue(...sorted.map((lead) => lead.website)),
+    contactSourceUrl: pickValue(...sorted.map((lead) => lead.contactSourceUrl)),
     listingUrl: pickValue(...sorted.map((lead) => lead.listingUrl)),
     address: pickValue(...sorted.map((lead) => lead.address)),
+    state: pickValue(...sorted.map((lead) => lead.state)),
+    stateCode: pickValue(...sorted.map((lead) => lead.stateCode)),
+    postalCode: pickValue(...sorted.map((lead) => lead.postalCode)),
+    zip: pickValue(...sorted.map((lead) => lead.zip)),
+    latitude: sorted.find((lead) => lead.latitude !== undefined)?.latitude,
+    longitude: sorted.find((lead) => lead.longitude !== undefined)?.longitude,
     source: sources.join(', '),
     confidence: Math.max(...sorted.map((lead) => lead.confidence)),
+    publicEvidence: mergePublicEvidence(group),
+    matchSignals: mergeMatchSignals(group),
     hasEmail: sorted.some((lead) => lead.hasEmail),
     hasPhone: sorted.some((lead) => lead.hasPhone),
     hasWebsite: sorted.some((lead) => lead.hasWebsite),
