@@ -357,6 +357,19 @@ function getCityInput(container: Element) {
   return input as HTMLInputElement;
 }
 
+function getCheckboxByLabel(container: Element, pattern: RegExp) {
+  const label = Array.from(container.querySelectorAll('label')).find((element) =>
+    pattern.test(normalizedText(element)),
+  );
+  const checkbox = label?.querySelector('input[type="checkbox"]');
+
+  if (!checkbox) {
+    throw new Error(`Could not find checkbox ${pattern.toString()}`);
+  }
+
+  return checkbox as HTMLInputElement;
+}
+
 async function typeValue(input: HTMLInputElement, value: string) {
   const descriptor = Object.getOwnPropertyDescriptor(
     Object.getPrototypeOf(input),
@@ -810,6 +823,72 @@ describe('App', () => {
     expect(content).toMatch(/0\s*\/\s*1/);
     expect(content).toMatch(/Missing Email\s*1/);
     expect(content).toMatch(/Missing Phone\s*1/);
+
+    await unmount();
+  });
+
+  it('filters LinkedIn results by public match quality signals', async () => {
+    const linkedinResponse: SearchResponse = {
+      ...completedResponse,
+      searchId: 'search-linkedin-quality-filters',
+      leads: [
+        {
+          ...completedResponse.leads[0],
+          source: 'LinkedIn, Public Profile',
+          confidence: 94,
+          matchSignals: {
+            queryMatches: 4,
+            publicSources: 3,
+            roleMatched: true,
+            locationMatched: true,
+          },
+        },
+        {
+          ...completedResponse.leads[1],
+          id: 'lead-linkedin-low-fit',
+          source: 'LinkedIn, Public Profile',
+          confidence: 68,
+          matchSignals: {
+            queryMatches: 1,
+            publicSources: 1,
+            roleMatched: false,
+            locationMatched: true,
+          },
+        },
+      ],
+      meta: {
+        ...completedResponse.meta,
+        query: 'Dentist in Austin, TX',
+        progress: {
+          ...completedResponse.meta.progress,
+          discovered: 2,
+          enriched: 2,
+          foundCount: 2,
+          publicQueriesAttempted: 18,
+          publicProvidersChecked: 3,
+        },
+      },
+    };
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(linkedinResponse),
+      getSearch: vi.fn().mockResolvedValue(linkedinResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await clickElement(getButton(container, /linkedin/i));
+    await typeValue(getCompanyTypeInput(container), 'Dentist');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+    await waitForText(container, /public linkedin discovery complete/i, 6000);
+
+    expect(normalizedText(container)).toContain('2 visible leads');
+    await clickElement(getCheckboxByLabel(container, /high-fit score/i));
+    expect(normalizedText(container)).toContain('1 visible leads');
+    expect(normalizedText(container)).toContain('Northstar Labs');
+
+    await clickElement(getCheckboxByLabel(container, /cross-source match/i));
+    expect(normalizedText(container)).toContain('1 visible leads');
 
     await unmount();
   });

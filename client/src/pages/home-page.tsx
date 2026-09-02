@@ -57,6 +57,8 @@ export function HomePage({ searchApi }: HomePageProps) {
     hasEmail: false,
     hasPhone: false,
     hasWebsite: false,
+    highFitOnly: false,
+    crossSourceOnly: false,
   });
 
   const auth = useAuth();
@@ -74,6 +76,8 @@ export function HomePage({ searchApi }: HomePageProps) {
       hasEmail: false,
       hasPhone: false,
       hasWebsite: false,
+      highFitOnly: false,
+      crossSourceOnly: false,
     });
 
     if (sourceMode !== search.sourceMode) {
@@ -81,22 +85,41 @@ export function HomePage({ searchApi }: HomePageProps) {
     }
   };
 
+  const activeSourceMode = submittedSearch?.sourceMode ?? search.sourceMode;
+  const activeSourceLabel = sourceModeLabelsByCode[activeSourceMode];
+
   const visibleLeads = useMemo(() => {
     return (result?.leads ?? [])
       .filter((lead) => {
         if (filters.hasEmail && !lead.hasEmail) return false;
         if (filters.hasPhone && !lead.hasPhone) return false;
         if (filters.hasWebsite && !lead.hasWebsite) return false;
+        if (activeSourceMode === 'linkedin' && filters.highFitOnly && lead.confidence < 85) {
+          return false;
+        }
+        if (
+          activeSourceMode === 'linkedin' &&
+          filters.crossSourceOnly &&
+          (lead.matchSignals?.publicSources ?? 0) < 2
+        ) {
+          return false;
+        }
         return true;
       })
       .sort((left, right) => right.confidence - left.confidence);
-  }, [filters.hasEmail, filters.hasPhone, filters.hasWebsite, result?.leads]);
+  }, [
+    activeSourceMode,
+    filters.crossSourceOnly,
+    filters.hasEmail,
+    filters.hasPhone,
+    filters.hasWebsite,
+    filters.highFitOnly,
+    result?.leads,
+  ]);
 
   const deferredLeads = useDeferredValue(visibleLeads);
 
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const activeSourceMode = submittedSearch?.sourceMode ?? search.sourceMode;
-  const activeSourceLabel = sourceModeLabelsByCode[activeSourceMode];
 
   const exportableLeads = useMemo(() => {
     if (!selectedIds.length) return visibleLeads;
@@ -867,7 +890,11 @@ export function HomePage({ searchApi }: HomePageProps) {
           ) : result ? (
             <section className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
               <aside className="space-y-6 lg:sticky lg:top-6 lg:self-start">
-                <FiltersPanel filters={filters} onChange={setFilters} />
+                <FiltersPanel
+                  filters={filters}
+                  onChange={setFilters}
+                  sourceMode={activeSourceMode}
+                />
 
                 <div className="overflow-hidden rounded-[1.75rem] border border-slate-900 bg-slate-950 p-5 text-white shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
                   <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-blue-200">
