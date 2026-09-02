@@ -80,6 +80,14 @@ export function ResultsTable({
                   </td>
                   <td className="px-4 py-4">
                     <div className="font-semibold text-slate-950">{lead.name}</div>
+                    {lead.headline ? (
+                      <div
+                        className="mt-1 max-w-[280px] truncate text-xs font-medium text-slate-500"
+                        title={lead.headline}
+                      >
+                        {lead.headline}
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-4 py-4">{lead.mobile || '—'}</td>
                   <td className="px-4 py-4">{lead.email || '—'}</td>

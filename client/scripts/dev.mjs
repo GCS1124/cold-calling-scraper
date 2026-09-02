@@ -42,20 +42,9 @@ const shutdown = (signal = 'SIGTERM') => {
   }
 };
 
-process.on('SIGINT', () => {
-  shutdown('SIGINT');
-  process.exit(130);
-});
-
-process.on('SIGTERM', () => {
-  shutdown('SIGTERM');
-  process.exit(143);
-});
-
 for (const child of children) {
   child.on('exit', (code) => {
     if (shuttingDown) {
-      process.exit(code ?? 0);
       return;
     }
 
@@ -70,3 +59,13 @@ for (const child of children) {
     process.exit(code ?? 0);
   });
 }
+
+process.on('SIGINT', () => {
+  shutdown('SIGINT');
+  process.exit(130);
+});
+
+process.on('SIGTERM', () => {
+  shutdown('SIGTERM');
+  process.exit(143);
+});

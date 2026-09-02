@@ -15,16 +15,23 @@ type SearchFormProps = {
   value: SearchDraft;
   loading: boolean;
   onChange: Dispatch<SetStateAction<SearchDraft>>;
+  onSourceModeChange: (sourceMode: SearchDraft['sourceMode']) => void;
   onSubmit: () => void;
 };
 
-export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormProps) {
+export function SearchForm({
+  value,
+  loading,
+  onChange,
+  onSourceModeChange,
+  onSubmit,
+}: SearchFormProps) {
   const isLinkedInMode = value.sourceMode === 'linkedin';
   const companyTypePlaceholder = isLinkedInMode
-    ? 'founder, CEO, operations manager, marketing director'
+    ? 'dentist, HVAC contractor, dental clinic'
     : 'dentist, plumber, roofer, HVAC contractor';
   const companyTypeHelp = isLinkedInMode
-    ? 'Tailored to public LinkedIn search: try founder, owner, CEO, manager, agency partner, or other decision-maker roles.'
+    ? 'Enter a business category. Public LinkedIn discovery expands it across founders, owners, CEOs, and relevant decision-makers.'
     : 'Tailored to Google Business listings: try dentist, orthodontist, plumber, roofer, HVAC contractor, real estate agent, attorney, urgent care, mechanic, or commercial cleaning.';
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -51,8 +58,16 @@ export function SearchForm({ value, loading, onChange, onSubmit }: SearchFormPro
                     ? 'bg-white text-slate-950 shadow-sm'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
+                disabled={loading}
                 key={option.code}
-                onClick={() => onChange((current) => ({ ...current, sourceMode: option.code }))}
+                onClick={() => {
+                  if (option.code === value.sourceMode) {
+                    return;
+                  }
+
+                  onChange((current) => ({ ...current, sourceMode: option.code }));
+                  onSourceModeChange(option.code);
+                }}
                 type="button"
                 aria-pressed={active}
               >

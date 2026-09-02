@@ -49,4 +49,19 @@ describe('buildDiscoveryQueryVariants', () => {
       ),
     ).toBe(true);
   });
+
+  it('includes mapped profile aliases for broader public LinkedIn coverage', () => {
+    const profile = resolveCategoryProfile('Dentist');
+    const queries = buildDiscoveryQueryVariants('Dentist', austinLocation, profile);
+
+    expect(queries).toContain('dentists in Austin, TX');
+  });
+
+  it('singularizes custom plural business inputs for public discovery', () => {
+    const profile = resolveCategoryProfile('Solar installers');
+    const queries = buildDiscoveryQueryVariants('Solar installers', austinLocation, profile);
+
+    expect(queries).toContain('Solar installers in Austin, TX');
+    expect(queries).toContain('Solar installer in Austin, TX');
+  });
 });

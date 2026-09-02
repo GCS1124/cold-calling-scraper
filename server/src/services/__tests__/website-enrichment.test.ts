@@ -58,4 +58,28 @@ describe('extractContactDetailsFromHtml', () => {
     expect(extracted.emails).toContain('info@parmerlaneortho.com');
     expect(extracted.emails).not.toContain('info@parmerlaneortho.comhomeaboutpatients');
   });
+
+  it('extracts contacts from nested JSON-LD contact points', () => {
+    const html = `
+      <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "Austin Trade Group",
+          "contactPoint": [
+            {
+              "@type": "ContactPoint",
+              "telephone": "+1 512 555 0444",
+              "email": "office@austintradegroup.com"
+            }
+          ]
+        }
+      </script>
+    `;
+
+    const extracted = extractContactDetailsFromHtml(html);
+
+    expect(extracted.emails).toContain('office@austintradegroup.com');
+    expect(extracted.phones).toContain('+1 512 555 0444');
+  });
 });

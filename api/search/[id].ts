@@ -1,4 +1,8 @@
-import { vercelSearchService } from '../../server/src/services/vercel-search-service.js';
+import { waitUntil } from '@vercel/functions';
+import { getSearchJobSnapshot } from '../../server/src/services/search-job-snapshot.js';
+import { getVercelSearchService } from '../_lib/vercel-search-service.js';
+
+const activeSearchStatuses = new Set(['queued', 'discovering', 'enriching']);
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'GET') {
@@ -13,10 +17,21 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const response = await vercelSearchService.getSearch(searchId);
+    res.setHeader?.('Cache-Control', 'no-store, max-age=0');
+    const response = await getSearchJobSnapshot(searchId);
     if (!response) {
       res.status(204).end();
       return;
+    }
+
+    if (activeSearchStatuses.has(response.meta.status)) {
+      waitUntil(
+        getVercelSearchService()
+          .then((service) => service.advanceSearch(searchId))
+          .catch((error) => {
+            console.error('[api/search/:id] background search failed', error);
+          }),
+      );
     }
 
     res.status(200).json(response);

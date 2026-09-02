@@ -160,6 +160,24 @@ describe('location-acceptance', () => {
     );
   });
 
+  it('does not mistake prose or foreign addresses for a US state abbreviation', () => {
+    const foreignAddress = makeLead({
+      address:
+        'Shop 14, in front of Prem Form House, Chipiyana Buzurg, Ghaziabad, Uttar Pradesh 201002, India',
+      city: 'Ghaziabad, Uttar Pradesh',
+      stateCode: 'IN',
+    });
+    const indianaAddress = makeLead({
+      id: 'lead-2',
+      address: '100 Main Street, Indianapolis, IN 46201',
+      city: 'Indianapolis, IN',
+      stateCode: 'IN',
+    });
+
+    expect(leadMatchesLocation(foreignAddress, centralTimeLocation)).toBe(false);
+    expect(leadMatchesLocation(indianaAddress, centralTimeLocation)).toBe(true);
+  });
+
   it('keeps state-shaped local searches on the confirmed state only', () => {
     const inStateLead = makeLead({
       address: '1000 Capitol Mall, Sacramento, CA 95814',

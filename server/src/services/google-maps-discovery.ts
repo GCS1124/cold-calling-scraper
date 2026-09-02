@@ -263,9 +263,16 @@ export const discoverUsLeadsFromGoogleMaps = async ({
         break;
       }
 
+      const remainingNavigationMs = deadlineMs
+        ? deadlineMs - Date.now()
+        : 12_000;
+      if (remainingNavigationMs <= 0) {
+        break;
+      }
+
       await page.goto(`https://www.google.com/maps/search/${encodeURIComponent(query)}`, {
         waitUntil: 'domcontentloaded',
-        timeout: 12000,
+        timeout: Math.min(12_000, remainingNavigationMs),
       });
 
       const acceptButton = page.locator('button:has-text("Accept all")').first();
@@ -273,7 +280,13 @@ export const discoverUsLeadsFromGoogleMaps = async ({
         await acceptButton.click().catch(() => undefined);
       }
 
-      await page.waitForTimeout(600);
+      const remainingAfterNavigationMs = deadlineMs
+        ? deadlineMs - Date.now()
+        : 600;
+      if (remainingAfterNavigationMs <= 0) {
+        break;
+      }
+      await page.waitForTimeout(Math.min(600, remainingAfterNavigationMs));
 
       const body = (await page.textContent('body')) ?? '';
       if (blockedPattern.test(body) || /\/sorry\//i.test(page.url())) {
@@ -308,7 +321,13 @@ export const discoverUsLeadsFromGoogleMaps = async ({
         } else {
           await page.mouse.wheel(0, 3500);
         }
-        await page.waitForTimeout(500);
+        const remainingAfterScrollMs = deadlineMs
+          ? deadlineMs - Date.now()
+          : 500;
+        if (remainingAfterScrollMs <= 0) {
+          break;
+        }
+        await page.waitForTimeout(Math.min(500, remainingAfterScrollMs));
       }
     }
 

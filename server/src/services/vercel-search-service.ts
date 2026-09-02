@@ -5,7 +5,6 @@ import type { ProviderWarning, SearchProgress, SearchRequest, SearchResponse, Se
 import { deduplicateLeads } from './lead-deduplication';
 import { enrichLead } from './lead-validation';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
-import { discoverUsLeadsFromGoogleMaps } from './google-maps-discovery';
 import {
   discoverUsLeadsFromLinkedinSearch,
   type LinkedInDiscoveryResult,
@@ -32,6 +31,8 @@ import {
 type VercelSearchService = {
   startSearch: (request: SearchRequest) => Promise<SearchResponse>;
   getSearch: (searchId: string) => Promise<SearchResponse | null>;
+  getSearchSnapshot: (searchId: string) => Promise<SearchResponse | null>;
+  advanceSearch: (searchId: string) => Promise<SearchResponse | null>;
 };
 
 type VercelSearchServiceDeps = {
@@ -52,10 +53,23 @@ type VercelSearchServiceDeps = {
     deadlineMs?: number;
   }) => Promise<LinkedInDiscoveryResult>;
   enrichLinkedinLeads?: typeof enrichLinkedinLeadsWithPublicContacts;
-  discoverOsmLeads?: typeof discoverUsLeadsFromOsm;
+  discoverOsmLeads?: (args: {
+    request: { companyType: string; count: number };
+    location: NormalizedUsLocation;
+    profile: ReturnType<typeof resolveCategoryProfile>;
+    deadlineMs?: number;
+  }) => Promise<Lead[]>;
   enrichWebsiteLead?: (lead: Lead) => Promise<unknown>;
   now?: () => number;
   idFactory?: () => string;
+};
+
+const discoverGoogleMapsLeadsOnDemand: NonNullable<
+  VercelSearchServiceDeps['discoverGoogleMapsLeads']
+> = async (args) => {
+  // Keep Playwright and Chromium out of LinkedIn serverless cold starts.
+  const { discoverUsLeadsFromGoogleMaps } = await import('./google-maps-discovery.js');
+  return discoverUsLeadsFromGoogleMaps(args);
 };
 
 const jobTtlMs = 15 * 60 * 1000;
@@ -73,11 +87,12 @@ const getGooglePlacesTimeoutMs = (requestedCount: number) =>
 const getGoogleMapsTimeoutMs = (requestedCount: number) =>
   requestedCount >= 50 ? 15_000 : 8_000;
 const getLinkedinProfileDiscoveryWindowMs = (requestedCount: number) =>
-  requestedCount >= 50 ? 25_000 : 18_000;
+  requestedCount >= 50 ? 30_000 : 20_000;
 const getLinkedinContactEnrichmentWindowMs = (requestedCount: number) =>
-  requestedCount >= 50 ? 22_000 : 14_000;
+  requestedCount >= 50 ? 24_000 : 14_000;
 const getMaxTickDurationMs = (requestedCount: number) =>
-  requestedCount >= 50 ? 55_000 : 35_000;
+  requestedCount >= 50 ? 45_000 : 30_000;
+const processingLeaseMs = 70_000;
 
 const withNow = () => Date.now();
 
@@ -149,6 +164,11 @@ const dedupeWithCount = (leads: Lead[]) => {
 const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
   rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
 
+const finalizeLeads = (job: SearchJobRecord) => {
+  job.leads = rankDiscoveryCandidates(job.leads).slice(0, job.request.count);
+  refreshProgress(job);
+};
+
 const mergeLeads = (
   job: SearchJobRecord,
   incoming: Lead[],
@@ -173,7 +193,6 @@ const runLinkedinDiscovery = async (
   request: SearchRequest,
   location: NormalizedUsLocation,
   discoverLinkedinLeads: NonNullable<VercelSearchServiceDeps['discoverLinkedinLeads']>,
-  enrichLinkedinLeads: VercelSearchServiceDeps['enrichLinkedinLeads'],
   now: () => number,
 ) => {
   job.progress.currentSource = leadSourceModeLabels.linkedin;
@@ -202,32 +221,37 @@ const runLinkedinDiscovery = async (
   }
 
   mergeLeads(job, linkedinResult.leads, now);
+  job.progress.batchesCompleted += 1;
+};
 
-  if (enrichLinkedinLeads) {
-    job.status = 'enriching';
-    job.progress.discovered = linkedinResult.leads.length;
-    job.progress.totalCandidates = linkedinResult.leads.length;
+const runLinkedinEnrichment = async (
+  job: SearchJobRecord,
+  request: SearchRequest,
+  location: NormalizedUsLocation,
+  enrichLinkedinLeads: NonNullable<VercelSearchServiceDeps['enrichLinkedinLeads']>,
+  now: () => number,
+) => {
+  job.progress.currentSource = 'Public Contact Enrichment';
+  job.progress.discovered = job.leads.length;
+  job.progress.totalCandidates = job.leads.length;
 
-    const contactResult = await enrichLinkedinLeads({
-      leads: linkedinResult.leads,
-      request,
-      location,
-      deadlineMs: now() + getLinkedinContactEnrichmentWindowMs(request.count),
-      onProgress: (completed) => {
-        job.progress.enriched = completed;
-        job.updatedAt = now();
-      },
-    });
+  const contactResult = await enrichLinkedinLeads({
+    leads: job.leads,
+    request,
+    location,
+    deadlineMs: now() + getLinkedinContactEnrichmentWindowMs(request.count),
+    onProgress: (completed) => {
+      job.progress.enriched = completed;
+      job.updatedAt = now();
+    },
+  });
 
-    for (const warning of contactResult.warnings) {
-      appendWarningOnce(job, warning);
-    }
-
-    job.progress.enriched = contactResult.enrichedCount;
-    mergeLeads(job, contactResult.leads, now, false);
+  for (const warning of contactResult.warnings) {
+    appendWarningOnce(job, warning);
   }
 
-  job.progress.batchesCompleted += 1;
+  job.progress.enriched = contactResult.enrichedCount;
+  mergeLeads(job, contactResult.leads, now, false);
 };
 
 const buildQuery = (companyType: string, location: NormalizedUsLocation) =>
@@ -239,7 +263,7 @@ const discoverRegionLeads = async (
   discoveryLocation: NormalizedUsLocation,
   googlePlaces: typeof googlePlacesProvider,
   discoverGoogleMapsLeads: VercelSearchServiceDeps['discoverGoogleMapsLeads'],
-  discoverOsmLeads: typeof discoverUsLeadsFromOsm,
+  discoverOsmLeads: NonNullable<VercelSearchServiceDeps['discoverOsmLeads']>,
   now: () => number,
   profile = resolveCategoryProfile(request.companyType),
   deadlineMs = Date.now() + getMaxTickDurationMs(request.count),
@@ -291,6 +315,7 @@ const discoverRegionLeads = async (
         request: googleRequest,
         location: discoveryLocation,
         profile,
+        deadlineMs,
       });
     }
   } catch (error) {
@@ -358,6 +383,7 @@ const tickJob = async (
     >,
 ): Promise<SearchJobRecord> => {
   let targetLocation = job.targetLocation as NormalizedUsLocation | undefined;
+  const shouldInitializeLocation = !targetLocation;
 
   if (!targetLocation) {
     try {
@@ -384,14 +410,16 @@ const tickJob = async (
 
   const sourceMode: LeadSourceMode = normalizeLeadSourceMode(job.request.sourceMode);
 
-  if (!job.searchSeeds.length) {
+  if (shouldInitializeLocation) {
     job.locationLabel = targetLocation.label;
     job.locationMode = targetLocation.mode;
     job.query =
       targetLocation.mode === 'nationwide'
         ? `${job.request.companyType} in United States`
         : buildQuery(job.request.companyType, targetLocation);
-    job.providerWarnings.push(...targetLocation.warnings);
+    for (const warning of targetLocation.warnings) {
+      appendWarningOnce(job, warning);
+    }
   }
 
   if (sourceMode === 'linkedin') {
@@ -412,17 +440,41 @@ const tickJob = async (
       return job;
     }
 
-    job.status = 'discovering';
-    job.progress.currentSource = leadSourceModeLabels.linkedin;
     try {
-      await runLinkedinDiscovery(
-        job,
-        job.request,
-        targetLocation,
-        discoverLinkedinLeads,
-        deps.enrichLinkedinLeads,
-        deps.now,
-      );
+      if (job.status !== 'enriching') {
+        job.status = 'discovering';
+        job.progress.currentSource = leadSourceModeLabels.linkedin;
+        job.updatedAt = deps.now();
+        // Persist the phase before the network work so overlapping polls see a
+        // truthful in-progress snapshot instead of starting from "queued".
+        await store.upsert(job);
+      }
+
+      if (job.status === 'enriching' && deps.enrichLinkedinLeads && job.leads.length) {
+        await runLinkedinEnrichment(
+          job,
+          job.request,
+          targetLocation,
+          deps.enrichLinkedinLeads,
+          deps.now,
+        );
+      } else {
+        await runLinkedinDiscovery(
+          job,
+          job.request,
+          targetLocation,
+          discoverLinkedinLeads,
+          deps.now,
+        );
+
+        if (deps.enrichLinkedinLeads && job.leads.length) {
+          job.status = 'enriching';
+          job.progress.currentSource = 'Public Contact Enrichment';
+          job.updatedAt = withNow();
+          await store.upsert(job);
+          return job;
+        }
+      }
     } catch (error) {
       appendWarningOnce(job, {
         providerId: 'linkedin-search',
@@ -439,6 +491,7 @@ const tickJob = async (
       return job;
     }
     job.discoveryComplete = true;
+    finalizeLeads(job);
     job.status = 'complete';
     job.progress.currentSource = 'Complete';
     refreshProgress(job);
@@ -484,7 +537,7 @@ const tickJob = async (
         targetLocation,
         regionalLocation,
         deps.googlePlaces,
-        deps.discoverGoogleMapsLeads ?? discoverUsLeadsFromGoogleMaps,
+        deps.discoverGoogleMapsLeads,
         deps.discoverOsmLeads,
         deps.now,
         resolveCategoryProfile(job.request.companyType),
@@ -520,6 +573,7 @@ const tickJob = async (
   }
 
   if (job.progress.foundCount >= job.request.count || job.discoveryComplete) {
+    finalizeLeads(job);
     job.status = 'complete';
     job.progress.currentSource = 'Complete';
   } else {
@@ -541,11 +595,12 @@ export const createVercelSearchServiceWithDeps = (
   deps: VercelSearchServiceDeps,
 ): VercelSearchService => {
   const store = deps.store ?? createSearchJobStore();
+  const inFlightTicks = new Map<string, Promise<SearchJobRecord>>();
   const googlePlaces = deps.googlePlaces ?? googlePlacesProvider;
   const normalizeLocation = deps.normalizeLocation ?? normalizeUsLocation;
   const discoverGoogleMapsLeads =
     deps.discoverGoogleMapsLeads ??
-    (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromGoogleMaps);
+    (process.env.NODE_ENV === 'test' ? undefined : discoverGoogleMapsLeadsOnDemand);
   const discoverLinkedinLeads =
     deps.discoverLinkedinLeads ??
     (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
@@ -555,6 +610,73 @@ export const createVercelSearchServiceWithDeps = (
   const discoverOsm = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
+
+  const getStoredSearch = async (searchId: string) => {
+    await store.ensureSchema();
+
+    const job = await store.get(searchId);
+    return job ? toSearchResponse(job) : null;
+  };
+
+  const advanceSearch = async (searchId: string) => {
+    await store.ensureSchema();
+
+    const job = await store.get(searchId);
+    if (!job) {
+      return null;
+    }
+
+    // Keep one provider tick per warm function instance. The durable snapshot
+    // remains the source of truth when another request overlaps this work.
+    const existingTick = inFlightTicks.get(searchId);
+    if (existingTick) {
+      return toSearchResponse(job);
+    }
+
+    const processingToken = randomUUID();
+    const claimedJob = await store.claim(
+      searchId,
+      now(),
+      processingLeaseMs,
+      processingToken,
+    );
+
+    if (!claimedJob) {
+      const latestJob = await store.get(searchId);
+      return latestJob ? toSearchResponse(latestJob) : null;
+    }
+
+    const tick = tickJob(claimedJob, store, {
+      googlePlaces,
+      normalizeLocation,
+      discoverGoogleMapsLeads,
+      discoverLinkedinLeads,
+      enrichLinkedinLeads,
+      discoverOsmLeads: discoverOsm,
+      now,
+    });
+    inFlightTicks.set(searchId, tick);
+
+    try {
+      return toSearchResponse(await tick);
+    } finally {
+      if (inFlightTicks.get(searchId) === tick) {
+        inFlightTicks.delete(searchId);
+      }
+
+      try {
+        const latestJob = await store.get(searchId);
+        if (latestJob?.processingToken === processingToken) {
+          latestJob.processingToken = undefined;
+          latestJob.processingUntil = undefined;
+          latestJob.updatedAt = now();
+          await store.upsert(latestJob);
+        }
+      } catch (error) {
+        console.error('[vercel-search-service] failed to release search lease', error);
+      }
+    }
+  };
 
   return {
     async startSearch(request) {
@@ -589,25 +711,11 @@ export const createVercelSearchServiceWithDeps = (
     },
 
     async getSearch(searchId) {
-      await store.ensureSchema();
-      await store.deleteExpired(now());
-
-      const job = await store.get(searchId);
-      if (!job) {
-        return null;
-      }
-
-      const next = await tickJob(job, store, {
-        googlePlaces,
-        normalizeLocation,
-        discoverGoogleMapsLeads,
-        discoverLinkedinLeads,
-        enrichLinkedinLeads,
-        discoverOsmLeads: discoverOsm,
-        now,
-      });
-      return toSearchResponse(next);
+      return advanceSearch(searchId);
     },
+
+    getSearchSnapshot: getStoredSearch,
+    advanceSearch,
   };
 };
 

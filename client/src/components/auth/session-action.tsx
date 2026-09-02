@@ -1,5 +1,5 @@
 import { LogIn, LogOut } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -12,17 +12,6 @@ type SessionActionProps = {
 export function SessionAction({ auth }: SessionActionProps) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
-  const [pendingRedirect, setPendingRedirect] = useState(false);
-
-  useEffect(() => {
-    if (!pendingRedirect || auth.user) {
-      return;
-    }
-
-    navigate('/', { replace: true });
-    setBusy(false);
-    setPendingRedirect(false);
-  }, [auth.user, navigate, pendingRedirect]);
 
   const handleSignOut = async () => {
     setBusy(true);
@@ -30,9 +19,10 @@ export function SessionAction({ auth }: SessionActionProps) {
     try {
       await auth.signOut();
       toast.success('Signed out');
-      setPendingRedirect(true);
+      navigate('/', { replace: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Sign out failed');
+    } finally {
       setBusy(false);
     }
   };

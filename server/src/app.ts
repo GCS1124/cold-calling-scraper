@@ -2,10 +2,26 @@ import cors from 'cors';
 import express from 'express';
 
 import { createSearchRouter, type SearchService } from './routes/search';
-import { searchService } from './services/search-orchestrator';
 
 type AppDeps = {
   search?: SearchService;
+};
+
+const createLazySearchService = (): SearchService => {
+  let servicePromise: Promise<SearchService> | undefined;
+
+  const getService = () => {
+    servicePromise ??= import('./services/search-orchestrator').then(
+      ({ searchService }) => searchService,
+    );
+
+    return servicePromise;
+  };
+
+  return {
+    startSearch: async (request) => (await getService()).startSearch(request),
+    getSearch: async (searchId) => (await getService()).getSearch(searchId),
+  };
 };
 
 export const createApp = (deps: AppDeps = {}) => {
@@ -16,7 +32,7 @@ export const createApp = (deps: AppDeps = {}) => {
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
-  app.use('/api/search', createSearchRouter(deps.search ?? searchService));
+  app.use('/api/search', createSearchRouter(deps.search ?? createLazySearchService()));
 
   return app;
 };

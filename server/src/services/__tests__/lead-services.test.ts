@@ -88,6 +88,30 @@ describe('enrichLead', () => {
     expect(enriched.hasWebsite).toBe(false);
     expect(enriched.website).toBe('');
   });
+
+  it('does not treat a lookalike domain as a LinkedIn profile listing', () => {
+    const enriched = enrichLead({
+      id: 'lookalike-linkedin-lead',
+      name: 'Jordan Lee',
+      mobile: '',
+      email: '',
+      website: '',
+      address: '',
+      category: 'Dentist',
+      city: 'Austin, TX',
+      source: 'Public Web',
+      confidence: 80,
+      listingUrl: 'https://notlinkedin.com/in/jordan-lee',
+      hasEmail: false,
+      hasPhone: false,
+      hasWebsite: false,
+      verifiedPhone: false,
+      verifiedEmail: false,
+      scrapedAt: '2026-04-21T00:00:00.000Z',
+    });
+
+    expect(enriched.hasWebsite).toBe(true);
+  });
 });
 
 describe('deduplicateLeads', () => {

@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto';
 
+import { usStateProfiles } from '../data/us-states';
 import type { Lead } from '../types/lead';
 import type { ProviderWarning, SearchRequest } from '../types/search';
 import type { NormalizedUsLocation } from './us-location';
 import { buildDiscoverySeeds } from './discovery-seeds';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
+import { buildQueryTermVariants } from './query-term-variants';
+import { isPublicHttpUrl } from '../utils/public-url';
 
 type SearchResult = {
   title: string;
@@ -13,14 +16,44 @@ type SearchResult = {
   snippet: string;
 };
 
+type SearchSource = {
+  name: string;
+  label: string;
+  kind: 'markdown' | 'bing-html' | 'duckduckgo-html';
+  buildUrl: (query: string, page?: number) => string;
+  decodeUrl: (value: string) => string;
+};
+
+type ProviderSearchResult = {
+  results: SearchResult[];
+  failure?: 'blocked' | 'fetch';
+  message?: string;
+};
+
+type ProviderHealth = {
+  attempts: number;
+  failures: number;
+  blockedResponses: number;
+  disabled: boolean;
+  lastMessage: string;
+};
+
 type LinkedInCandidate = {
   title: string;
   name: string;
   headline?: string;
   profileUrl: string;
+  website?: string;
   snippet: string;
+  relevanceScore: number;
+  location?: PublicProfileLocation;
 };
 
+type PublicProfileLocation = {
+  city: string;
+  stateCode: string;
+  label: string;
+};
 type LinkedInRoleTerms = {
   primary: string[];
   category: string[];
@@ -32,45 +65,98 @@ export type LinkedInDiscoveryResult = {
   blocked: boolean;
 };
 
-const maxQueries = 14;
-const searchTimeoutMs = 4500;
+const readBoundedNumber = (
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+) => {
+  const parsed = value?.trim() ? Number(value) : Number.NaN;
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(maximum, Math.max(minimum, Math.round(parsed)));
+};
+
+const maxQueries = readBoundedNumber(
+  process.env.LINKEDIN_SEARCH_MAX_QUERIES,
+  20,
+  1,
+  40,
+);
+const searchTimeoutMs = readBoundedNumber(
+  process.env.LINKEDIN_SEARCH_TIMEOUT_MS,
+  4_500,
+  500,
+  15_000,
+);
+const queryBatchSize = 2;
+const providerFailureThreshold = 2;
+const queryCacheTtlMs = 15 * 60 * 1000;
+const maxQueryCacheEntries = 300;
+const publicSearchPageSize = 10;
 const sourceLabel = 'LinkedIn';
+const leadSourceLabel = 'LinkedIn, Public Profile';
 const providerId = 'linkedin-search';
 
+const queryCache = new Map<
+  string,
+  { expiresAt: number; result: ProviderSearchResult }
+>();
+
 const blockedBodyPatterns = [
-  /captcha/i,
-  /challenge/i,
+  /(?:captcha|human verification) required/i,
   /too many requests/i,
   /unusual traffic/i,
   /verify.*not a bot/i,
   /we detected unusual traffic/i,
   /access denied/i,
   /temporarily blocked/i,
-  /forbidden/i,
-  /robot/i,
+  /anomaly\.js/i,
+  /bots use duckduckgo/i,
 ];
 
-const searchSources = [
+const searchSources: SearchSource[] = [
   {
     name: 'brave',
     label: 'Brave Search',
-    buildUrl: (query: string) =>
-      `https://r.jina.ai/http://search.brave.com/search?q=${encodeURIComponent(query)}&source=web`,
+    kind: 'markdown',
+    buildUrl: (query: string, page = 0) =>
+      `https://r.jina.ai/http://search.brave.com/search?q=${encodeURIComponent(query)}&source=web&offset=${page * publicSearchPageSize}`,
     decodeUrl: (value: string) => value,
   },
   {
     name: 'bing',
     label: 'Bing',
-    buildUrl: (query: string) =>
-      `https://r.jina.ai/http://www.bing.com/search?q=${encodeURIComponent(query)}`,
+    kind: 'bing-html',
+    buildUrl: (query: string, page = 0) =>
+      `https://www.bing.com/search?q=${encodeURIComponent(query)}&cc=us&setlang=en-us&first=${page * publicSearchPageSize + 1}&count=${publicSearchPageSize}`,
     decodeUrl: (value: string) => decodeBingUrl(value),
   },
-] as const;
+  {
+    name: 'duckduckgo',
+    label: 'DuckDuckGo',
+    kind: 'duckduckgo-html',
+    buildUrl: (query: string, page = 0) =>
+      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&s=${page * publicSearchPageSize}&dc=${page * publicSearchPageSize + 1}`,
+    decodeUrl: (value: string) => decodeDuckDuckGoUrl(value),
+  },
+];
 
 const normalizeText = (value?: string | null) =>
   (value ?? '')
     .replace(/\s+/g, ' ')
     .trim();
+
+const decodeCodePoint = (value: string, radix: number) => {
+  const codePoint = Number.parseInt(value, radix);
+
+  return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+    ? String.fromCodePoint(codePoint)
+    : '';
+};
 
 const decodeHtmlEntities = (value: string) =>
   value
@@ -78,14 +164,20 @@ const decodeHtmlEntities = (value: string) =>
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&ndash;/g, '–')
+    .replace(/&mdash;/g, '—')
+    .replace(/&hellip;/g, '…')
+    .replace(/&middot;/g, '·')
+    .replace(/&bull;/g, '•')
+    .replace(/&lsquo;/g, '‘')
+    .replace(/&rsquo;/g, '’')
+    .replace(/&ldquo;/g, '“')
+    .replace(/&rdquo;/g, '”')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
-      String.fromCodePoint(Number.parseInt(hex, 16)),
-    )
-    .replace(/&#([0-9]+);/g, (_, decimal: string) =>
-      String.fromCodePoint(Number.parseInt(decimal, 10)),
-    );
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => decodeCodePoint(hex, 16))
+    .replace(/&#([0-9]+);/g, (_, decimal: string) => decodeCodePoint(decimal, 10));
 
 const stripMarkdown = (value: string) =>
   decodeHtmlEntities(
@@ -97,6 +189,51 @@ const stripMarkdown = (value: string) =>
   );
 
 const extractUrls = (value: string) => Array.from(value.matchAll(/https?:\/\/[^\s<>"')\]]+/gi), (match) => match[0]);
+
+const excludedPublicWebsiteHosts = new Set([
+  'bing.com',
+  'brave.com',
+  'duckduckgo.com',
+  'facebook.com',
+  'google.com',
+  'healthgrades.com',
+  'instagram.com',
+  'linkedin.com',
+  'opencare.com',
+  'r.jina.ai',
+  'twitter.com',
+  'wikipedia.org',
+  'x.com',
+  'yelp.com',
+  'yellowpages.com',
+]);
+
+const extractPublicWebsite = (...values: string[]) => {
+  for (const value of values) {
+    for (const rawUrl of extractUrls(value)) {
+      try {
+        const url = new URL(rawUrl.replace(/[),.;:!?]+$/, ''));
+        const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+
+        if (
+          !isPublicHttpUrl(url) ||
+          [...excludedPublicWebsiteHosts].some(
+            (host) => hostname === host || hostname.endsWith(`.${host}`),
+          )
+        ) {
+          continue;
+        }
+
+        url.hash = '';
+        return url.toString();
+      } catch {
+        // Search snippets can contain truncated or malformed URLs.
+      }
+    }
+  }
+
+  return undefined;
+};
 
 const decodeBingUrl = (value: string) => {
   try {
@@ -113,10 +250,76 @@ const decodeBingUrl = (value: string) => {
   }
 };
 
+const decodeDuckDuckGoUrl = (value: string) => {
+  try {
+    const normalized = value.startsWith('//') ? `https:${value}` : value;
+    const url = new URL(normalized, 'https://duckduckgo.com');
+    const destination = url.searchParams.get('uddg');
+
+    return destination ? decodeURIComponent(destination) : normalized;
+  } catch {
+    return value;
+  }
+};
+
+const getCachedProviderResult = (key: string) => {
+  if (process.env.NODE_ENV === 'test') {
+    return undefined;
+  }
+
+  const cached = queryCache.get(key);
+  if (!cached) {
+    return undefined;
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    queryCache.delete(key);
+    return undefined;
+  }
+
+  return cached.result;
+};
+
+const setCachedProviderResult = (key: string, result: ProviderSearchResult) => {
+  // Empty responses can be caused by provider drift or geo/rate-limit pages
+  // that still return HTTP 200. Do not turn one transient miss into a 15-minute
+  // false zero-result search.
+  if (process.env.NODE_ENV === 'test' || result.failure || !result.results.length) {
+    return;
+  }
+
+  if (queryCache.size >= maxQueryCacheEntries) {
+    const oldestKey = queryCache.keys().next().value as string | undefined;
+    if (oldestKey) {
+      queryCache.delete(oldestKey);
+    }
+  }
+
+  queryCache.set(key, {
+    expiresAt: Date.now() + queryCacheTtlMs,
+    result,
+  });
+};
+
 const createId = (value: string) =>
   `linkedin-${createHash('sha1').update(value).digest('hex')}`;
 
-const unique = (values: string[]) => [...new Set(values.map(normalizeText).filter(Boolean))];
+const unique = (values: string[]) => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values.map(normalizeText).filter(Boolean)) {
+    const key = value.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(value);
+  }
+
+  return result;
+};
 
 const normalizeQueryTerm = (value: string) =>
   normalizeText(value)
@@ -127,11 +330,32 @@ const normalizeQueryTerm = (value: string) =>
 
 const buildCompanyTerms = (request: SearchRequest, profile: ReturnType<typeof resolveCategoryProfile>) =>
   unique([
+    ...buildQueryTermVariants(request.companyType),
     ...profile.searchTerms,
     ...(profile.aliases ?? []),
     request.companyType,
     profile.label,
   ]).slice(0, 8);
+
+const buildAliasCompanyTerms = (
+  request: SearchRequest,
+  profile: ReturnType<typeof resolveCategoryProfile>,
+) => {
+  const canonicalKeys = new Set(
+    unique([
+      ...buildQueryTermVariants(request.companyType),
+      request.companyType,
+      profile.label,
+      ...profile.searchTerms,
+    ]).map((term) =>
+      normalizeQueryTerm(term).toLowerCase(),
+    ),
+  );
+
+  return unique(profile.aliases ?? [])
+    .filter((alias) => !canonicalKeys.has(normalizeQueryTerm(alias).toLowerCase()))
+    .slice(0, 4);
+};
 
 const selectPrimaryCompanyTerm = (request: SearchRequest, companyTerms: string[]) => {
   const requestedTerm = normalizeQueryTerm(request.companyType);
@@ -155,12 +379,21 @@ const selectSecondaryCompanyTerm = (companyTerms: string[], primaryCompany: stri
   companyTerms.find((term) => term !== primaryCompany) ??
   primaryCompany;
 
-const buildLocationTerms = (location: NormalizedUsLocation) =>
-  unique([
+const buildLocationTerms = (location: NormalizedUsLocation) => {
+  const discoverySeeds = buildDiscoverySeeds(location).map(normalizeQueryTerm);
+
+  if (location.mode === 'timezone' || location.mode === 'nationwide') {
+    // Search engines understand concrete metros much better than labels such as
+    // "Eastern Time", so broad searches rotate through representative cities.
+    return unique(discoverySeeds).slice(0, 10);
+  }
+
+  return unique([
     normalizeQueryTerm(location.label),
     normalizeQueryTerm(location.city || location.label),
-    ...buildDiscoverySeeds(location).slice(0, 5).map(normalizeQueryTerm),
-  ]).slice(0, 5);
+    ...discoverySeeds.slice(0, 8),
+  ]).slice(0, 8);
+};
 
 const buildRoleTerms = (request: SearchRequest, profile: ReturnType<typeof resolveCategoryProfile>): LinkedInRoleTerms => {
   const normalizedContext = normalizeText(
@@ -172,73 +405,405 @@ const buildRoleTerms = (request: SearchRequest, profile: ReturnType<typeof resol
   const primaryRoles = [
     'founder',
     'owner',
+    'co-owner',
     'business owner',
     'owner operator',
     'ceo',
+    'chief operating officer',
+    'coo',
+    'general manager',
+    'operations manager',
+    'field manager',
+    'branch manager',
+    'service manager',
+    'installation manager',
+    'dispatch manager',
+    'project manager',
+    'estimator',
+    'sales manager',
+    'account manager',
     'co-founder',
     'president',
     'managing partner',
+    'managing member',
+    'proprietor',
+    'franchisee',
+    'managing director',
+    'executive director',
     'principal',
     'director',
+    'director of operations',
+    'director of sales',
+    'operations director',
+    'sales director',
+    'vice president',
+    'vp',
+    'chief technology officer',
+    'cto',
+    'chief marketing officer',
+    'cmo',
+    'chief sales officer',
+    'cro',
+    'head of sales',
+    'head of growth',
+    'head of operations',
+    'regional manager',
+    'business development manager',
+    'business development director',
   ];
 
   const categoryRoles: string[] = [];
 
+  if (/(hospital|pharmacy|medical center|surgery center|health system|nursing)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'hospital administrator',
+      'pharmacy manager',
+      'practice administrator',
+      'clinical director',
+      'director of nursing',
+      'healthcare administrator',
+    );
+  }
+
   if (/(dentist|dental|orthodont|periodont|oral surgeon|clinic|urgent care|medical|veterin|health care|healthcare)/i.test(normalizedContext)) {
-    categoryRoles.push('practice owner', 'clinic owner', 'office manager', 'practice manager', 'medical director', 'dental director');
+    categoryRoles.push(
+      'practice owner',
+      'clinic owner',
+      'office manager',
+      'practice manager',
+      'medical director',
+      'office administrator',
+      'administrator',
+      'clinical director',
+      'dental director',
+      'provider',
+    );
   }
 
   if (/(hvac|plumb|electric|roof|clean|landscap|pest|move|auto repair|mechanic|car wash|service contractor|trade)/i.test(normalizedContext)) {
-    categoryRoles.push('general manager', 'operations manager', 'service manager', 'field manager', 'franchise owner');
+    categoryRoles.push(
+      'general manager',
+      'operations manager',
+      'service manager',
+      'service director',
+      'field manager',
+      'branch manager',
+      'installation manager',
+      'dispatch manager',
+      'project manager',
+      'estimator',
+      'sales manager',
+      'franchise owner',
+    );
   }
 
-  if (/(law|attorney|account|insurance|real estate|marketing|consult|software|saas|tech|agency)/i.test(normalizedContext)) {
-    categoryRoles.push('partner', 'vice president', 'head of growth', 'head of operations');
+  if (/(school|college|university|academy|education)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'school principal',
+      'superintendent',
+      'dean',
+      'admissions director',
+      'school administrator',
+      'education director',
+    );
   }
 
   if (/(restaurant|cafe|bakery|bar|hotel|grocery|clothing|electronics|furniture|salon|gym|school|college|day care|daycare)/i.test(normalizedContext)) {
-    categoryRoles.push('operator', 'store manager', 'general manager', 'franchise owner');
+    categoryRoles.push(
+      'operator',
+      'store owner',
+      'store manager',
+      'location manager',
+      'district manager',
+      'general manager',
+      'franchise owner',
+      'franchisee',
+    );
+  }
+
+  if (/(car dealership|dealership|automotive|auto dealer)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'dealer principal',
+      'fixed operations director',
+      'internet sales manager',
+      'automotive general manager',
+      'service director',
+      'sales director',
+    );
+  }
+
+  if (/(church|mosque|temple|synagogue|place of worship|religious)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'pastor',
+      'minister',
+      'rabbi',
+      'imam',
+      'executive pastor',
+      'church administrator',
+      'worship director',
+    );
   }
 
   if (/(ecommerce|e-commerce|d2c|direct to consumer|shopify|online store|brand)/i.test(normalizedContext)) {
-    categoryRoles.push('brand founder', 'ecommerce manager', 'head of ecommerce', 'd2c founder', 'brand owner');
+    categoryRoles.push(
+      'brand founder',
+      'ecommerce manager',
+      'head of ecommerce',
+      'd2c founder',
+      'brand owner',
+      'merchandising manager',
+    );
+  }
+
+  if (/(accounting|bookkeeping|tax|cpa|audit)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'tax partner',
+      'accounting manager',
+      'controller',
+      'firm administrator',
+      'managing accountant',
+    );
+  }
+
+  if (/(insurance|financial|wealth|bank|credit union|mortgage|brokerage)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'financial advisor',
+      'agency principal',
+      'insurance agency owner',
+      'wealth manager',
+      'mortgage broker',
+      'branch manager',
+    );
+  }
+
+  if (/(staffing|recruit|human resources|\bhr\b)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'staffing manager',
+      'recruiting manager',
+      'talent acquisition manager',
+      'recruiting director',
+      'branch manager',
+    );
+  }
+
+  if (/(logistics|trucking|freight|warehouse|fulfillment|courier|delivery)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'logistics manager',
+      'warehouse manager',
+      'supply chain manager',
+      'fleet manager',
+      'distribution manager',
+    );
+  }
+
+  if (/(manufactur|factory|industrial|production|distribution)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'plant manager',
+      'production manager',
+      'supply chain manager',
+      'quality manager',
+      'manufacturing director',
+    );
+  }
+
+  if (/(hotel|hospitality|resort|event|catering)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'hotel general manager',
+      'revenue manager',
+      'event director',
+      'food and beverage manager',
+      'hospitality manager',
+    );
+  }
+
+  if (/(fitness|gym|wellness|yoga|pilates|personal training|studio)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'studio owner',
+      'fitness director',
+      'gym manager',
+      'wellness director',
+      'membership director',
+    );
+  }
+
+  if (/(salon|spa|barber|beauty|esthetic)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'salon owner',
+      'spa director',
+      'salon manager',
+      'beauty director',
+      'studio owner',
+    );
+  }
+
+  if (/(property management|apartment|multifamily|leasing|commercial property)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'property manager',
+      'community manager',
+      'leasing manager',
+      'asset manager',
+      'property director',
+    );
+  }
+
+  if (/(nonprofit|non-profit|foundation|charity|community organization)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'development director',
+      'program director',
+      'fundraising director',
+      'volunteer coordinator',
+      'community director',
+    );
+  }
+
+  if (/(solar|renewable|clean energy|battery|wind energy)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'solar sales manager',
+      'energy consultant',
+      'renewable energy manager',
+      'project manager',
+      'installation manager',
+    );
+  }
+
+  if (/(construction|builder|general contractor|remodel|renovation)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'construction manager',
+      'superintendent',
+      'project executive',
+      'estimator',
+      'preconstruction manager',
+    );
+  }
+
+  if (/(security|alarm|surveillance|guard service)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'security operations manager',
+      'security director',
+      'branch manager',
+      'account manager',
+      'loss prevention manager',
+    );
+  }
+
+  if (/(home care|elder care|senior care|assisted living|nursing home)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'executive director',
+      'care administrator',
+      'director of nursing',
+      'care manager',
+      'resident care director',
+    );
+  }
+
+  if (/(child care|childcare|daycare|preschool|early learning)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'center director',
+      'childcare director',
+      'school director',
+      'program director',
+      'preschool director',
+    );
+  }
+
+  if (/(technology|software|cybersecurity|information technology|cloud services|saas)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'it director',
+      'engineering manager',
+      'vp of engineering',
+      'product manager',
+      'customer success director',
+    );
+  }
+
+  if (/(law|attorney|account|insurance|real estate|marketing|consult|software|saas|tech|agency)/i.test(normalizedContext)) {
+    categoryRoles.push(
+      'partner',
+      'managing attorney',
+      'founding partner',
+      'managing member',
+      'vice president',
+      'head of growth',
+      'head of operations',
+      'business development',
+      'account manager',
+    );
   }
 
   return {
-    primary: unique(primaryRoles).slice(0, 10),
+    primary: unique(primaryRoles).slice(0, 24),
     category: unique(categoryRoles).slice(0, 12),
   };
 };
 
-const buildLinkedInQuery = (company: string, location: string, role?: string) =>
+const quoteQueryTerm = (value: string) => {
+  const normalized = normalizeQueryTerm(value);
+  return normalized.includes(' ') ? `"${normalized}"` : normalized;
+};
+
+type LinkedInProfilePath = 'in' | 'pub';
+
+const buildLinkedInQuery = (
+  company: string,
+  location: string,
+  role?: string,
+  profilePath: LinkedInProfilePath = 'in',
+) =>
   normalizeText(
     [
-      'site:linkedin.com/in/',
-      role,
-      company,
-      location,
-      '-jobs',
-      '-company',
-      '-school',
-      '-posts',
-      '-learning',
+      `site:linkedin.com/${profilePath}/`,
+      role ? quoteQueryTerm(role) : '',
+      quoteQueryTerm(company),
+      quoteQueryTerm(location),
     ]
       .filter(Boolean)
       .join(' '),
   );
 
-const buildLinkedInQueryFromPhrase = (phrase: string) =>
+const buildLinkedInQueryFromPhrase = (
+  phrase: string,
+  profilePath: LinkedInProfilePath = 'in',
+) =>
   normalizeText(
-    [
-      'site:linkedin.com/in/',
-      phrase,
-      '-jobs',
-      '-company',
-      '-school',
-      '-posts',
-      '-learning',
-    ].join(' '),
+    [`site:linkedin.com/${profilePath}/`, phrase].filter(Boolean).join(' '),
   );
+
+const prioritizeRoleTerms = (genericRoleTerms: string[], categoryRoleTerms: string[]) => {
+  const genericCoverageOrder = [
+    'founder',
+    'chief operating officer',
+    'coo',
+    'general manager',
+    'field manager',
+    'operations manager',
+    'owner',
+    'ceo',
+    'branch manager',
+    'service manager',
+    'installation manager',
+    'dispatch manager',
+    'project manager',
+    'estimator',
+    'sales manager',
+    'account manager',
+  ];
+  const genericCoverage = unique([
+    ...genericCoverageOrder.map((role) =>
+      genericRoleTerms.find((term) => term.toLowerCase() === role) ?? '',
+    ),
+    ...genericRoleTerms,
+  ]);
+
+  // Keep one sector-specific role and the highest-signal general roles in the
+  // first query window, then rotate through the remaining sector roles.
+  return unique([
+    categoryRoleTerms[0] ?? '',
+    ...genericCoverage.slice(0, 6),
+    ...categoryRoleTerms.slice(1, 6),
+    ...genericCoverage.slice(6),
+    ...categoryRoleTerms.slice(6),
+  ]);
+};
 
 const normalizeLinkedInProfileUrl = (value?: string) => {
   const trimmed = value?.trim() ?? '';
@@ -249,24 +814,46 @@ const normalizeLinkedInProfileUrl = (value?: string) => {
 
   try {
     const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
-    if (!url.hostname.endsWith('linkedin.com')) {
+    const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+    if (hostname !== 'linkedin.com' && !hostname.endsWith('.linkedin.com')) {
       return null;
     }
 
     const segments = url.pathname.split('/').filter(Boolean);
-    if (segments[0]?.toLowerCase() !== 'in' || !segments[1]) {
-      return null;
-    }
+    const profilePath = segments[0]?.toLowerCase();
+    if ((profilePath !== 'in' && profilePath !== 'pub') || !segments[1]) {
+     return null;
+   }
 
-    const slug = segments[1].trim().toLowerCase();
+    const slug = segments[1].trim().toLowerCase().replace(/[.,;:!?]+$/, '');
     if (!slug) {
       return null;
     }
 
-    return `https://linkedin.com/in/${slug}`;
+    return `https://linkedin.com/${profilePath}/${slug}`;
   } catch {
     return null;
   }
+};
+
+const extractLinkedInProfileReference = (value: string) => {
+  const directMatch = value.match(
+    /(?:https?:\/\/)?(?:[a-z]{2,3}\.)?(?:www\.)?linkedin\.com\/(?:in|pub)\/[^\s<>")\]]+/i,
+  );
+  const directProfile = normalizeLinkedInProfileUrl(directMatch?.[0]);
+  if (directProfile) {
+    return directProfile;
+  }
+
+  const navigationMatch = value.match(
+    /linkedin\.com\s*[›>]\s*(in|pub)\s*[›>]\s*([a-z0-9][a-z0-9-]{1,120})/i,
+  );
+
+  return normalizeLinkedInProfileUrl(
+    navigationMatch?.[1] && navigationMatch[2]
+      ? `https://linkedin.com/${navigationMatch[1]}/${navigationMatch[2]}`
+      : undefined,
+  );
 };
 
 const isLinkedInProfileUrl = (value: string) => Boolean(normalizeLinkedInProfileUrl(value));
@@ -277,12 +864,18 @@ const slugToName = (value?: string) => {
     return '';
   }
 
-  const slug = normalized.split('/in/')[1]?.split(/[/?#]/)[0] ?? '';
+  const slug = normalized.match(/\/(?:in|pub)\/([^/?#]+)/i)?.[1] ?? '';
 
   return slug
     .split('-')
     .map((part) => part.trim())
-    .filter((part) => part && !/^\d+$/.test(part) && part.toLowerCase() !== 'profile')
+    .filter(
+      (part) =>
+        part &&
+        !/^\d+$/.test(part) &&
+        !/^(?=[a-z0-9]*\d)[a-z0-9]{6,}$/i.test(part) &&
+        part.toLowerCase() !== 'profile',
+    )
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
     .trim();
@@ -293,43 +886,353 @@ const hasLinkedInProfileSignals = (value: string) =>
     value,
   );
 
+const decisionMakerPattern =
+  /\b(founder|co-founder|co-owner|owner|owner operator|business owner|proprietor|franchisee|franchise owner|chief executive|ceo|chief operating officer|coo|chief technology officer|cto|chief marketing officer|cmo|chief sales officer|cro|president|principal|partner|managing partner|managing member|managing director|executive director|director|head of|vice president|vp|regional manager|branch manager|business development|business development manager|business development director|general manager|operations manager|operations director|office manager|practice manager|medical director|clinical director|dental director|administrator|service manager|service director|field manager|installation manager|dispatch manager|project manager|estimator|sales manager|account manager|store owner|store manager|location manager|district manager|operator|brand owner|brand founder|ecommerce manager|head of ecommerce|merchandising manager|hospital administrator|pharmacy manager|practice administrator|healthcare administrator|director of nursing|school principal|superintendent|dean|admissions director|school administrator|education director|dealer principal|fixed operations director|internet sales manager|automotive general manager|pastor|minister|rabbi|imam|executive pastor|church administrator|worship director|tax partner|accounting manager|controller|firm administrator|managing accountant|financial advisor|agency principal|insurance agency owner|wealth manager|mortgage broker|staffing manager|recruiting manager|talent acquisition manager|recruiting director|logistics manager|warehouse manager|supply chain manager|fleet manager|distribution manager|plant manager|production manager|quality manager|manufacturing director|hotel general manager|revenue manager|event director|food and beverage manager|hospitality manager|studio owner|fitness director|gym manager|wellness director|membership director|salon owner|spa director|salon manager|beauty director|property manager|community manager|leasing manager|asset manager|property director|development director|program director|fundraising director|volunteer coordinator|community director|solar sales manager|energy consultant|renewable energy manager|construction manager|superintendent|project executive|preconstruction manager|security operations manager|security director|loss prevention manager|care administrator|care manager|resident care director|center director|childcare director|school director|preschool director|it director|engineering manager|vp of engineering|product manager|customer success director)\b/i;
+const businessNamePattern =
+  /\b(clinic|dentist|dentists|dentistry|dental|orthodontics?|company|services|solutions|agency|group|associates|partners|llc|inc\.?|corp\.?|corporation|store|shop|school|university|hospital|restaurant|salon|spa|plumbing|roofing|heating|cooling|hvac)\b/i;
+const companyIdentityPattern =
+  /\b(clinic|dentistry|dental|company|services|solutions|agency|group|associates|partners|llc|inc\.?|corp\.?|corporation|store|shop|school|university|hospital|restaurant|salon|spa|plumbing|roofing|heating|cooling|hvac)\b/i;
+const nonLeadContextPattern =
+  /\b(student|researcher|professor|faculty|lecturer|intern|graduate|undergraduate|postdoctoral|phd candidate|academic)\b/i;
+const academicInstitutionPattern =
+  /\b(university|college|school of|medical school|dental school|graduate school|law school)\b/i;
+const credentialPattern =
+  /\b(dr\.?|dds|dmd|md|do|phd|cpa|esq\.?|jd|mba|rn|dvm)\b/gi;
+const credentialIdentityPattern =
+  /\b(dr\.?|dds|dmd|md|do|phd|cpa|esq\.?|jd|mba|rn|dvm)\b/i;
+const professionalTitlePattern =
+  /\b(dentist|orthodontist|periodontist|oral surgeon|doctor|physician|veterinarian|plumber|electrician|roofer|hvac|mechanic|attorney|lawyer|accountant|realtor|real estate agent|broker|consultant|architect|engineer|designer|developer|therapist|nurse|pharmacist|chiropractor|esthetician|barber|stylist|chef|advisor|analyst|strategist|specialist|technician)\b/i;
+const categoryStopWords = new Set([
+  'business',
+  'company',
+  'companies',
+  'contractor',
+  'contractors',
+  'service',
+  'services',
+  'agency',
+  'agencies',
+  'clinic',
+  'clinics',
+  'office',
+  'local',
+]);
+
+const normalizeMatchText = (value: string) =>
+  normalizeText(value)
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const publicStateCodeByValue = new Map(
+  usStateProfiles.flatMap((state) => [
+    [state.code.toLowerCase(), state.code],
+    [state.name.toLowerCase(), state.code],
+  ]),
+);
+const publicStatePattern = usStateProfiles
+  .flatMap((state) => [state.code, state.name])
+  .sort((left, right) => right.length - left.length)
+  .join('|');
+const publicStateNamePattern = usStateProfiles
+  .map((state) => state.name)
+  .sort((left, right) => right.length - left.length)
+  .join('|');
+const publicLocationPattern = new RegExp(
+  "\\b(?:based\\s+in|located\\s+in|serving|in|from)\\s+([A-Za-z][A-Za-z.'-]*(?:\\s+[A-Za-z][A-Za-z.'-]*){0,3}),\\s*(" + publicStatePattern + ")\\b",
+  'i',
+);
+const publicUnpunctuatedLocationNamePattern = new RegExp(
+  "\\b(?:based\\s+in|located\\s+in|serving|in|from)\\s+([A-Za-z][A-Za-z.'-]*(?:\\s+[A-Za-z][A-Za-z.'-]*){0,3})\\s+(" + publicStateNamePattern + ")\\b",
+  'i',
+);
+const publicUnpunctuatedLocationCodePattern =
+  /\b(?:based\s+in|located\s+in|serving|in|from)\s+([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,3})\s+([A-Z]{2})\b/i;
+const publicCityStatePattern = new RegExp(
+  "\\b([A-Za-z][A-Za-z.'-]*(?:\\s+[A-Za-z][A-Za-z.'-]*){0,3}),\\s*(" + publicStatePattern + ")\\b",
+  'i',
+);
+
+const normalizePublicCity = (value: string) =>
+  normalizeText(value)
+    .split(' ')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+
+const publicLocationNoiseWords = new Set([
+  'dds',
+  'dmd',
+  'dvm',
+  'esq',
+  'jd',
+  'mba',
+  'md',
+  'do',
+  'phd',
+  'cpa',
+  'rn',
+]);
+
+const extractPublicProfileLocation = (candidate: Pick<LinkedInCandidate, 'title' | 'headline' | 'snippet'>) => {
+  const searchable = normalizeText(`${candidate.title} ${candidate.headline ?? ''} ${candidate.snippet}`);
+  const match =
+    publicLocationPattern.exec(searchable) ??
+    publicUnpunctuatedLocationNamePattern.exec(searchable) ??
+    publicUnpunctuatedLocationCodePattern.exec(searchable) ??
+    publicCityStatePattern.exec(searchable);
+  const city = normalizePublicCity(match?.[1] ?? '');
+  const stateCode = publicStateCodeByValue.get((match?.[2] ?? '').toLowerCase()) ?? '';
+
+  if (
+    !city ||
+    city.length < 2 ||
+    publicLocationNoiseWords.has(normalizeMatchText(city)) ||
+    !stateCode
+  ) {
+    return undefined;
+  }
+
+  return {
+    city,
+    stateCode,
+    label: `${city}, ${stateCode}`,
+  } satisfies PublicProfileLocation;
+};
+const geographicQualifierPattern =
+  /^(?:greater\s+)?(?:north(?:west|east)?|south(?:west|east)?|east|west|central|downtown|metro(?:politan)?)\s+/i;
+
+const isLocationOrganizationName = (value: string, location: NormalizedUsLocation) => {
+  const normalizedName = normalizeMatchText(value);
+  const normalizedCity = normalizeMatchText(location.city);
+
+  if (!normalizedCity) {
+    return false;
+  }
+
+  return (
+    normalizedName === normalizedCity ||
+    normalizedName.replace(geographicQualifierPattern, '') === normalizedCity
+  );
+};
+
+const isLikelyPersonName = (value: string) => {
+  const normalized = normalizeText(value);
+  const withoutCredentials = normalizeText(normalized.replace(credentialPattern, ' '));
+  const words = withoutCredentials
+    .split(/\s+/)
+    .map((word) => word.replace(/[^\p{L}'-]/gu, ''))
+    .filter((word) => /\p{L}/u.test(word));
+
+  if (words.length < 2 || words.length > 7) {
+    return false;
+  }
+
+  if (decisionMakerPattern.test(withoutCredentials) || businessNamePattern.test(withoutCredentials)) {
+    return false;
+  }
+
+  return words.every((word) => word.length >= 2);
+};
+
+const buildCategoryEvidenceTerms = (
+  request: SearchRequest,
+  profile: ReturnType<typeof resolveCategoryProfile>,
+) => {
+  const phrases = unique([
+    request.companyType,
+    profile.label,
+    ...profile.searchTerms,
+    ...(profile.aliases ?? []),
+  ]).map(normalizeMatchText);
+  const significantWords = phrases.flatMap((phrase) =>
+    phrase
+      .split(' ')
+      .filter((word) => word.length >= 5 && !categoryStopWords.has(word)),
+  );
+
+  return unique([...phrases, ...significantWords]);
+};
+
+const matchesEvidence = (searchable: string, terms: string[]) =>
+  terms.some((term) => {
+    const normalizedTerm = normalizeMatchText(term);
+    if (!normalizedTerm) {
+      return false;
+    }
+
+    const escapedTerm = normalizedTerm
+      .replace(/[.*+?^${}()|[\[\]\\]/g, '\\$&')
+      .replace(/\s+/g, '\\s+');
+
+    return new RegExp(`(?:^|\\s)${escapedTerm}(?=$|\\s)`).test(searchable);
+  });
+
+const scoreCandidateRelevance = (
+  candidate: Omit<LinkedInCandidate, 'relevanceScore'>,
+  request: SearchRequest,
+  location: NormalizedUsLocation,
+) => {
+  if (
+    !isLikelyPersonName(candidate.name) ||
+    isLocationOrganizationName(candidate.name, location)
+  ) {
+    return 0;
+  }
+
+  const profile = resolveCategoryProfile(request.companyType);
+  const categoryTerms = buildCategoryEvidenceTerms(request, profile);
+  const locationTerms = buildLocationTerms(location).map(normalizeMatchText);
+  const identitySearchable = normalizeMatchText(
+    `${candidate.title} ${candidate.headline ?? ''}`,
+  );
+  const searchable = normalizeMatchText(
+    `${candidate.title} ${candidate.headline ?? ''} ${candidate.snippet}`,
+  );
+  const hasCategoryEvidence = matchesEvidence(searchable, categoryTerms);
+  const hasCategoryIdentityEvidence = matchesEvidence(identitySearchable, categoryTerms);
+  const hasRoleEvidence = decisionMakerPattern.test(identitySearchable);
+  const hasCredentialEvidence = credentialIdentityPattern.test(identitySearchable);
+  const hasProfessionalTitleEvidence = professionalTitlePattern.test(identitySearchable);
+  const hasLocationEvidence = matchesEvidence(searchable, locationTerms);
+  const hasProfileEvidence =
+    hasLinkedInProfileSignals(candidate.title) || hasLinkedInProfileSignals(candidate.snippet);
+
+  // A specific vertical must appear in the public result itself. This prevents
+  // an owner from an unrelated industry slipping through a broad search page.
+  if (!hasCategoryEvidence) {
+    return 0;
+  }
+
+  // A mapped category must be visible in the profile identity, not only in a
+  // search-engine snippet that may describe an unrelated page or employer.
+  if (
+    profile.key !== 'keyword-fallback' &&
+    !hasCategoryIdentityEvidence &&
+    !hasRoleEvidence
+  ) {
+    return 0;
+  }
+
+  // A business-shaped identity without a person role or professional marker
+  // is usually a company page published under a profile URL, not a lead.
+  if (
+    companyIdentityPattern.test(identitySearchable) &&
+    !hasRoleEvidence &&
+    !hasCredentialEvidence &&
+    !hasProfessionalTitleEvidence
+  ) {
+    return 0;
+  }
+
+  // Education profiles can rank for local practitioner queries because their
+  // institution name contains the requested category.
+  if (
+    profile.key !== 'schools' &&
+    profile.key !== 'colleges' &&
+    academicInstitutionPattern.test(identitySearchable)
+  ) {
+    return 0;
+  }
+
+  // Keep academic and training profiles out unless their identity also shows
+  // a decision-making role for the requested business category.
+  if (nonLeadContextPattern.test(identitySearchable) && !hasRoleEvidence) {
+    return 0;
+  }
+
+  // Local searches should not accept a profile that the public result places in
+  // another city, even when its category and role match the query.
+  if (location.mode === 'local' && !hasLocationEvidence) {
+    return 0;
+  }
+
+  let score = 35;
+  score += hasCategoryEvidence ? 28 : 0;
+  score += hasRoleEvidence ? 16 : 0;
+  score += hasLocationEvidence ? 12 : 0;
+  score += hasProfileEvidence ? 5 : 0;
+  score += candidate.headline ? 3 : 0;
+  score += candidate.snippet ? 2 : 0;
+
+  return Math.min(score, 100);
+};
+
 const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocation) => {
   const profile = resolveCategoryProfile(request.companyType);
+  const isBroadLocation = location.mode === 'timezone' || location.mode === 'nationwide';
+  const broadLocationLabel = normalizeMatchText(location.label);
   const discoveryQueries = buildDiscoveryQueryVariants(request.companyType, location, profile)
-    .slice(0, 10)
-    .map(buildLinkedInQueryFromPhrase);
+    .slice(0, 16)
+    .map((phrase) => buildLinkedInQueryFromPhrase(phrase))
+    .filter(
+      (query) =>
+        !isBroadLocation ||
+        !broadLocationLabel ||
+        !normalizeMatchText(query).includes(broadLocationLabel),
+    );
   const companyTerms = buildCompanyTerms(request, profile);
+  const aliasCompanyTerms = buildAliasCompanyTerms(request, profile);
   const locationTerms = buildLocationTerms(location);
   const { primary: genericRoleTerms, category: categoryRoleTerms } = buildRoleTerms(request, profile);
 
   const primaryCompany = selectPrimaryCompanyTerm(request, companyTerms);
   const secondaryCompany = selectSecondaryCompanyTerm(companyTerms, primaryCompany);
   const primaryLocation = locationTerms[0] ?? normalizeQueryTerm(location.label);
-  const secondaryLocation = locationTerms[1] ?? primaryLocation;
+  const prioritizedRoleTerms = prioritizeRoleTerms(genericRoleTerms, categoryRoleTerms);
 
-  const prioritizedRoleTerms = unique([...categoryRoleTerms, ...genericRoleTerms]);
+  const roleQueries = [
+    ...prioritizedRoleTerms.map((role, index) => {
+      const company = index % 2 === 0 ? primaryCompany : secondaryCompany;
 
-  const companyQueries = unique([
-    buildLinkedInQuery(primaryCompany, primaryLocation),
-    buildLinkedInQuery(secondaryCompany, primaryLocation),
-    buildLinkedInQuery(primaryCompany, secondaryLocation),
-    ...companyTerms.slice(2, 5).map((company) => buildLinkedInQuery(company, primaryLocation)),
+      return buildLinkedInQuery(company, primaryLocation, role);
+    }),
+    ...locationTerms.slice(1).map((locationTerm, index) => {
+      const role = prioritizedRoleTerms[
+        (index + 6) % Math.max(1, prioritizedRoleTerms.length)
+      ];
+      const company = index % 2 === 0 ? primaryCompany : secondaryCompany;
+
+      return buildLinkedInQuery(company, locationTerm, role);
+    }),
+  ];
+
+  const companyQueries = locationTerms.flatMap((locationTerm, index) => [
+    buildLinkedInQuery(index % 2 === 0 ? primaryCompany : secondaryCompany, locationTerm),
   ]);
 
-  const locationQueries = locationTerms
-    .slice(2, 5)
-    .map((term) => buildLinkedInQuery(primaryCompany, term));
+ const aliasQueries = locationTerms
+   .slice(0, aliasCompanyTerms.length)
+   .map((locationTerm, index) => {
+     const alias = aliasCompanyTerms[index] ?? '';
+     const role = prioritizedRoleTerms[(index + 6) % Math.max(1, prioritizedRoleTerms.length)];
 
-  const queryCandidates = unique([
-    ...prioritizedRoleTerms.slice(0, 4).map((role) => buildLinkedInQuery(primaryCompany, primaryLocation, role)),
-    ...discoveryQueries.slice(0, 4),
-    ...companyQueries,
-    ...prioritizedRoleTerms.slice(4, 8).map((role) => buildLinkedInQuery(primaryCompany, primaryLocation, role)),
-    ...discoveryQueries.slice(4, 10),
-    ...locationQueries,
+     return buildLinkedInQuery(alias, locationTerm, role);
+   });
+
+ const legacyProfileQueries = [
+   buildLinkedInQueryFromPhrase(`${request.companyType} in ${primaryLocation}`, 'pub'),
+ ];
+
+ const queryCandidates = unique([
+   buildLinkedInQueryFromPhrase(`${request.companyType} in ${primaryLocation}`),
+    ...legacyProfileQueries,
+   ...aliasQueries,
+    ...roleQueries.slice(0, 10),
+    ...discoveryQueries.slice(0, 5),
+    ...companyQueries.slice(0, 5),
+    ...roleQueries.slice(6),
+    ...discoveryQueries.slice(5),
+    ...companyQueries.slice(5),
   ]);
 
-  const queryBudget = Math.min(maxQueries, Math.max(10, Math.ceil(request.count / 40) + 6));
+  const minimumBudget =
+    location.mode === 'timezone' || location.mode === 'nationwide' ? 16 : 12;
+  const queryBudget = Math.min(
+    maxQueries,
+    Math.max(minimumBudget, Math.ceil(request.count / 35) + 8),
+  );
 
   return queryCandidates.slice(0, queryBudget);
 };
@@ -338,19 +1241,25 @@ const buildFallbackQueryVariants = (request: SearchRequest, location: Normalized
   const profile = resolveCategoryProfile(request.companyType);
   const locationTerms = buildLocationTerms(location);
   const { primary: genericRoleTerms, category: categoryRoleTerms } = buildRoleTerms(request, profile);
-  const prioritizedRoleTerms = unique([...categoryRoleTerms, ...genericRoleTerms]);
-  const primaryLocation = locationTerms[0] ?? normalizeQueryTerm(location.label);
-  const secondaryLocations = locationTerms.slice(1, 4).filter((term) => term !== primaryLocation);
+  const fallbackRoleTerms = unique([...categoryRoleTerms, ...genericRoleTerms]);
+  const companyTerms = buildCompanyTerms(request, profile);
+  const primaryCompany = selectPrimaryCompanyTerm(request, companyTerms);
+  const fallbackRoleOffsets = [3, 4, 5, 6, 9, 7, 8, 10, 11, 12];
 
   const fallbackCandidates = unique([
-    ...prioritizedRoleTerms.slice(0, 6).map((role) => buildLinkedInQueryFromPhrase(`${role} ${primaryLocation}`)),
-    ...prioritizedRoleTerms.slice(0, 4).flatMap((role) =>
-      secondaryLocations.map((term) => buildLinkedInQueryFromPhrase(`${role} ${term}`)),
-    ),
-    ...prioritizedRoleTerms.slice(6, 10).map((role) => buildLinkedInQueryFromPhrase(`${role} ${primaryLocation}`)),
+    ...locationTerms.flatMap((locationTerm, index) => {
+      const roleOffset = fallbackRoleOffsets[index % fallbackRoleOffsets.length] ?? 3;
+      const role = fallbackRoleTerms[roleOffset % Math.max(1, fallbackRoleTerms.length)];
+      const company = companyTerms[(index + 1) % Math.max(1, Math.min(8, companyTerms.length))] ?? primaryCompany;
+
+      return [
+        buildLinkedInQuery(company, locationTerm, role),
+        buildLinkedInQueryFromPhrase(`${company} ${role ?? 'owner'} ${locationTerm}`),
+      ];
+    }),
   ]);
 
-  const fallbackBudget = Math.min(maxQueries, Math.max(8, Math.ceil(request.count / 60) + 4));
+  const fallbackBudget = Math.min(maxQueries, Math.max(10, Math.ceil(request.count / 50) + 6));
 
   return fallbackCandidates.slice(0, fallbackBudget);
 };
@@ -378,21 +1287,6 @@ const fetchTextWithTimeout = async (url: string, timeoutMs: number) => {
 };
 
 const isBlockedSearchBody = (body: string) => blockedBodyPatterns.some((pattern) => pattern.test(body));
-
-const buildBlockedWarning = (sourceLabelText: string, query: string) => ({
-  providerId: `${providerId}-${sourceLabelText.toLowerCase().replace(/\s+/g, '-')}`,
-  providerName: sourceLabelText,
-  message: `${sourceLabelText} returned a blocked or rate-limited page while searching public LinkedIn profiles for "${query}".`,
-});
-
-const buildFetchWarning = (sourceLabelText: string, query: string, error: unknown) => ({
-  providerId: `${providerId}-${sourceLabelText.toLowerCase().replace(/\s+/g, '-')}`,
-  providerName: sourceLabelText,
-  message:
-    error instanceof Error
-      ? `${sourceLabelText} search failed for "${query}": ${error.message}`
-      : `${sourceLabelText} search failed while searching public LinkedIn profiles for "${query}".`,
-});
 
 const parseMarkdownResults = (markdown: string, decodeUrl: (value: string) => string) => {
   const results: SearchResult[] = [];
@@ -430,7 +1324,9 @@ const parseMarkdownResults = (markdown: string, decodeUrl: (value: string) => st
     }
 
     const urls = extractUrls(line).map((url) => decodeUrl(url));
-    const profileUrl = urls.map(normalizeLinkedInProfileUrl).find(Boolean);
+    const profileUrl =
+      urls.map(normalizeLinkedInProfileUrl).find(Boolean) ??
+      extractLinkedInProfileReference(line);
     const visibleText = stripMarkdown(line);
 
     if (profileUrl) {
@@ -454,47 +1350,189 @@ const parseMarkdownResults = (markdown: string, decodeUrl: (value: string) => st
   return results;
 };
 
-const searchProvider = async (source: (typeof searchSources)[number], query: string) => {
+const parseDuckDuckGoResults = (html: string, decodeUrl: (value: string) => string) => {
+  const results: SearchResult[] = [];
+  const anchors = [
+    ...html.matchAll(
+      /<a\b[^>]*\bresult__a\b[^>]*>([\s\S]*?)<\/a>/gi,
+    ),
+  ];
+
+  anchors.forEach((match, index) => {
+    const anchor = match[0] ?? '';
+    const rawUrl = decodeHtmlEntities(
+      anchor.match(/\bhref=["']([^"']+)["']/i)?.[1] ?? '',
+    ).trim();
+    const url = decodeUrl(rawUrl);
+    if (!url) {
+      return;
+    }
+
+    const start = (match.index ?? 0) + match[0].length;
+    const end = anchors[index + 1]?.index ?? Math.min(html.length, start + 4_000);
+    const resultTail = html.slice(start, end);
+    const snippetMatch = resultTail.match(
+      /class=["'][^"']*\bresult__snippet\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:a|div)>/i,
+    );
+
+    results.push({
+      title: stripMarkdown(match[1] ?? ''),
+      url,
+      snippet: stripMarkdown(snippetMatch?.[1] ?? ''),
+    });
+  });
+
+  return results;
+};
+
+const parseBingResults = (html: string, decodeUrl: (value: string) => string) => {
+  const results: SearchResult[] = [];
+  const resultBlocks = [
+    ...html.matchAll(
+      /<li\b[^>]*\bclass=["'][^"']*\bb_algo\b[^"']*["'][\s\S]*?<\/li>/gi,
+    ),
+  ];
+
+  for (const match of resultBlocks) {
+    const block = match[0] ?? '';
+    const anchor = block.match(
+      /<h2\b[^>]*>[\s\S]*?<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/h2>/i,
+    );
+    if (!anchor?.[1]) {
+      continue;
+    }
+
+    const caption = block.match(
+      /<div\b[^>]*\bclass=["'][^"']*\bb_caption\b[^"']*["'][\s\S]*?>([\s\S]*?)<\/div>/i,
+    )?.[1];
+    const snippet = block.match(
+      /<div\b[^>]*\bclass=["'][^"']*\bb_caption\b[^"']*["'][\s\S]*?<p\b[^>]*>([\s\S]*?)<\/p>/i,
+    )?.[1] ?? caption;
+
+    results.push({
+      title: stripMarkdown(anchor[2] ?? ''),
+      url: decodeUrl(decodeHtmlEntities(anchor[1])),
+      snippet: stripMarkdown(snippet ?? ''),
+    });
+  }
+
+  // Keep tests and alternate Bing layouts tolerant while preferring the
+  // native HTML parser for real public Bing result pages.
+  return results.length ? results : parseMarkdownResults(html, decodeUrl);
+};
+
+const searchProvider = async (
+  source: SearchSource,
+  query: string,
+  timeoutMs = searchTimeoutMs,
+  page = 0,
+): Promise<ProviderSearchResult> => {
+  const cacheKey = `${source.name}:${page}:${query.toLowerCase()}`;
+  const cached = getCachedProviderResult(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   try {
-    const markdown = await fetchTextWithTimeout(source.buildUrl(query), searchTimeoutMs);
-    if (isBlockedSearchBody(markdown)) {
+    const body = await fetchTextWithTimeout(source.buildUrl(query, page), timeoutMs);
+    if (isBlockedSearchBody(body)) {
       return {
         results: [] as SearchResult[],
-        warnings: [buildBlockedWarning(source.label, query)],
-        blocked: true,
+        failure: 'blocked',
+        message: `${source.label} returned a blocked or rate-limited page.`,
       };
     }
 
-    return {
-      results: parseMarkdownResults(markdown, source.decodeUrl).filter((result) =>
+    const parsed =
+      source.kind === 'duckduckgo-html'
+        ? parseDuckDuckGoResults(body, source.decodeUrl)
+        : source.kind === 'bing-html'
+          ? parseBingResults(body, source.decodeUrl)
+          : parseMarkdownResults(body, source.decodeUrl);
+    const result = {
+      results: parsed.filter((result) =>
         isLinkedInProfileUrl(result.url),
       ),
-      warnings: [] as ProviderWarning[],
-      blocked: false,
     };
+
+    setCachedProviderResult(cacheKey, result);
+    return result;
   } catch (error) {
     return {
       results: [] as SearchResult[],
-      warnings: [buildFetchWarning(source.label, query, error)],
-      blocked: true,
+      failure: 'fetch',
+      message:
+        error instanceof Error
+          ? `${source.label} request failed: ${error.message}`
+          : `${source.label} request failed.`,
     };
   }
 };
 
-const collectSearchResults = async (query: string, remainingResults: number) => {
-  const warnings: ProviderWarning[] = [];
-  const [brave, bing] = await Promise.all(
-    searchSources.map((source) => searchProvider(source, query)),
+const createProviderHealth = () =>
+  new Map<string, ProviderHealth>(
+    searchSources.map((source) => [
+      source.name,
+      {
+        attempts: 0,
+        failures: 0,
+        blockedResponses: 0,
+        disabled: false,
+        lastMessage: '',
+      },
+    ]),
+  );
+
+const collectSearchResults = async (
+  query: string,
+  remainingResults: number,
+  queryIndex: number,
+  providerHealth: Map<string, ProviderHealth>,
+  deadline: number,
+  page = 0,
+) => {
+  const availableSources = searchSources.filter(
+    (source) => !providerHealth.get(source.name)?.disabled,
+  );
+
+  if (!availableSources.length) {
+    return [] as SearchResult[];
+  }
+
+  const remainingTimeMs = deadline - Date.now();
+  if (remainingTimeMs <= 0) {
+    return [] as SearchResult[];
+  }
+
+  const requestTimeoutMs = Math.min(searchTimeoutMs, remainingTimeMs);
+
+  const rotatedSources = availableSources.map(
+    (_, index) => availableSources[(index + queryIndex) % availableSources.length]!,
+  );
+  const selectedSources = rotatedSources.slice(0, Math.min(2, rotatedSources.length));
+  const resultSets = await Promise.all(
+    selectedSources.map(async (source) => ({
+      source,
+      outcome: await searchProvider(source, query, requestTimeoutMs, page),
+    })),
   );
   const collected: SearchResult[] = [];
   const seenUrls = new Set<string>();
-  let blocked = false;
 
-  for (const resultSet of [brave, bing]) {
-    warnings.push(...resultSet.warnings);
-    blocked ||= resultSet.blocked;
+  for (const { source, outcome } of resultSets) {
+    const health = providerHealth.get(source.name);
+    if (health) {
+      health.attempts += 1;
 
-    for (const result of resultSet.results) {
+      if (outcome.failure) {
+        health.failures += 1;
+        health.blockedResponses += Number(outcome.failure === 'blocked');
+        health.lastMessage = outcome.message ?? `${source.label} search failed.`;
+        health.disabled = health.failures >= providerFailureThreshold;
+      }
+    }
+
+    for (const result of outcome.results) {
       if (collected.length >= remainingResults) {
         break;
       }
@@ -508,17 +1546,41 @@ const collectSearchResults = async (query: string, remainingResults: number) => 
     }
   }
 
-  return {
-    results: collected,
-    warnings,
-    blocked,
-  };
+  return collected;
 };
 
+const buildProviderHealthWarnings = (providerHealth: Map<string, ProviderHealth>) =>
+  searchSources.flatMap((source) => {
+    const health = providerHealth.get(source.name);
+    if (!health || !health.failures) {
+      return [];
+    }
+
+    const allProvidersDisabled = [...providerHealth.values()].every(
+      (provider) => provider.disabled,
+    );
+    const status = health.disabled
+      ? 'was paused after repeated failures'
+      : 'was unavailable for part of this search';
+    const continuation = allProvidersDisabled
+      ? 'No public-search fallback remained available.'
+      : 'Discovery continued with available fallback providers.';
+
+    return [
+      {
+        providerId: `${providerId}-${source.name}`,
+        providerName: source.label,
+        message: `${source.label} ${status} (${health.failures}/${health.attempts} attempts). ${continuation}`,
+      },
+    ];
+  });
+
 const parseLinkedInTitle = (title: string, profileUrl: string) => {
+  const slugName = slugToName(profileUrl);
   const cleaned = normalizeText(
     decodeHtmlEntities(title)
-      .replace(/^(?:LinkedIn\s+)?(?:[a-z0-9-]+\.)?linkedin\.com\s*›\s*in\s*›\s*[^ ]+\s+/i, '')
+      .replace(/^\s*\d+[.)]\s*/, '')
+      .replace(/^.*?(?:[a-z0-9-]+\.)?linkedin\.com\s*›\s*(?:in|pub)\s*›\s*[^ ]+\s+/i, '')
       .replace(/\s*[|]\s*Professional Profile\s*[|]\s*LinkedIn.*$/i, '')
       .replace(/\s*[|]\s*LinkedIn.*$/i, '')
       .replace(/\s*-\s*LinkedIn.*$/i, ''),
@@ -537,8 +1599,16 @@ const parseLinkedInTitle = (title: string, profileUrl: string) => {
     .map((segment) => normalizeText(segment))
     .filter(Boolean);
 
-  const name = segments[0] ?? slugToName(profileUrl) ?? cleaned;
-  const headline = normalizeText(segments.slice(1).join(' - '));
+  const titleName = segments[0] ?? '';
+  const titleStartsWithHeadline = decisionMakerPattern.test(titleName);
+  const name = isLikelyPersonName(titleName)
+    ? titleName
+    : isLikelyPersonName(slugName)
+      ? slugName
+      : titleName || slugName || cleaned;
+  const headline = normalizeText(
+    titleStartsWithHeadline ? cleaned : segments.slice(1).join(' - '),
+  );
 
   return {
     name,
@@ -547,43 +1617,48 @@ const parseLinkedInTitle = (title: string, profileUrl: string) => {
 };
 
 const toLeadConfidence = (candidate: LinkedInCandidate) => {
-  let score = 66;
+  let score = 52 + Math.round(candidate.relevanceScore * 0.3);
 
   if (candidate.name) score += 10;
   if (candidate.headline) score += 8;
   if (candidate.snippet) score += 4;
-  if (candidate.profileUrl.includes('/in/')) score += 10;
+  if (candidate.profileUrl.includes('/in/') || candidate.profileUrl.includes('/pub/')) score += 10;
   if (hasLinkedInProfileSignals(candidate.title)) score += 5;
   if (hasLinkedInProfileSignals(candidate.snippet)) score += 3;
 
-  return Math.min(score, 95);
+  return Math.min(score, 98);
 };
 
 const buildLeadFromCandidate = (
   candidate: LinkedInCandidate,
   request: SearchRequest,
   location: NormalizedUsLocation,
-): Lead => ({
-  id: createId(candidate.profileUrl || `${candidate.name}-${candidate.headline ?? ''}`),
-  name: normalizeText(candidate.name || slugToName(candidate.profileUrl) || candidate.profileUrl),
-  headline: candidate.headline,
-  mobile: '',
-  email: '',
-  website: '',
-  address: '',
-  category: request.companyType,
-  city: location.label,
-  source: sourceLabel,
-  confidence: toLeadConfidence(candidate),
-  sourceScore: 86,
-  listingUrl: candidate.profileUrl,
-  hasEmail: false,
-  hasPhone: false,
-  hasWebsite: false,
-  verifiedPhone: false,
-  verifiedEmail: false,
-  scrapedAt: new Date().toISOString(),
-});
+): Lead => {
+  const publicLocation = candidate.location;
+
+  return {
+    id: createId(candidate.profileUrl || `${candidate.name}-${candidate.headline ?? ''}`),
+    name: normalizeText(candidate.name || slugToName(candidate.profileUrl) || candidate.profileUrl),
+    headline: candidate.headline,
+    mobile: '',
+    email: '',
+    website: candidate.website ?? '',
+    category: request.companyType,
+    city: publicLocation?.city || location.city || location.label,
+    stateCode: publicLocation?.stateCode || location.stateCode,
+    address: publicLocation?.label ?? '',
+    source: leadSourceLabel,
+    confidence: toLeadConfidence(candidate),
+    sourceScore: 86,
+    listingUrl: candidate.profileUrl,
+    hasEmail: false,
+    hasPhone: false,
+    hasWebsite: Boolean(candidate.website),
+    verifiedPhone: false,
+    verifiedEmail: false,
+    scrapedAt: new Date().toISOString(),
+  };
+};
 
 const buildNoResultsWarning = (locationLabel: string) => ({
   providerId,
@@ -606,50 +1681,129 @@ const pushUniqueWarning = (warnings: ProviderWarning[], warning: ProviderWarning
 const runLinkedInQuerySet = async ({
   queries,
   candidates,
-  warnings,
   maxResults,
   deadline,
+  request,
+  location,
+  providerHealth,
+  queryOffset = 0,
+  page = 0,
 }: {
   queries: string[];
   candidates: Map<string, LinkedInCandidate>;
-  warnings: ProviderWarning[];
   maxResults: number;
   deadline: number;
+  request: SearchRequest;
+  location: NormalizedUsLocation;
+  providerHealth: Map<string, ProviderHealth>;
+  queryOffset?: number;
+  page?: number;
 }) => {
-  let blocked = false;
+  let queriesAttempted = 0;
 
-  for (const query of queries) {
-    if (Date.now() >= deadline || candidates.size >= maxResults) {
-      break;
-    }
-
-    const queryResults = await collectSearchResults(query, maxResults - candidates.size);
-    blocked ||= queryResults.blocked;
-    queryResults.warnings.forEach((warning) => pushUniqueWarning(warnings, warning));
-
-    for (const result of queryResults.results) {
+  const addQueryResults = (queryResults: SearchResult[]) => {
+    for (const result of queryResults) {
       if (Date.now() >= deadline || candidates.size >= maxResults) {
         break;
       }
 
       const profileUrl = normalizeLinkedInProfileUrl(result.url);
-      if (!profileUrl || candidates.has(profileUrl)) {
+      if (!profileUrl) {
         continue;
       }
 
       const { name, headline } = parseLinkedInTitle(result.title, profileUrl);
-
-      candidates.set(profileUrl, {
+      const candidateWithoutScore = {
         title: result.title,
         name,
         headline,
         profileUrl,
+        website: extractPublicWebsite(result.title, result.snippet),
         snippet: normalizeText(result.snippet),
+        location: extractPublicProfileLocation({
+          title: result.title,
+          headline,
+          snippet: normalizeText(result.snippet),
+        }),
+      };
+      const relevanceScore = scoreCandidateRelevance(
+        candidateWithoutScore,
+        request,
+        location,
+      );
+
+      if (relevanceScore < 60) {
+        continue;
+      }
+
+      const existing = candidates.get(profileUrl);
+      if (existing) {
+        candidates.set(profileUrl, {
+          ...existing,
+          title:
+            candidateWithoutScore.title.length > existing.title.length
+              ? candidateWithoutScore.title
+              : existing.title,
+          headline:
+            (candidateWithoutScore.headline?.length ?? 0) > (existing.headline?.length ?? 0)
+              ? candidateWithoutScore.headline
+              : existing.headline,
+          website: candidateWithoutScore.website ?? existing.website,
+          snippet:
+            candidateWithoutScore.snippet.length > existing.snippet.length
+              ? candidateWithoutScore.snippet
+              : existing.snippet,
+          location: candidateWithoutScore.location ?? existing.location,
+          relevanceScore: Math.max(existing.relevanceScore, relevanceScore),
+        });
+        continue;
+      }
+
+      candidates.set(profileUrl, {
+        ...candidateWithoutScore,
+        relevanceScore,
       });
     }
+  };
+
+  let batchStart = 0;
+
+  while (batchStart < queries.length) {
+    if (Date.now() >= deadline || candidates.size >= maxResults) {
+      break;
+    }
+
+    if ([...providerHealth.values()].every((health) => health.disabled)) {
+      break;
+    }
+
+    // Parallelize only the healthy phase. Once a provider starts failing,
+    // serialize fallback queries so the circuit breaker can pause it before
+    // another request is scheduled.
+    const hasProviderFailures = [...providerHealth.values()].some((health) => health.failures > 0);
+    const batchSize = hasProviderFailures ? 1 : queryBatchSize;
+    const batch = queries.slice(batchStart, batchStart + batchSize);
+    const resultSets = await Promise.all(
+      batch.map((query, batchIndex) =>
+        collectSearchResults(
+          query,
+          maxResults - candidates.size,
+          queryOffset + batchStart + batchIndex,
+          providerHealth,
+          deadline,
+          page,
+        ),
+      ),
+    );
+    queriesAttempted += batch.length;
+
+    // Preserve query order while merging concurrent responses for deterministic
+    // ranking and stable duplicate handling.
+    resultSets.forEach(addQueryResults);
+    batchStart += batch.length;
   }
 
-  return blocked;
+  return queriesAttempted;
 };
 
 export const discoverUsLeadsFromLinkedinSearch = async ({
@@ -664,35 +1818,82 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
   const start = Date.now();
   const deadline = deadlineMs ?? start + 28_000;
   const queries = buildQueryVariants(request, location);
-  const fallbackQueries = buildFallbackQueryVariants(request, location);
-  const maxResults = Number(process.env.LINKEDIN_SEARCH_MAX_RESULTS ?? request.count);
+  const primaryQueryKeys = new Set(queries.map((query) => query.toLowerCase()));
+  const fallbackQueries = buildFallbackQueryVariants(request, location).filter(
+    (query) => !primaryQueryKeys.has(query.toLowerCase()),
+  );
+  const configuredMaxResults = readBoundedNumber(
+    process.env.LINKEDIN_SEARCH_MAX_RESULTS,
+    request.count,
+    1,
+    request.count,
+  );
+  const maxResults = Math.min(request.count, configuredMaxResults);
   const candidates = new Map<string, LinkedInCandidate>();
   const warnings: ProviderWarning[] = [];
-  let blocked = false;
+  const providerHealth = createProviderHealth();
 
-  blocked ||= await runLinkedInQuerySet({
+  const primaryQueriesAttempted = await runLinkedInQuerySet({
     queries,
     candidates,
-    warnings,
     maxResults,
     deadline,
+    request,
+    location,
+    providerHealth,
   });
 
-  if (!candidates.size) {
-    blocked ||= await runLinkedInQuerySet({
+  if (candidates.size < maxResults && Date.now() < deadline) {
+    await runLinkedInQuerySet({
       queries: fallbackQueries,
       candidates,
-      warnings,
       maxResults,
       deadline,
+      request,
+      location,
+      providerHealth,
+      queryOffset: primaryQueriesAttempted,
     });
   }
 
-  const leads = [...candidates.values()].map((candidate) =>
-    buildLeadFromCandidate(candidate, request, location),
+  // Public search engines expose more than one result page. Only request a
+  // small second page after query variants are exhausted, which improves
+  // recall without multiplying every search request or hiding rate limits.
+  if (
+    candidates.size < maxResults &&
+    Date.now() < deadline &&
+    [...providerHealth.values()].some((health) => !health.disabled)
+  ) {
+    await runLinkedInQuerySet({
+      queries: queries.slice(0, 5),
+      candidates,
+      maxResults,
+      deadline,
+      request,
+      location,
+      providerHealth,
+      queryOffset: primaryQueriesAttempted + fallbackQueries.length,
+      page: 1,
+    });
+  }
+
+  buildProviderHealthWarnings(providerHealth).forEach((warning) =>
+    pushUniqueWarning(warnings, warning),
   );
 
-  if (!leads.length && !warnings.length) {
+  const leads = [...candidates.values()]
+    .sort(
+      (left, right) =>
+        right.relevanceScore - left.relevanceScore ||
+        left.name.localeCompare(right.name),
+    )
+    .slice(0, request.count)
+    .map((candidate) => buildLeadFromCandidate(candidate, request, location));
+
+  const blocked =
+    !leads.length && [...providerHealth.values()].every((health) => health.disabled);
+
+  if (!leads.length && !blocked) {
     warnings.push(buildNoResultsWarning(location.label));
   }
 

@@ -4,11 +4,15 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import type { Lead } from '../types/lead';
 import type { ProviderWarning } from '../types/search';
 import { httpClient } from '../utils/http-client';
+import { isPublicHttpUrl } from '../utils/public-url';
+
+export { isPublicHttpUrl } from '../utils/public-url';
 
 type CrawlPage = {
   url: string;
   depth: number;
   score: number;
+  redirects: number;
 };
 
 type ExtractedContactDetails = {
@@ -156,7 +160,7 @@ const normalizeUrl = (value: string) => {
     const url = new URL(withProtocol);
     url.hash = '';
 
-    if (!/^https?:$/i.test(url.protocol)) {
+    if (!isPublicHttpUrl(url)) {
       return '';
     }
 
@@ -342,6 +346,13 @@ const flattenJsonLd = (value: unknown): unknown[] => {
   return [];
 };
 
+const expandJsonLdContactEntries = (entry: Record<string, unknown>) => [
+  entry,
+  ...['contactPoint', 'contactPoints'].flatMap((key) =>
+    flattenJsonLd(entry[key]),
+  ),
+];
+
 const formatJsonLdAddress = (address: unknown) => {
   if (!address) return '';
 
@@ -388,40 +399,46 @@ const parseJsonLdContacts = (html: string): ExtractedContactDetails => {
         continue;
       }
 
-      const objectEntry = entry as Record<string, unknown>;
-
-      const email = normalizeEmail(String(objectEntry.email ?? ''));
-      if (email) {
-        emails.add(email);
-      }
-
-      const telephone = normalizePhone(String(objectEntry.telephone ?? ''));
-      if (telephone) {
-        phones.add(telephone);
-      }
-
-      const address = formatJsonLdAddress(objectEntry.address);
-      if (address) {
-        addresses.add(address);
-      }
-
-      const sameAs = objectEntry.sameAs;
-      const sameAsValues = Array.isArray(sameAs) ? sameAs : [sameAs];
-
-      for (const value of sameAsValues) {
-        const normalized = normalizeUrl(String(value ?? ''));
-
-        if (!normalized) {
+      for (const contactEntry of expandJsonLdContactEntries(entry as Record<string, unknown>)) {
+        if (!contactEntry || typeof contactEntry !== 'object') {
           continue;
         }
 
-        try {
-          const url = new URL(normalized);
-          if (isSocialHost(url.hostname)) {
-            socialUrls.add(url.toString());
+        const objectEntry = contactEntry as Record<string, unknown>;
+
+        const email = normalizeEmail(String(objectEntry.email ?? ''));
+        if (email) {
+          emails.add(email);
+        }
+
+        const telephone = normalizePhone(String(objectEntry.telephone ?? ''));
+        if (telephone) {
+          phones.add(telephone);
+        }
+
+        const address = formatJsonLdAddress(objectEntry.address);
+        if (address) {
+          addresses.add(address);
+        }
+
+        const sameAs = objectEntry.sameAs;
+        const sameAsValues = Array.isArray(sameAs) ? sameAs : [sameAs];
+
+        for (const value of sameAsValues) {
+          const normalized = normalizeUrl(String(value ?? ''));
+
+          if (!normalized) {
+            continue;
           }
-        } catch {
-          continue;
+
+          try {
+            const url = new URL(normalized);
+            if (isSocialHost(url.hostname)) {
+              socialUrls.add(url.toString());
+            }
+          } catch {
+            continue;
+          }
         }
       }
     }
@@ -788,6 +805,7 @@ export const enrichLeadFromWebsite = async (
       url: canonicalizeUrl(website),
       depth: 0,
       score: 100,
+      redirects: 0,
     },
   ];
 
@@ -828,8 +846,36 @@ export const enrichLeadFromWebsite = async (
           'User-Agent': 'LeadFinderPro/1.0 (US-only enrichment)',
           Accept: 'text/html,application/xhtml+xml',
         },
+        maxRedirects: 0,
         validateStatus: () => true,
       });
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = String(response.headers.location ?? '').trim();
+
+        if (location && current.redirects < 5) {
+          try {
+            const redirectUrl = new URL(location, currentUrl);
+
+            if (
+              isPublicHttpUrl(redirectUrl) &&
+              !isSocialHost(redirectUrl.hostname) &&
+              !isLikelyAssetUrl(redirectUrl)
+            ) {
+              queue.push({
+                url: canonicalizeUrl(redirectUrl.toString()),
+                depth: current.depth,
+                score: current.score - 5,
+                redirects: current.redirects + 1,
+              });
+            }
+          } catch {
+            // Ignore malformed or unsafe redirect destinations.
+          }
+        }
+
+        continue;
+      }
 
       const contentType = String(response.headers['content-type'] ?? '').toLowerCase();
 
@@ -873,6 +919,7 @@ export const enrichLeadFromWebsite = async (
           url: link.url,
           depth: current.depth + 1,
           score: link.score - current.depth * 10,
+          redirects: 0,
         });
       }
     } catch (error) {

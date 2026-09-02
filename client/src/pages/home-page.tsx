@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import {
+  AlertTriangle,
   CheckCircle2,
   Clock3,
   Download,
@@ -23,7 +24,7 @@ import { ResultsTable } from '../components/results/results-table';
 import { SearchForm } from '../components/search/search-form';
 import { useAuth } from '../hooks/use-auth';
 import { useSearchHistory } from '../hooks/use-search-history';
-import type { SearchApi } from '../services/search-service';
+import { isRetryableSearchError, type SearchApi } from '../services/search-service';
 import {
   buildSearchRequestFromDraft,
   createSearchDraft,
@@ -50,6 +51,8 @@ export function HomePage({ searchApi }: HomePageProps) {
   const [loading, setLoading] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [submittedSearch, setSubmittedSearch] = useState<SearchRequest | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [pollRevision, setPollRevision] = useState(0);
   const [filters, setFilters] = useState({
     hasEmail: false,
     hasPhone: false,
@@ -60,6 +63,23 @@ export function HomePage({ searchApi }: HomePageProps) {
   const { rememberSearch } = useSearchHistory(auth.user?.id);
   const recordedSearchId = useRef<string | null>(null);
   const isPollingRef = useRef(false);
+
+  const handleSourceModeChange = (sourceMode: SearchDraft['sourceMode']) => {
+    setResult(null);
+    setSubmittedSearch(null);
+    setPollError(null);
+    setSelectedIds([]);
+    setShowExport(false);
+    setFilters({
+      hasEmail: false,
+      hasPhone: false,
+      hasWebsite: false,
+    });
+
+    if (sourceMode !== search.sourceMode) {
+      recordedSearchId.current = null;
+    }
+  };
 
   const visibleLeads = useMemo(() => {
     return (result?.leads ?? [])
@@ -95,10 +115,8 @@ export function HomePage({ searchApi }: HomePageProps) {
       withEmail: deferredLeads.filter((lead) => lead.hasEmail).length,
       withPhone: deferredLeads.filter((lead) => lead.hasPhone).length,
       withWebsite: deferredLeads.filter((lead) => lead.hasWebsite).length,
-      missingEmail: allLeads.filter((lead) => lead.rejectionReason === 'missing_email').length,
-      missingPhone: allLeads.filter((lead) =>
-        ['missing_phone', 'invalid_phone'].includes(lead.rejectionReason ?? ''),
-      ).length,
+      missingEmail: allLeads.filter((lead) => !lead.hasEmail).length,
+      missingPhone: allLeads.filter((lead) => !lead.hasPhone).length,
     };
   }, [deferredLeads, result?.leads]);
 
@@ -111,10 +129,27 @@ export function HomePage({ searchApi }: HomePageProps) {
     : 0;
 
   const requestedCount = result?.meta.progress.requestedCount ?? search.count;
+  const linkedinDiscoveryBlocked = Boolean(
+    result &&
+      activeSourceMode === 'linkedin' &&
+      result.meta.status === 'complete' &&
+      result.leads.length === 0 &&
+      result.meta.providerWarnings.some(
+        (warning) =>
+          warning.providerId === 'linkedin-search' &&
+          /blocked|rate-limited/i.test(warning.message),
+      ),
+  );
   const resultsExhausted =
     result !== null &&
     result.meta.status === 'complete' &&
     result.meta.progress.foundCount < result.meta.progress.requestedCount;
+  const canRetryEmptyLinkedInSearch = Boolean(
+    result &&
+      activeSourceMode === 'linkedin' &&
+      result.meta.status === 'complete' &&
+      result.leads.length === 0,
+  );
 
   const progressPercent = result
     ? Math.min(
@@ -135,6 +170,8 @@ export function HomePage({ searchApi }: HomePageProps) {
           ? 'Collecting contact details'
           : result.meta.status === 'failed'
             ? 'Search failed'
+            : linkedinDiscoveryBlocked
+              ? 'LinkedIn discovery blocked'
             : resultsExhausted
               ? 'Discovery complete'
               : 'Search complete'
@@ -151,6 +188,8 @@ export function HomePage({ searchApi }: HomePageProps) {
               ? 'Adding emails, phone numbers, websites, and source details.'
               : result.meta.status === 'failed'
                   ? 'The search could not be completed. Adjust the query and try again.'
+                  : linkedinDiscoveryBlocked
+                    ? 'Free public-search providers temporarily blocked this request. No unverified or fabricated leads were added.'
                   : resultsExhausted
               ? 'We verified the available businesses and stopped once the discovery sources stopped returning new results.'
               : 'Your leads are ready to review, filter, copy, and export.'
@@ -159,7 +198,9 @@ export function HomePage({ searchApi }: HomePageProps) {
   const emptyStateMessage =
     result && result.leads.length === 0
       ? result.meta.status === 'complete'
-        ? 'No leads were found for this search. Try a broader company type or different location.'
+        ? linkedinDiscoveryBlocked
+          ? 'LinkedIn discovery was blocked by the free public-search providers. Try again later or switch location.'
+          : 'No leads were found for this search. Try a broader company type or different location.'
         : 'Still finding leads.'
       : 'No leads match the current filters.';
 
@@ -187,6 +228,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     }
 
     let cancelled = false;
+    setPollError(null);
 
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => {
@@ -195,6 +237,7 @@ export function HomePage({ searchApi }: HomePageProps) {
 
     const poll = async () => {
       let firstTick = true;
+      let transientFailures = 0;
 
       while (!cancelled) {
         if (firstTick) {
@@ -234,6 +277,8 @@ export function HomePage({ searchApi }: HomePageProps) {
             return;
           }
 
+          transientFailures = 0;
+          setPollError(null);
           setResult(nextResult);
 
           if (!pollingStatuses.includes(nextResult.meta.status)) {
@@ -241,7 +286,21 @@ export function HomePage({ searchApi }: HomePageProps) {
           }
         } catch (error) {
           if (!cancelled) {
-            toast.error(error instanceof Error ? error.message : 'Search update failed');
+            const message = error instanceof Error ? error.message : 'Search update failed';
+
+            if (isRetryableSearchError(error)) {
+              transientFailures += 1;
+              const retryDelay = Math.min(
+                10_000,
+                1_500 * 2 ** Math.min(transientFailures - 1, 3),
+              );
+              setPollError(`${message} Retrying status check automatically.`);
+              await sleep(retryDelay);
+              continue;
+            }
+
+            setPollError(message);
+            toast.error(message);
           }
           return;
         } finally {
@@ -256,7 +315,7 @@ export function HomePage({ searchApi }: HomePageProps) {
       cancelled = true;
       isPollingRef.current = false;
     };
-  }, [result?.searchId, searchApi]);
+  }, [pollRevision, result?.meta.status, result?.searchId, searchApi]);
 
   const handleSearch = async (override?: SearchRequest) => {
     const nextSearch = override ?? buildSearchRequestFromDraft(search);
@@ -265,6 +324,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     setSubmittedSearch(nextSearch);
     setSelectedIds([]);
     setResult(null);
+    setPollError(null);
     recordedSearchId.current = null;
 
     try {
@@ -275,6 +335,15 @@ export function HomePage({ searchApi }: HomePageProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const retryStatusPolling = () => {
+    if (!result?.searchId || !pollingStatuses.includes(result.meta.status)) {
+      return;
+    }
+
+    setPollError(null);
+    setPollRevision((current) => current + 1);
   };
 
   const toggleSelected = (leadId: string) => {
@@ -378,6 +447,7 @@ export function HomePage({ searchApi }: HomePageProps) {
             <SearchForm
               loading={loading}
               onChange={setSearch}
+              onSourceModeChange={handleSourceModeChange}
               onSubmit={() => handleSearch()}
               value={search}
             />
@@ -428,6 +498,8 @@ export function HomePage({ searchApi }: HomePageProps) {
               className={`rounded-[1.75rem] border p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] ${
                 result.meta.status === 'failed'
                   ? 'border-red-200 bg-red-50/90'
+                  : linkedinDiscoveryBlocked
+                    ? 'border-amber-200 bg-amber-50/90'
                   : result.meta.status === 'complete'
                     ? 'border-emerald-200 bg-emerald-50/70'
                     : 'border-blue-200 bg-white/90'
@@ -439,6 +511,8 @@ export function HomePage({ searchApi }: HomePageProps) {
                     className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${
                       result.meta.status === 'failed'
                         ? 'bg-red-100 text-red-700'
+                        : linkedinDiscoveryBlocked
+                          ? 'bg-amber-100 text-amber-700'
                         : result.meta.status === 'complete'
                           ? 'bg-emerald-100 text-emerald-700'
                           : 'bg-blue-100 text-blue-700'
@@ -446,6 +520,8 @@ export function HomePage({ searchApi }: HomePageProps) {
                   >
                     {isWaiting ? (
                       <LoaderCircle className="h-6 w-6 animate-spin" />
+                    ) : linkedinDiscoveryBlocked ? (
+                      <AlertTriangle className="h-6 w-6" />
                     ) : result.meta.status === 'complete' ? (
                       <CheckCircle2 className="h-6 w-6" />
                     ) : (
@@ -507,6 +583,73 @@ export function HomePage({ searchApi }: HomePageProps) {
                       style={{ width: `${progressPercent}%` }}
                     />
                   </div>
+                </div>
+              ) : null}
+
+              {pollError ? (
+                <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50/90 p-4 text-sm text-red-950 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-bold">Status update paused</p>
+                    <p className="mt-1 leading-5 text-red-800/80">{pollError}</p>
+                  </div>
+                  <button
+                    className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-red-700 px-4 text-sm font-bold text-white transition hover:bg-red-800"
+                    onClick={retryStatusPolling}
+                    type="button"
+                  >
+                    <LoaderCircle className="h-4 w-4" />
+                    Retry status check
+                  </button>
+                </div>
+              ) : null}
+
+              {result.meta.providerWarnings.length ? (
+                <div className="mt-5 rounded-2xl border border-amber-200 bg-white/80 p-4 text-sm text-amber-950">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                    <div>
+                      <p className="font-bold">
+                        {linkedinDiscoveryBlocked ? 'Provider access blocked' : 'Provider notices'}
+                      </p>
+                      <ul className="mt-2 space-y-1.5 leading-5 text-amber-900/80">
+                        {result.meta.providerWarnings.map((warning) => (
+                          <li key={`${warning.providerId}-${warning.message}`}>
+                            <span className="font-semibold">{warning.providerName}:</span>{' '}
+                            {warning.message}
+                          </li>
+                        ))}
+                      </ul>
+                      {result.meta.status === 'complete' && result.leads.length === 0 ? (
+                        <button
+                          className="mt-4 inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-bold text-white transition hover:bg-slate-700"
+                          onClick={() => void handleSearch(submittedSearch ?? undefined)}
+                          type="button"
+                        >
+                          <Search className="h-4 w-4" />
+                          Try public search again
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {canRetryEmptyLinkedInSearch && !result.meta.providerWarnings.length ? (
+                <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-blue-200 bg-blue-50/80 p-4 text-sm text-blue-950 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-bold">No public profiles returned</p>
+                    <p className="mt-1 leading-5 text-blue-900/80">
+                      Public search results can change. Try the same search again or adjust the category.
+                    </p>
+                  </div>
+                  <button
+                    className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white transition hover:bg-blue-800"
+                    onClick={() => void handleSearch(submittedSearch ?? undefined)}
+                    type="button"
+                  >
+                    <Search className="h-4 w-4" />
+                    Try public search again
+                  </button>
                 </div>
               ) : null}
             </section>

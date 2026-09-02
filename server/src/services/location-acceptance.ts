@@ -15,6 +15,7 @@ type StateAliasEntry = {
   code: UsStateCode;
   alias: string;
   tokens: string[];
+  isAbbreviation: boolean;
 };
 
 type LeadLocationCandidate = Pick<
@@ -48,6 +49,9 @@ const cityDecorationTokens = new Set([
 ]);
 
 const zipPattern = /\b\d{5}(?:-\d{4})?\b/;
+
+const foreignCountrySuffixPattern =
+  /(?:^|[,;\n|])\s*(?:india|canada|mexico|brazil|australia|new zealand|singapore|pakistan|bangladesh|philippines|germany|france|spain|italy|china|japan|south africa|united kingdom|uae|united arab emirates)\s*$/i;
 
 const stateAliases: StateAliasEntry[] = [];
 
@@ -108,11 +112,13 @@ for (const code of Object.keys(usStateNames) as UsStateCode[]) {
       code,
       alias: normalizeText(code),
       tokens: normalizeText(code).split(' '),
+      isAbbreviation: true,
     },
     {
       code,
       alias: normalizeText(stateName),
       tokens: normalizeText(stateName).split(' '),
+      isAbbreviation: false,
     },
   );
 }
@@ -141,6 +147,14 @@ const findStateMatchInTokens = (tokens: string[]) => {
       const candidate = tokens.slice(start, start + alias.tokens.length);
 
       if (candidate.some((token, index) => token !== alias.tokens[index])) {
+        continue;
+      }
+
+      const afterStateTokens = tokens.slice(start + alias.tokens.length);
+
+      // Two-letter abbreviations in prose, such as "in front of", are not
+      // reliable state evidence unless only ZIP/country decoration follows.
+      if (alias.isAbbreviation && afterStateTokens.some((token) => !isDecorationToken(token))) {
         continue;
       }
 
@@ -274,6 +288,13 @@ const parseAddressEvidence = (address?: string): ParsedAddressEvidence | null =>
 const parseLeadLocationEvidence = (
   lead: LeadLocationCandidate,
 ): ParsedAddressEvidence | null => {
+  if (foreignCountrySuffixPattern.test(lead.address?.trim() ?? '')) {
+    return {
+      confidence: 100,
+      source: 'address',
+    };
+  }
+
   const addressEvidence = parseAddressEvidence(lead.address);
 
   if (addressEvidence?.stateCode) {

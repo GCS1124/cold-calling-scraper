@@ -37,11 +37,19 @@ export type SearchJobRecord = {
   expiresAt: number;
   createdAt: number;
   updatedAt: number;
+  processingToken?: string;
+  processingUntil?: number;
 };
 
 export type SearchJobStore = {
   ensureSchema: () => Promise<void>;
   get: (searchId: string) => Promise<SearchJobRecord | null>;
+  claim: (
+    searchId: string,
+    now: number,
+    leaseMs: number,
+    token: string,
+  ) => Promise<SearchJobRecord | null>;
   upsert: (job: SearchJobRecord) => Promise<void>;
   deleteExpired: (now: number) => Promise<void>;
   close?: () => Promise<void>;
@@ -229,6 +237,13 @@ const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
       ? job.createdAt
       : currentTime,
     updatedAt: currentTime,
+    processingToken:
+      typeof job.processingToken === 'string' && job.processingToken.trim()
+        ? job.processingToken.trim()
+        : undefined,
+    processingUntil: Number.isFinite(job.processingUntil)
+      ? job.processingUntil
+      : undefined,
     expiresAt: Number.isFinite(job.expiresAt)
       ? job.expiresAt
       : currentTime + DEFAULT_JOB_TTL_MS,
@@ -266,6 +281,11 @@ const migrateJobPayload = (payload: unknown): SearchJobRecord | null => {
     expiresAt: Number(raw.expiresAt ?? nowMs() + DEFAULT_JOB_TTL_MS),
     createdAt: Number(raw.createdAt ?? nowMs()),
     updatedAt: Number(raw.updatedAt ?? nowMs()),
+    processingToken:
+      typeof raw.processingToken === 'string' ? raw.processingToken : undefined,
+    processingUntil: Number.isFinite(raw.processingUntil)
+      ? raw.processingUntil
+      : undefined,
   });
 };
 
@@ -321,6 +341,28 @@ const memoryStore = (): SearchJobStore => {
       return job;
     },
 
+    claim: async (searchId: string, now: number, leaseMs: number, token: string) => {
+      const normalized = normalizeSearchId(searchId);
+
+      if (!isValidSearchId(normalized)) {
+        return null;
+      }
+
+      const job = jobs.get(normalized);
+      if (!job || (job.processingUntil ?? 0) > now) {
+        return null;
+      }
+
+      const claimed = {
+        ...job,
+        processingToken: token,
+        processingUntil: now + leaseMs,
+        updatedAt: now,
+      };
+      jobs.set(normalized, claimed);
+      return claimed;
+    },
+
     upsert: async (job: SearchJobRecord) => {
       const sanitized = sanitizeJob(job);
       jobs.set(sanitized.searchId, sanitized);
@@ -366,6 +408,8 @@ const postgresStore = (): SearchJobStore => {
         throw new Error('Missing Postgres connection string');
       }
 
+      // Keep cold-start schema setup to one database round-trip. Snapshot reads
+      // share the same serverless invocation budget as provider discovery.
       await client.query(`
         create table if not exists lead_finder_jobs (
           search_id text primary key,
@@ -373,17 +417,11 @@ const postgresStore = (): SearchJobStore => {
           expires_at bigint not null,
           created_at bigint not null,
           updated_at bigint not null
-        )
-      `);
-
-      await client.query(`
+        );
         create index if not exists lead_finder_jobs_expires_at_idx
-          on lead_finder_jobs (expires_at)
-      `);
-
-      await client.query(`
+          on lead_finder_jobs (expires_at);
         create index if not exists lead_finder_jobs_updated_at_idx
-          on lead_finder_jobs (updated_at)
+          on lead_finder_jobs (updated_at);
       `);
 
       schemaReady = true;
@@ -434,6 +472,51 @@ const postgresStore = (): SearchJobStore => {
       }
 
       return parsePayload(payload);
+    },
+
+    claim: async (searchId: string, now: number, leaseMs: number, token: string) => {
+      const normalized = normalizeSearchId(searchId);
+
+      if (!isValidSearchId(normalized)) {
+        return null;
+      }
+
+      await ensureSchema();
+
+      const client = getPool();
+
+      if (!client) {
+        throw new Error('Missing Postgres connection string');
+      }
+
+      const leaseUntil = now + leaseMs;
+      const result = await client.query<{
+        payload: SearchJobRecord | string;
+      }>(
+        `
+          update lead_finder_jobs
+          set payload = jsonb_set(
+            jsonb_set(payload, '{processingToken}', to_jsonb($3::text), true),
+            '{processingUntil}', to_jsonb($2::bigint), true
+          ),
+          updated_at = $4
+          where search_id = $1
+            and expires_at > $4
+            and coalesce(
+              case
+                when payload->>'processingUntil' ~ '^[0-9]+$'
+                  then (payload->>'processingUntil')::bigint
+                else 0
+              end,
+              0
+            ) <= $4
+            and coalesce(payload->>'status', '') in ('queued', 'discovering', 'enriching')
+          returning payload
+        `,
+        [normalized, leaseUntil, token, now],
+      );
+
+      return parsePayload(result.rows[0]?.payload);
     },
 
     upsert: async (job: SearchJobRecord) => {
@@ -543,6 +626,14 @@ export const createSearchJobStore = (): SearchJobStore => {
       );
     },
 
+    claim: async (searchId: string, now: number, leaseMs: number, token: string) => {
+      return withFallback(
+        () => postgres.claim(searchId, now, leaseMs, token),
+        () => fallback.claim(searchId, now, leaseMs, token),
+        'claim',
+      );
+    },
+
     upsert: async (job: SearchJobRecord) => {
       await withFallback(
         () => postgres.upsert(job),
@@ -577,10 +668,15 @@ const countLeadTotals = (leads: Lead[]) => {
 };
 
 export const toSearchResponse = (job: SearchJobRecord): SearchResponse => {
-  const leads = deduplicateLeads(job.leads);
+  const leads = deduplicateLeads(job.leads).slice(0, job.request.count);
   const providerWarnings = dedupeWarnings(job.providerWarnings).filter(
     (warning) => !isHiddenWarning(warning),
   );
+  const progress = {
+    ...job.progress,
+    foundCount: leads.length,
+    estimatedRemaining: Math.max(0, job.request.count - leads.length),
+  };
 
   return {
     searchId: job.searchId,
@@ -589,7 +685,7 @@ export const toSearchResponse = (job: SearchJobRecord): SearchResponse => {
       query: job.query,
       locationLabel: job.locationLabel,
       status: job.status,
-      progress: job.progress,
+      progress,
       totals: countLeadTotals(leads),
       providerWarnings,
     },

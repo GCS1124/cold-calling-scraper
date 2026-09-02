@@ -19,6 +19,7 @@
     "concurrently": "^9.2.1"
   },
   "dependencies": {
+    "@vercel/functions": "^3.9.5",
     "@vercel/postgres": "^0.10.0"
   }
 }

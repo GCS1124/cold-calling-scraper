@@ -1,6 +1,7 @@
 import { ZodError } from 'zod';
+import { waitUntil } from '@vercel/functions';
 import { searchRequestSchema } from '../_lib/search-contract.js';
-import { vercelSearchService } from '../../server/src/services/vercel-search-service.js';
+import { getVercelSearchService } from '../_lib/vercel-search-service.js';
 import { flattenSearchRequest } from '../../server/src/utils/search-location.js';
 
 export default async function handler(req: any, res: any) {
@@ -10,8 +11,17 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    res.setHeader?.('Cache-Control', 'no-store, max-age=0');
     const payload = searchRequestSchema.parse(req.body);
-    const response = await vercelSearchService.startSearch(flattenSearchRequest(payload));
+    const service = await getVercelSearchService();
+    const response = await service.startSearch(flattenSearchRequest(payload));
+
+    waitUntil(
+      service.advanceSearch(response.searchId).catch((error) => {
+        console.error('[api/search] background search failed', error);
+      }),
+    );
+
     res.status(200).json(response);
   } catch (error) {
     if (error instanceof ZodError) {

@@ -158,6 +158,53 @@ const queuedResponse: SearchResponse = {
   },
 };
 
+const blockedLinkedinResponse: SearchResponse = {
+  ...completedResponse,
+  searchId: 'search-linkedin-blocked',
+  leads: [],
+  meta: {
+    ...completedResponse.meta,
+    query: 'Dentist in Eastern Time',
+    progress: {
+      ...completedResponse.meta.progress,
+      discovered: 0,
+      enriched: 0,
+      totalCandidates: 0,
+      foundCount: 0,
+      batchesCompleted: 0,
+      estimatedRemaining: 50,
+    },
+    totals: {
+      total: 0,
+      withEmail: 0,
+      withPhone: 0,
+      withWebsite: 0,
+    },
+    providerWarnings: [
+      {
+        providerId: 'linkedin-search-brave',
+        providerName: 'Brave Search',
+        message: 'Brave Search was paused after repeated failures (2/2 attempts).',
+      },
+      {
+        providerId: 'linkedin-search',
+        providerName: 'LinkedIn',
+        message:
+          'LinkedIn search providers were blocked or rate-limited, so no public profiles were returned.',
+      },
+    ],
+  },
+};
+
+const emptyLinkedinResponse: SearchResponse = {
+  ...blockedLinkedinResponse,
+  searchId: 'search-linkedin-empty',
+  meta: {
+    ...blockedLinkedinResponse.meta,
+    providerWarnings: [],
+  },
+};
+
 const cleanupTasks: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
@@ -489,6 +536,188 @@ describe('App', () => {
 
     await waitForText(container, /discovery complete/i, 6000);
     expect(normalizedText(container)).toContain('LinkedIn');
+
+    await unmount();
+  });
+
+  it('clears results when switching the lead source mode', async () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(completedResponse),
+      getSearch: vi.fn().mockResolvedValue(completedResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await typeValue(getCompanyTypeInput(container), 'Dentist');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+    await waitForText(container, /discovery complete/i, 6000);
+
+    await waitForText(container, /Northstar Labs/i, 6000);
+    expect(normalizedText(container)).toContain('Northstar Labs');
+
+    await clickElement(getButton(container, /linkedin/i));
+
+    expect(normalizedText(container)).not.toContain('Northstar Labs');
+    expect(normalizedText(container)).toContain('Public LinkedIn discovery');
+
+    await unmount();
+  });
+
+  it('shows an honest blocked state and provider details when free LinkedIn discovery is unavailable', async () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(blockedLinkedinResponse),
+      getSearch: vi.fn().mockResolvedValue(blockedLinkedinResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await clickElement(getButton(container, /linkedin/i));
+    await typeValue(getCompanyTypeInput(container), 'Dentist');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+
+    await waitForText(container, /linkedin discovery blocked/i, 6000);
+
+    const content = normalizedText(container);
+    expect(content).toContain('Provider access blocked');
+    expect(content).toContain('Brave Search was paused after repeated failures');
+    expect(content).toContain('No unverified or fabricated leads were added');
+    expect(content).not.toContain(
+      'We verified the available businesses and stopped once the discovery sources stopped returning new results',
+    );
+
+    await unmount();
+  });
+
+  it('lets users retry a completed empty LinkedIn search with the same request', async () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(blockedLinkedinResponse),
+      getSearch: vi.fn().mockResolvedValue(blockedLinkedinResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await clickElement(getButton(container, /linkedin/i));
+    await typeValue(getCompanyTypeInput(container), 'Dentist');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+    await waitForText(container, /linkedin discovery blocked/i, 6000);
+
+    await clickElement(getButton(container, /try public search again/i));
+
+    expect(searchApi.startSearch).toHaveBeenCalledTimes(2);
+    expect(searchApi.startSearch).toHaveBeenLastCalledWith({
+      companyType: 'Dentist',
+      sourceMode: 'linkedin',
+      location: {
+        mode: 'timezone',
+        timeZone: 'EST',
+      },
+      count: 50,
+    });
+
+    await unmount();
+  });
+
+  it('offers a retry for an empty LinkedIn search without provider warnings', async () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(emptyLinkedinResponse),
+      getSearch: vi.fn().mockResolvedValue(emptyLinkedinResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await clickElement(getButton(container, /linkedin/i));
+    await typeValue(getCompanyTypeInput(container), 'Dentist');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+    await waitForText(container, /discovery complete/i, 6000);
+
+    await clickElement(getButton(container, /try public search again/i));
+    expect(searchApi.startSearch).toHaveBeenCalledTimes(2);
+
+    await unmount();
+  });
+
+  it('lets users resume polling after a transient status update failure', async () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(waitingResponse),
+      getSearch: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('The search service is temporarily unavailable.'))
+        .mockResolvedValueOnce(completedResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await typeValue(getCompanyTypeInput(container), 'Dentist');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+    await waitForText(container, /status update paused/i, 6000);
+
+    await clickElement(getButton(container, /retry status check/i));
+    await waitForText(container, /discovery complete/i, 6000);
+    expect(searchApi.getSearch).toHaveBeenCalledTimes(2);
+
+    await unmount();
+  });
+
+  it('reports missing contact coverage from LinkedIn lead fields', async () => {
+    const linkedinResponse: SearchResponse = {
+      ...completedResponse,
+      searchId: 'search-linkedin-contacts',
+      leads: [
+        {
+          ...completedResponse.leads[0],
+          name: 'Public LinkedIn Dentist',
+          mobile: '',
+          email: '',
+          website: '',
+          source: 'LinkedIn',
+          listingUrl: 'https://linkedin.com/in/public-linkedin-dentist',
+          hasEmail: false,
+          hasPhone: false,
+          hasWebsite: false,
+          verifiedPhone: false,
+          verifiedEmail: false,
+          rejectionReason: 'missing_contact',
+        },
+      ],
+      meta: {
+        ...completedResponse.meta,
+        progress: {
+          ...completedResponse.meta.progress,
+          discovered: 1,
+          enriched: 1,
+          totalCandidates: 1,
+          foundCount: 1,
+          estimatedRemaining: 49,
+        },
+        totals: {
+          total: 1,
+          withEmail: 0,
+          withPhone: 0,
+          withWebsite: 0,
+        },
+      },
+    };
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(linkedinResponse),
+      getSearch: vi.fn().mockResolvedValue(linkedinResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await clickElement(getButton(container, /linkedin/i));
+    await typeValue(getCompanyTypeInput(container), 'Dentist');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+
+    await waitForText(container, /discovery complete/i, 6000);
+    const content = normalizedText(container);
+    expect(content).toMatch(/Missing Email\s*1/);
+    expect(content).toMatch(/Missing Phone\s*1/);
 
     await unmount();
   });

@@ -4,6 +4,7 @@ import type { UsStateCode } from '../data/us-states';
 export type Lead = {
   id: string;
   name: string;
+  headline?: string;
   mobile?: string;
   email?: string;
   website?: string;
@@ -23,7 +24,8 @@ export type Lead = {
     | 'blocked_website'
     | 'blocked_google'
     | 'duplicate'
-    | 'non_business_site';
+    | 'non_business_site'
+    | 'missing_contact';
   hasEmail: boolean;
   hasPhone: boolean;
   hasWebsite: boolean;

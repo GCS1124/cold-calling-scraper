@@ -144,6 +144,46 @@ describe('createSearchService', () => {
     expect(completed?.leads[0]?.name).toBe('Lattice Dental');
   });
 
+  it('caps the completed result at the requested count after ranking the candidate pool', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+    const candidates = Array.from({ length: 75 }, (_, index) => ({
+      ...sampleLead,
+      id: `lead-${index + 1}`,
+      name: `Lattice Dental ${index + 1}`,
+      mobile: `512555${String(1000 + index)}`,
+      website: `https://lattice-dental-${index + 1}.com`,
+      address: `${100 + index} Congress Ave, Austin, TX 78701`,
+    }));
+
+    const service = createSearchService({
+      idFactory: () => 'search-count-cap',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverGoogleLeads: vi.fn().mockResolvedValue(candidates),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'Dental Clinics',
+      city: 'Austin',
+      count: 50,
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-count-cap');
+
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.leads).toHaveLength(50);
+    expect(completed?.meta.progress.foundCount).toBe(50);
+  });
+
   it('completes a LinkedIn search job with public profile leads', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 
@@ -258,6 +298,62 @@ describe('createSearchService', () => {
     expect(completed?.leads[0]?.website).toBe('https://markdental.com');
     expect(completed?.leads[0]?.source).toContain('Website Crawl');
     expect(completed?.meta.progress.duplicatesRemoved).toBe(0);
+  });
+
+  it('keeps discovered LinkedIn profiles when public contact enrichment fails', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+    const enrichLinkedinLeads = vi
+      .fn()
+      .mockRejectedValue(new Error('Public contact provider unavailable'));
+
+    const service = createSearchService({
+      idFactory: () => 'search-linkedin-enrichment-failure',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverLinkedinLeads: vi.fn().mockResolvedValue({
+        leads: [
+          {
+            ...sampleLead,
+            id: 'linkedin-enrichment-failure-lead',
+            name: 'Mark Sweeney',
+            source: 'LinkedIn',
+            listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
+          },
+        ],
+        warnings: [],
+        blocked: false,
+      }),
+      enrichLinkedinLeads,
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin',
+      count: 50,
+      sourceMode: 'linkedin',
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-linkedin-enrichment-failure');
+
+    expect(enrichLinkedinLeads).toHaveBeenCalledTimes(1);
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.leads).toHaveLength(1);
+    expect(completed?.leads[0]?.listingUrl).toContain('/in/');
+    expect(
+      completed?.meta.providerWarnings.some(
+        (warning) =>
+          warning.providerName === 'Public Contact Search' &&
+          warning.message.includes('Discovered public profiles were kept'),
+      ),
+    ).toBe(true);
   });
 
   it('completes a LinkedIn search gracefully when public profile pages are blocked', async () => {

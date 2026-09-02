@@ -21,7 +21,6 @@ export const useAuth = (): AuthApi => {
     const supabase = getSupabaseClient();
 
     if (!supabase) {
-      setLoading(false);
       return;
     }
 

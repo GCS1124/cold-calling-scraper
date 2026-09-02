@@ -104,7 +104,8 @@ const isLikelyBusinessEmail = (value: string) => {
   }
 
   const [, domain = ''] = value.toLowerCase().split('@');
-  const topLevelLabel = domain.split('.').filter(Boolean).at(-1) ?? '';
+  const domainLabels = domain.split('.').filter(Boolean);
+  const topLevelLabel = domainLabels[domainLabels.length - 1] ?? '';
 
   if (topLevelLabel.length > 12) {
     return false;
@@ -156,8 +157,12 @@ const isLinkedInProfileListing = (value?: string) => {
 
   try {
     const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
-    return url.hostname.replace(/^www\./i, '').endsWith('linkedin.com') &&
-      /^\/in\//i.test(url.pathname);
+    const hostname = url.hostname.replace(/^www\./i, '').toLowerCase();
+
+    return (
+      (hostname === 'linkedin.com' || hostname.endsWith('.linkedin.com')) &&
+      /^\/in\//i.test(url.pathname)
+    );
   } catch {
     return false;
   }

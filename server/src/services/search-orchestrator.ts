@@ -222,6 +222,11 @@ const refreshProgress = (job: SearchJob) => {
 const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
   rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
 
+const finalizeLeads = (job: SearchJob) => {
+  job.leads = rankDiscoveryCandidates(job.leads).slice(0, job.request.count);
+  refreshProgress(job);
+};
+
 const upsertLeads = (
   job: SearchJob,
   incoming: Lead[],
@@ -301,23 +306,36 @@ const runLinkedinDiscovery = async (
     job.progress.discovered = linkedinResult.leads.length;
     job.progress.totalCandidates = linkedinResult.leads.length;
 
-    const contactResult = await withTimeout(
-      enrichLinkedinLeads({
-        leads: linkedinResult.leads,
-        request,
-        location,
-        deadlineMs: Date.now() + linkedinContactEnrichmentWindowMs,
-        onProgress: (completed) => {
-          job.progress.enriched = completed;
-        },
-      }),
-      linkedinContactEnrichmentWindowMs,
-      'LinkedIn contact enrichment timed out before the batch completed',
-    );
+    try {
+      const contactResult = await withTimeout(
+        enrichLinkedinLeads({
+          leads: linkedinResult.leads,
+          request,
+          location,
+          deadlineMs: Date.now() + linkedinContactEnrichmentWindowMs,
+          onProgress: (completed) => {
+            job.progress.enriched = completed;
+          },
+        }),
+        linkedinContactEnrichmentWindowMs,
+        'LinkedIn contact enrichment timed out before the batch completed',
+      );
 
-    appendUniqueWarnings(job, contactResult.warnings);
-    job.progress.enriched = contactResult.enrichedCount;
-    upsertLeads(job, contactResult.leads, now, false);
+      appendUniqueWarnings(job, contactResult.warnings);
+      job.progress.enriched = contactResult.enrichedCount;
+      upsertLeads(job, contactResult.leads, now, false);
+    } catch (error) {
+      appendUniqueWarnings(job, [
+        {
+          providerId: 'linkedin-public-contact-enrichment',
+          providerName: 'Public Contact Search',
+          message:
+            error instanceof Error
+              ? `${error.message}. Discovered public profiles were kept; contact fields may be incomplete.`
+              : 'Public contact enrichment failed. Discovered public profiles were kept; contact fields may be incomplete.',
+        },
+      ]);
+    }
   }
 
   job.progress.batchesCompleted += 1;
@@ -372,14 +390,14 @@ const runRegionalDiscovery = async (
         upsertLeads(job, acceptedGoogleLeads, now);
         job.progress.batchesCompleted += 1;
       } catch (error) {
-        job.providerWarnings.push({
+        appendUniqueWarnings(job, [{
           providerId: 'google-places',
           providerName: 'Google Places',
           message:
             error instanceof Error
               ? error.message
               : 'Google Places discovery failed',
-        });
+        }]);
       }
     })(),
     (async () => {
@@ -397,12 +415,12 @@ const runRegionalDiscovery = async (
         upsertLeads(job, acceptedOsmLeads, now);
         job.progress.batchesCompleted += 1;
       } catch (error) {
-        job.providerWarnings.push({
+        appendUniqueWarnings(job, [{
           providerId: 'osm-discovery',
           providerName: 'OpenStreetMap',
           message:
             error instanceof Error ? error.message : 'OSM discovery failed',
-        });
+        }]);
       }
     })(),
   ]);
@@ -430,14 +448,14 @@ const runRegionalDiscovery = async (
       job.progress.batchesCompleted += 1;
       job.progress.currentSource = 'Google Maps API';
     } catch (error) {
-      job.providerWarnings.push({
+      appendUniqueWarnings(job, [{
         providerId: 'google-maps',
         providerName: 'Google Maps',
         message:
           error instanceof Error
             ? error.message
             : 'Google Maps discovery failed',
-      });
+      }]);
     }
   }
 };
@@ -529,6 +547,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         return;
       }
 
+      finalizeLeads(job);
       refreshProgress(job);
       job.status = 'complete';
       job.progress.currentSource = 'Complete';
@@ -566,12 +585,12 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         job.progress.foundCount < job.request.count &&
         now() - job.lastProgressAt >= getDiscoveryStallMs(job.request.count)
       ) {
-        job.providerWarnings.push({
+        appendUniqueWarnings(job, [{
           providerId: 'discovery-limit',
           providerName: 'Discovery',
           message:
             `No new businesses were returned after ${getDiscoveryStallLabel(job.request.count)}. Search stopped after verifying the available results.`,
-        });
+        }]);
         break;
       }
 
@@ -591,25 +610,19 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         job.progress.foundCount < job.request.count &&
         now() - job.lastProgressAt >= getDiscoveryStallMs(job.request.count)
       ) {
-        job.providerWarnings.push({
+        appendUniqueWarnings(job, [{
           providerId: 'discovery-limit',
           providerName: 'Discovery',
           message:
             `No new businesses were returned after ${getDiscoveryStallLabel(job.request.count)}. Search stopped after verifying the available results.`,
-        });
+        }]);
         break;
       }
     }
 
-    refreshProgress(job);
-
-    if (job.progress.foundCount >= job.request.count) {
-      job.status = 'complete';
-      job.progress.currentSource = 'Complete';
-    } else {
-      job.status = 'complete';
-      job.progress.currentSource = 'Complete';
-    }
+    finalizeLeads(job);
+    job.status = 'complete';
+    job.progress.currentSource = 'Complete';
     refreshProgress(job);
   };
 

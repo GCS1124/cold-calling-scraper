@@ -1,6 +1,7 @@
 import type { CategoryProfile } from './us-category-mapping';
 import { usStateNames, type UsStateCode } from '../data/us-states';
 import type { NormalizedUsLocation } from './us-location';
+import { buildQueryTermVariants } from './query-term-variants';
 
 const serviceSynonyms: Record<string, string[]> = {
   'dental clinics': ['dentist', 'dental office', 'orthodontist', 'periodontist'],
@@ -57,8 +58,22 @@ const normalizeQueryPart = (value: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const unique = (values: string[]) =>
-  [...new Set(values.map(normalizeQueryPart).filter(Boolean))];
+const unique = (values: string[]) => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values.map(normalizeQueryPart).filter(Boolean)) {
+    const key = value.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(value);
+  }
+
+  return result;
+};
 
 const buildQueryForms = (categoryTerm: string, locationTerm: string) => [
   `${categoryTerm} in ${locationTerm}`,
@@ -94,6 +109,28 @@ const buildCategoryTerms = (companyType: string, profile: CategoryProfile) => {
     terms.add(profile.label.trim());
   }
 
+  for (const variant of buildQueryTermVariants(normalized)) {
+    terms.add(variant);
+  }
+
+  const aliases = unique(profile.aliases ?? []);
+  const knownCanonicalTerms = new Set(
+    unique([
+      normalized,
+      profile.label,
+      ...profile.searchTerms,
+      ...(serviceSynonyms[normalizedKey] ?? []),
+      ...(serviceSynonyms[profileKey] ?? []),
+    ]).map((term) => term.toLowerCase()),
+  );
+  const earlyAliases = aliases
+    .filter((alias) => !knownCanonicalTerms.has(alias.toLowerCase()))
+    .slice(0, 4);
+
+  for (const alias of earlyAliases) {
+    terms.add(alias);
+  }
+
   for (const synonym of serviceSynonyms[normalizedKey] ?? []) {
     terms.add(synonym);
   }
@@ -104,6 +141,12 @@ const buildCategoryTerms = (companyType: string, profile: CategoryProfile) => {
   const profileTerms = unique(profile.searchTerms ?? []);
   for (const term of profileTerms) {
     terms.add(term);
+  }
+
+  // Aliases capture user-facing variants that are not always present in the
+  // provider's canonical search-term list, such as plural business labels.
+  for (const alias of aliases) {
+    terms.add(alias);
   }
 
   const genericVariants = replaceTokens(normalized, [

@@ -462,8 +462,15 @@ out center tags ${limit};
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const getRemainingDeadlineMs = (deadlineMs?: number) =>
+  deadlineMs === undefined ? overpassRequestTimeoutMs : deadlineMs - Date.now();
+
+const createDeadlineError = () =>
+  new Error('OpenStreetMap discovery reached its request deadline.');
+
 const fetchOverpass = async (
   query: string,
+  deadlineMs?: number,
 ): Promise<OverpassResponse> => {
   let lastError: Error | null = null;
 
@@ -471,13 +478,18 @@ const fetchOverpass = async (
     const endpoint = overpassEndpoints[endpointIndex];
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      const remainingMs = getRemainingDeadlineMs(deadlineMs);
+      if (remainingMs <= 0) {
+        throw createDeadlineError();
+      }
+
       try {
         const result = await httpClient.post<OverpassResponse>(endpoint, query, {
           headers: {
             'Content-Type': 'text/plain',
             'User-Agent': overpassUserAgent,
           },
-          timeout: overpassRequestTimeoutMs,
+          timeout: Math.min(overpassRequestTimeoutMs, remainingMs),
           validateStatus: () => true,
         });
 
@@ -500,7 +512,11 @@ const fetchOverpass = async (
             ? error
             : new Error('Overpass request failed');
 
-        await wait(300 * (attempt + 1) * (endpointIndex + 1));
+        const retryDelayMs = 300 * (attempt + 1) * (endpointIndex + 1);
+        const remainingAfterFailureMs = getRemainingDeadlineMs(deadlineMs);
+        if (remainingAfterFailureMs > 0) {
+          await wait(Math.min(retryDelayMs, remainingAfterFailureMs));
+        }
       }
     }
   }
@@ -606,10 +622,12 @@ export const discoverUsLeadsFromOsm = async ({
   request,
   location,
   profile,
+  deadlineMs,
 }: {
   request: { companyType: string; count: number };
   location: NormalizedUsLocation;
   profile: CategoryProfile;
+  deadlineMs?: number;
 }): Promise<Lead[]> => {
   const requestedCount = Math.max(1, request.count || 25);
   const targetCount = Math.min(
@@ -626,6 +644,10 @@ export const discoverUsLeadsFromOsm = async ({
   let lastError: Error | null = null;
 
   for (const box of boxes) {
+    if (deadlineMs !== undefined && Date.now() >= deadlineMs) {
+      break;
+    }
+
     if (elementsById.size >= targetCount * 2) {
       break;
     }
@@ -633,7 +655,7 @@ export const discoverUsLeadsFromOsm = async ({
     const query = buildOverpassQuery(profile, box, targetCount);
 
     try {
-      const response = await fetchOverpass(query);
+      const response = await fetchOverpass(query, deadlineMs);
 
       for (const element of response.elements ?? []) {
         const id = getElementStableId(element);
