@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { waitUntil } from '@vercel/functions';
 import { runStatelessLinkedinSearch } from '../../../server/src/services/linkedin-stateless-search.js';
@@ -53,6 +53,10 @@ const createResponse = () => {
 describe('/api/search', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('returns the queued job immediately and schedules background advancement', async () => {
@@ -199,6 +203,31 @@ describe('/api/search', () => {
       count: 50,
       filters: undefined,
     });
+    expect(waitUntil).not.toHaveBeenCalled();
+  });
+
+  it('uses the stateless LinkedIn path before importing the durable job service', async () => {
+    vi.stubEnv('VERCEL', '1');
+    vi.stubEnv('VERCEL_ENV', 'production');
+    vi.mocked(runStatelessLinkedinSearch).mockResolvedValue({} as never);
+    const { response, state } = createResponse();
+
+    await handler(
+      {
+        method: 'POST',
+        body: {
+          companyType: 'Dentist',
+          sourceMode: 'linkedin',
+          location: { mode: 'timezone', timeZone: 'EST' },
+          count: 50,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(200);
+    expect(runStatelessLinkedinSearch).toHaveBeenCalledTimes(1);
+    expect(vercelSearchService.startSearch).not.toHaveBeenCalled();
     expect(waitUntil).not.toHaveBeenCalled();
   });
 });
