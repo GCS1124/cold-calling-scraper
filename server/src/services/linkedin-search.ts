@@ -1051,9 +1051,11 @@ const buildCategoryEvidenceTerms = (
 ) => {
   const phrases = unique([
     request.companyType,
+    ...buildQueryTermVariants(request.companyType),
     profile.label,
-    ...profile.searchTerms,
-    ...(profile.aliases ?? []),
+    ...buildQueryTermVariants(profile.label),
+    ...profile.searchTerms.flatMap(buildQueryTermVariants),
+    ...(profile.aliases ?? []).flatMap(buildQueryTermVariants),
   ]).map(normalizeMatchText);
   const significantWords = phrases.flatMap((phrase) =>
     phrase

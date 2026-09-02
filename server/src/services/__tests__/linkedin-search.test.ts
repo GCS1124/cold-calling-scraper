@@ -475,6 +475,30 @@ Party planner serving Austin, Texas.
     expect(unrelatedCategoryResult.leads).toHaveLength(0);
   });
 
+  it('matches singular public evidence for custom plural company types', async () => {
+    const { fetchMock } = makeQueryCaptureFetch(`Title: LinkedIn search results
+
+Markdown Content:
+1. [Taylor Nguyen - Founder at Bright AI | LinkedIn](https://www.linkedin.com/in/taylor-nguyen-ai/)
+Founder of an AI startup serving Austin, Texas.
+`);
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: {
+        companyType: 'AI Startups',
+        city: 'Austin',
+        count: 50,
+      },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(1);
+    expect(result.leads[0]?.name).toContain('Taylor Nguyen');
+  });
+
   it('mixes LinkedIn role queries with the broader discovery planner for service categories', async () => {
     const { fetchMock, queries } = makeQueryCaptureFetch(hvacProfileBody);
 
