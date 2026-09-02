@@ -118,6 +118,7 @@ describe('enrichLinkedinLeadsWithPublicContacts', () => {
     expect(lead?.hasWebsite).toBe(true);
     expect(lead?.verifiedEmail).toBe(true);
     expect(lead?.verifiedPhone).toBe(true);
+    expect(lead?.contactSourceUrl).toBe('https://austindentalspa.example/contact');
     expect(lead?.source).toContain('LinkedIn');
     expect(lead?.source).toContain('Public Web');
     expect(lead?.source).toContain('Website Crawl');

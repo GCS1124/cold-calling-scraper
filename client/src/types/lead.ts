@@ -8,6 +8,8 @@ export type Lead = {
   mobile?: string;
   email?: string;
   website?: string;
+  /** Public business website used to verify an email or phone number. */
+  contactSourceUrl?: string;
   address?: string;
   category: string;
   city: string;

@@ -770,6 +770,7 @@ describe('App', () => {
           mobile: '',
           email: '',
           website: '',
+          contactSourceUrl: 'https://austindentalspa.example/contact',
           source: 'LinkedIn',
           listingUrl: 'https://linkedin.com/in/public-linkedin-dentist',
           matchSignals: {
@@ -850,6 +851,7 @@ describe('App', () => {
     const expandedContent = normalizedText(container);
     expect(expandedContent).toContain('Lead snapshot');
     expect(expandedContent).toContain('Profile identity is public');
+    expect(expandedContent).toContain('Public contact source: austindentalspa.example/contact');
     expect(expandedContent).toContain('Category matched');
     expect(expandedContent).toContain('Role matched');
     expect(expandedContent).toContain('Location matched');

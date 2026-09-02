@@ -899,6 +899,22 @@ const enrichLeadFromPublicSnippet = (lead: Lead, snippet: string) => {
   });
 };
 
+const attachContactProvenance = (lead: Lead, sourceUrl: string, hadContact: boolean) => {
+  if (
+    hadContact ||
+    lead.contactSourceUrl ||
+    !sourceUrl ||
+    (!lead.email && !lead.mobile)
+  ) {
+    return lead;
+  }
+
+  return {
+    ...lead,
+    contactSourceUrl: sourceUrl,
+  };
+};
+
 const enrichOneLead = async (
   lead: Lead,
   request: SearchRequest,
@@ -938,10 +954,12 @@ const enrichOneLead = async (
           ...publicWebLead,
           website: candidate.website,
         });
+        const hadContact = Boolean(candidateLead.email || candidateLead.mobile);
 
         const crawled = await enrichLeadFromWebsite(candidateLead);
         warnings.push(...crawled.warnings);
         candidateLead = enrichLeadFromPublicSnippet(crawled.lead, candidate.snippet);
+        candidateLead = attachContactProvenance(candidateLead, candidate.website, hadContact);
 
         const contactScore =
           Number(candidateLead.hasEmail) * 3 +
@@ -961,12 +979,13 @@ const enrichOneLead = async (
       enrichedLead = bestAttempt;
     }
   } else if (website && Date.now() < deadlineMs) {
+    const hadContact = Boolean(enrichedLead.email || enrichedLead.mobile);
     const crawled = await enrichLeadFromWebsite({
       ...enrichedLead,
       website,
     });
     warnings.push(...crawled.warnings);
-    enrichedLead = enrichLead(crawled.lead);
+    enrichedLead = attachContactProvenance(enrichLead(crawled.lead), website, hadContact);
   }
 
   return { lead: enrichedLead, warnings };

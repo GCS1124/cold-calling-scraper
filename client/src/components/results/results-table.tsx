@@ -229,6 +229,19 @@ export function ResultsTable({
                                 ? 'Profile identity is public; contact fields are kept only when openly listed on a business website.'
                                 : 'Review the available business details before adding this lead to your export.'}
                             </p>
+                            {lead.contactSourceUrl ? (
+                              <p className="mt-3 text-xs leading-5 text-slate-500">
+                                Public contact source:{' '}
+                                <a
+                                  className="font-semibold text-blue-700 hover:text-blue-800"
+                                  href={lead.contactSourceUrl}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  {lead.contactSourceUrl.replace(/^https?:\/\//, '')}
+                                </a>
+                              </p>
+                            ) : null}
                             <div className="mt-4 grid gap-2 sm:grid-cols-3">
                               <div className="rounded-xl border border-slate-200 bg-white p-3">
                                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
