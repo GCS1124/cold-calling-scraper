@@ -501,6 +501,43 @@ describe('App', () => {
     expect(normalizedText(container)).toContain('2 visible leads');
     expect(normalizedText(container)).toContain('Eastern Time');
     expect(normalizedText(container)).toContain('Discovery complete');
+    await waitForText(container, /Publicly validated/i, 1000);
+
+    await unmount();
+  });
+
+  it('shows public validation labels for LinkedIn contact fields', async () => {
+    const linkedinResponse: SearchResponse = {
+      ...completedResponse,
+      searchId: 'search-linkedin-public-contacts',
+      leads: completedResponse.leads.map((lead, index) => ({
+        ...lead,
+        id: `linkedin-public-contact-${index}`,
+        name: `Public LinkedIn ${lead.name}`,
+        source: 'LinkedIn',
+        listingUrl: `https://www.linkedin.com/in/public-linkedin-${index}`,
+        contactSourceUrl: lead.website,
+        publicEvidence: {
+          profileTitle: `Public LinkedIn ${lead.name} - Founder`,
+          profileSnippet: 'Public profile matched the requested business category.',
+        },
+      })),
+    };
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(linkedinResponse),
+      getSearch: vi.fn().mockResolvedValue(linkedinResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await clickElement(getButton(container, /linkedin/i));
+    await typeValue(getCompanyTypeInput(container), 'Dental Clinics');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+
+    await waitForText(container, /public linkedin discovery complete/i, 6000);
+    await waitForText(container, /Publicly validated/i, 1000);
+    expect(normalizedText(container)).toContain('Public LinkedIn Northstar Labs');
 
     await unmount();
   });

@@ -13,6 +13,31 @@ type ResultsTableProps = {
   onCopyRow: (lead: Lead) => void;
 };
 
+type ContactCellProps = {
+  value?: string;
+  verified: boolean;
+};
+
+function ContactCell({ value, verified }: ContactCellProps) {
+  if (!value) {
+    return <>—</>;
+  }
+
+  return (
+    <div className="min-w-[130px]">
+      <span className="block">{value}</span>
+      {verified ? (
+        <span
+          className="mt-1 block text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-700"
+          title="Collected from a public result or listing and passed contact validation checks."
+        >
+          Publicly validated
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function ResultsTable({
   leads,
   emptyStateMessage = 'No leads match the current filters.',
@@ -161,8 +186,12 @@ export function ResultsTable({
                         </>
                       ) : null}
                     </td>
-                    <td className="px-4 py-4">{lead.mobile || '—'}</td>
-                    <td className="px-4 py-4">{lead.email || '—'}</td>
+                    <td className="px-4 py-4">
+                      <ContactCell verified={lead.verifiedPhone} value={lead.mobile} />
+                    </td>
+                    <td className="px-4 py-4">
+                      <ContactCell verified={lead.verifiedEmail} value={lead.email} />
+                    </td>
                     <td className="px-4 py-4">
                       {lead.website || lead.listingUrl ? (
                         <a
