@@ -1,4 +1,4 @@
-import type { SearchRequest, SearchResponse } from '../../server/src/types/search';
+import type { SearchRequest, SearchResponse } from '../../server/src/types/search.js';
 
 type VercelSearchService = {
   startSearch: (request: SearchRequest) => Promise<SearchResponse>;

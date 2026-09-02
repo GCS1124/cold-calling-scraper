@@ -30,7 +30,7 @@ export const buildQueryTermVariants = (value: string) => {
   }
 
   const words = normalized.split(' ');
-  const lastWord = words.at(-1) ?? '';
+  const lastWord = words[words.length - 1] ?? '';
   let singularLastWord = lastWord;
 
   if (/ies$/i.test(lastWord) && lastWord.length > 4) {
