@@ -127,6 +127,48 @@ describe('enrichLinkedinLeadsWithPublicContacts', () => {
     expect(searchUrls.every((url) => url.includes('-site%3Alinkedin.com') || url.includes('-site:linkedin.com'))).toBe(true);
   });
 
+  it('resolves bare public domains from contact-search results', async () => {
+    const domainOnlySearchBody = `Title: public website results
+
+Markdown Content:
+1. Austin Dental Spa | austindentalspa.example
+Austin Dental Spa provides dental care in Austin, TX. Call (512) 555-0199 or email hello@austindentalspa.example.
+`;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('search.brave.com') || url.includes('bing.com')) {
+          return new Response(domainOnlySearchBody, {
+            status: 200,
+            headers: { 'Content-Type': 'text/plain' },
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      }) as typeof fetch,
+    );
+
+    vi.mocked(httpClient.get).mockResolvedValue({
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+      data: '<a href="mailto:hello@austindentalspa.example">Email</a>',
+    } as never);
+
+    const result = await enrichLinkedinLeadsWithPublicContacts({
+      leads: [makeLead()],
+      request: { companyType: 'Dentist', city: 'Austin', count: 1 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 10_000,
+    });
+
+    expect(result.leads[0]?.website).toBe('https://austindentalspa.example');
+    expect(result.leads[0]?.email).toBe('hello@austindentalspa.example');
+    expect(result.leads[0]?.hasWebsite).toBe(true);
+  });
+
   it('parses native Bing HTML without treating embedded challenge scripts as a block', async () => {
     vi.stubGlobal(
       'fetch',
