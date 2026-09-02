@@ -7,6 +7,11 @@ export type Lead = {
   website?: string;
   /** Public business website used to verify an email or phone number. */
   contactSourceUrl?: string;
+  /** Bounded public search-result evidence used for manual verification. */
+  publicEvidence?: {
+    profileTitle?: string;
+    profileSnippet?: string;
+  };
   address?: string;
   state?: string;
   stateCode?: string;

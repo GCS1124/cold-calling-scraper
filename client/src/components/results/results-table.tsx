@@ -242,6 +242,27 @@ export function ResultsTable({
                                 </a>
                               </p>
                             ) : null}
+                            {isPublicLinkedInLead &&
+                            (lead.publicEvidence?.profileTitle || lead.publicEvidence?.profileSnippet) ? (
+                              <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+                                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-700">
+                                  Public match excerpt
+                                </p>
+                                {lead.publicEvidence.profileTitle ? (
+                                  <p className="mt-2 text-xs font-semibold leading-5 text-slate-800">
+                                    {lead.publicEvidence.profileTitle}
+                                  </p>
+                                ) : null}
+                                {lead.publicEvidence.profileSnippet ? (
+                                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                                    {lead.publicEvidence.profileSnippet}
+                                  </p>
+                                ) : null}
+                                <p className="mt-2 text-[11px] leading-4 text-slate-500">
+                                  Excerpt from a public search result. Verify the linked profile before outreach.
+                                </p>
+                              </div>
+                            ) : null}
                             <div className="mt-4 grid gap-2 sm:grid-cols-3">
                               <div className="rounded-xl border border-slate-200 bg-white p-3">
                                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">

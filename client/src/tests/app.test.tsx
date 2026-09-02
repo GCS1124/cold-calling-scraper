@@ -771,6 +771,10 @@ describe('App', () => {
           email: '',
           website: '',
           contactSourceUrl: 'https://austindentalspa.example/contact',
+          publicEvidence: {
+            profileTitle: 'Public LinkedIn Dentist - Founder at Austin Dental Spa',
+            profileSnippet: 'Dentist and practice owner in Austin, Texas.',
+          },
           source: 'LinkedIn',
           listingUrl: 'https://linkedin.com/in/public-linkedin-dentist',
           matchSignals: {
@@ -852,6 +856,8 @@ describe('App', () => {
     expect(expandedContent).toContain('Lead snapshot');
     expect(expandedContent).toContain('Profile identity is public');
     expect(expandedContent).toContain('Public contact source: austindentalspa.example/contact');
+    expect(expandedContent).toContain('Public match excerpt');
+    expect(expandedContent).toContain('Dentist and practice owner in Austin, Texas.');
     expect(expandedContent).toContain('Category matched');
     expect(expandedContent).toContain('Role matched');
     expect(expandedContent).toContain('Location matched');

@@ -147,6 +147,10 @@ Owner at Austin Dental Spa.
     expect(new Set(result.leads.map((lead) => lead.id)).size).toBe(result.leads.length);
     expect(result.leads[0]?.name).toContain('Mark Sweeney');
     expect(result.leads[0]?.listingUrl).toContain('/in/');
+    expect(result.leads[0]?.publicEvidence).toMatchObject({
+      profileTitle: expect.stringContaining('Mark Sweeney'),
+      profileSnippet: expect.stringContaining('Owner at Austin Dental Spa'),
+    });
     expect(result.leads[0]?.matchSignals).toMatchObject({
       queryMatches: expect.any(Number),
       publicSources: expect.any(Number),
@@ -157,6 +161,36 @@ Owner at Austin Dental Spa.
     });
     expect(result.coverage?.queriesAttempted).toBeGreaterThan(0);
     expect(result.coverage?.providersChecked).toBe(3);
+  });
+
+  it('bounds public LinkedIn evidence before returning a lead', async () => {
+    const longTitle = 'Sam Carter - Dentist and practice owner at Austin Dental Clinic - ' +
+      'Public clinic leader '.repeat(20) +
+      ' | LinkedIn';
+    const longSnippet = 'Dentist and public clinic owner serving Austin, Texas. '.repeat(20);
+    const longBody = [
+      'Title: LinkedIn results',
+      '',
+      'Markdown Content:',
+      '',
+      '1. [' + longTitle + '](https://www.linkedin.com/in/sam-carter-austin/)',
+      longSnippet,
+    ].join('\n');
+    const { fetchMock } = makeQueryCaptureFetch(longBody);
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Dentist', city: 'Austin', count: 50 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(1);
+    expect(result.leads[0]?.publicEvidence?.profileTitle?.length).toBeLessThanOrEqual(240);
+    expect(result.leads[0]?.publicEvidence?.profileSnippet?.length).toBeLessThanOrEqual(360);
+    expect(result.leads[0]?.publicEvidence?.profileTitle).toMatch(/\.\.\.$/);
+    expect(result.leads[0]?.publicEvidence?.profileSnippet).toMatch(/\.\.\.$/);
   });
 
   it('discovers legacy public LinkedIn /pub profiles', async () => {

@@ -1682,12 +1682,29 @@ const toLeadConfidence = (candidate: LinkedInCandidate) => {
   return Math.min(score, 98);
 };
 
+const limitPublicEvidence = (value: string | undefined, maxLength: number) => {
+  const normalized = normalizeText(value);
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  return normalized.length > maxLength
+    ? normalized.slice(0, maxLength - 3).trimEnd() + '...'
+    : normalized;
+};
+
 const buildLeadFromCandidate = (
   candidate: LinkedInCandidate,
   request: SearchRequest,
   location: NormalizedUsLocation,
 ): Lead => {
   const publicLocation = candidate.location;
+  const profileTitle = limitPublicEvidence(candidate.title, 240);
+  const profileSnippet = limitPublicEvidence(candidate.snippet, 360);
+  const publicEvidence = profileTitle || profileSnippet
+    ? { profileTitle, profileSnippet }
+    : undefined;
 
   return {
     id: createId(candidate.profileUrl || `${candidate.name}-${candidate.headline ?? ''}`),
@@ -1696,6 +1713,7 @@ const buildLeadFromCandidate = (
     mobile: '',
     email: '',
     website: candidate.website ?? '',
+    publicEvidence,
     category: request.companyType,
     city: publicLocation?.city || location.city || location.label,
     stateCode: publicLocation?.stateCode || location.stateCode,
