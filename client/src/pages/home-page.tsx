@@ -286,7 +286,6 @@ export function HomePage({ searchApi }: HomePageProps) {
     }
 
     let cancelled = false;
-    setPollError(null);
 
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => {
