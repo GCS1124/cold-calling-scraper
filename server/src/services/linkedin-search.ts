@@ -114,6 +114,8 @@ const blockedBodyPatterns = [
   /we detected unusual traffic/i,
   /access denied/i,
   /temporarily blocked/i,
+  /(?:cf-chl|just a moment|checking your browser|enable javascript)/i,
+  /(?:robot check|prove you are human|rate limit(?:ed)?)/i,
   /anomaly\.js/i,
   /bots use duckduckgo/i,
 ];

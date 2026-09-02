@@ -291,6 +291,45 @@ Too many requests. Please try again later.
     ).toBe(true);
   });
 
+  it('treats browser verification pages as blocked instead of valid empty results', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('search.brave.com')) {
+          return makeResponse('Just a moment... Checking your browser before accessing this site.', 200);
+        }
+
+        if (url.includes('bing.com')) {
+          return makeResponse('Please enable JavaScript to continue. Robot check in progress.', 200);
+        }
+
+        if (url.includes('html.duckduckgo.com')) {
+          return makeResponse('<html><body>cf-chl=challenge-platform</body></html>');
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      }) as typeof fetch,
+    );
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: {
+        companyType: 'Dentist',
+        city: 'Austin',
+        count: 50,
+      },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(0);
+    expect(result.blocked).toBe(true);
+    expect(result.warnings.some((warning) => warning.providerName === 'Brave Search')).toBe(true);
+    expect(result.warnings.some((warning) => warning.providerName === 'Bing')).toBe(true);
+    expect(result.warnings.some((warning) => warning.providerName === 'DuckDuckGo')).toBe(true);
+  });
+
   it('aborts hanging public-search providers at the discovery deadline', async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, init?: RequestInit) =>
