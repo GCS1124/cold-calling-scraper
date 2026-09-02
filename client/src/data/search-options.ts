@@ -12,7 +12,7 @@ export const sourceModeOptions = [
   {
     code: 'linkedin',
     label: 'LinkedIn',
-    hint: 'Public profiles',
+    hint: 'Free public profiles',
   },
 ] as const;
 

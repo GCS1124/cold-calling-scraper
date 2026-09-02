@@ -520,6 +520,7 @@ describe('App', () => {
     const { container, unmount } = await renderApp(['/search'], searchApi);
 
     await clickElement(getButton(container, /linkedin/i));
+    expect(normalizedText(container)).toContain('Free public profiles');
     await typeValue(getCompanyTypeInput(container), 'Founders');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
