@@ -99,6 +99,45 @@ export function SearchForm({
               ? 'AI mode is free-only: no paid databases, private profiles, login sessions, or contact-reveal credits are used.'
               : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
         </p>
+
+        {isLinkedInMode ? (
+          <div className="overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-4 text-white shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-200">
+                  LinkedIn discovery recipe
+                </p>
+                <p className="mt-1 text-sm leading-5 text-slate-300">
+                  A focused public-web workflow for finding the people behind the category.
+                </p>
+              </div>
+              <span className="shrink-0 rounded-full border border-blue-300/30 bg-blue-300/10 px-3 py-1 text-[11px] font-bold text-blue-100">
+                Public signals
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-sm font-bold">Role expansion</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  Owners, founders, and decision-makers
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-sm font-bold">Location precision</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  City, state, and regional signals
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-sm font-bold">Public-site enrichment</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  Openly listed business contact details
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </fieldset>
 
       <label className="flex flex-col gap-2 text-sm font-semibold text-slate-900">

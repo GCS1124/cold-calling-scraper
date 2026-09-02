@@ -571,6 +571,9 @@ describe('App', () => {
 
     await clickElement(getButton(container, /linkedin/i));
     expect(normalizedText(container)).toContain('Free public profiles');
+    expect(normalizedText(container)).toContain('LinkedIn discovery recipe');
+    expect(normalizedText(container)).toContain('Role expansion');
+    expect(normalizedText(container)).toContain('Public-site enrichment');
     await typeValue(getCompanyTypeInput(container), 'Founders');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
@@ -811,6 +814,7 @@ describe('App', () => {
     await clickElement(getButton(container, /find leads/i));
 
     await waitForText(container, /discovery complete/i, 6000);
+    await waitForText(container, /Public match/i, 1000);
     const content = normalizedText(container);
     expect(content).toContain('Public contact coverage');
     expect(content).toContain('Public search coverage');
@@ -881,9 +885,11 @@ describe('App', () => {
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
     await waitForText(container, /public linkedin discovery complete/i, 6000);
+    await waitForText(container, /Northstar Labs/i, 1000);
 
     expect(normalizedText(container)).toContain('2 visible leads');
     await clickElement(getCheckboxByLabel(container, /high-fit score/i));
+    await waitForText(container, /Northstar Labs/i, 1000);
     expect(normalizedText(container)).toContain('1 visible leads');
     expect(normalizedText(container)).toContain('Northstar Labs');
 
