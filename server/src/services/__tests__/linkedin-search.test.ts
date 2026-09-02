@@ -147,6 +147,12 @@ Owner at Austin Dental Spa.
     expect(new Set(result.leads.map((lead) => lead.id)).size).toBe(result.leads.length);
     expect(result.leads[0]?.name).toContain('Mark Sweeney');
     expect(result.leads[0]?.listingUrl).toContain('/in/');
+    expect(result.leads[0]?.matchSignals).toMatchObject({
+      queryMatches: expect.any(Number),
+      publicSources: expect.any(Number),
+      roleMatched: true,
+      locationMatched: true,
+    });
     expect(result.coverage?.queriesAttempted).toBeGreaterThan(0);
     expect(result.coverage?.providersChecked).toBe(3);
   });

@@ -604,9 +604,9 @@ export function HomePage({ searchApi }: HomePageProps) {
                       </p>
                     </div>
                     {publicQueriesAttempted || publicProvidersChecked ? (
-                      <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
-                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">
-                          Public search coverage
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">
+                        Public search coverage
                         </p>
                         <p className="mt-2 text-sm font-semibold text-slate-900">
                           {publicQueriesAttempted ?? 0} query paths

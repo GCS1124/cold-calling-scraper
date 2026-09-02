@@ -1685,6 +1685,14 @@ const buildLeadFromCandidate = (
     source: leadSourceLabel,
     confidence: toLeadConfidence(candidate),
     sourceScore: 86,
+    matchSignals: {
+      queryMatches: candidate.matchedQueries.length,
+      publicSources: candidate.matchedProviders.length,
+      roleMatched: decisionMakerPattern.test(
+        normalizeMatchText(`${candidate.title} ${candidate.headline ?? ''}`),
+      ),
+      locationMatched: Boolean(publicLocation),
+    },
     listingUrl: candidate.profileUrl,
     hasEmail: false,
     hasPhone: false,

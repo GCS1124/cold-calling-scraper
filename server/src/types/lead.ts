@@ -17,6 +17,12 @@ export type Lead = {
   source: string;
   confidence: number;
   sourceScore?: number;
+  matchSignals?: {
+    queryMatches: number;
+    publicSources: number;
+    roleMatched: boolean;
+    locationMatched: boolean;
+  };
   listingUrl?: string;
   crawlAttempts?: number;
   rejectionReason?:

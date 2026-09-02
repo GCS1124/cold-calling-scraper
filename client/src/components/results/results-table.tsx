@@ -61,6 +61,12 @@ export function ResultsTable({
             {leads.map((lead, index) => {
               const isSelected = selectedIds.includes(lead.id);
               const isPublicLinkedInLead = lead.source.toLowerCase().includes('linkedin');
+              const matchLabel =
+                lead.confidence >= 85
+                  ? 'Strong match'
+                  : lead.confidence >= 70
+                    ? 'Good match'
+                    : 'Potential match';
 
               return (
                 <tr className="border-t border-slate-100 transition hover:bg-blue-50/40" key={lead.id}>
@@ -90,11 +96,21 @@ export function ResultsTable({
                       </div>
                     ) : null}
                     {isPublicLinkedInLead ? (
-                      <div className="mt-2 flex items-center gap-2 text-[11px] font-semibold">
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold">
                         <span className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">
                           Public match
                         </span>
-                        <span className="text-slate-400">{lead.confidence}% confidence</span>
+                        <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
+                          {matchLabel} · {lead.confidence}%
+                        </span>
+                        {lead.matchSignals?.publicSources && lead.matchSignals.publicSources > 1 ? (
+                          <span
+                            className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-700"
+                            title={`${lead.matchSignals.queryMatches} public query matches across ${lead.matchSignals.publicSources} public sources`}
+                          >
+                            {lead.matchSignals.publicSources}-source signal
+                          </span>
+                        ) : null}
                       </div>
                     ) : null}
                   </td>
