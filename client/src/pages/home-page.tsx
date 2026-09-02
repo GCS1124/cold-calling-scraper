@@ -871,7 +871,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                 ))}
               </div>
             </section>
-          ) : isWaiting ? (
+          ) : isWaiting && !result?.leads.length ? (
             <section className="rounded-[2rem] border border-slate-200 bg-white/90 p-8 text-center shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
                 <LoaderCircle className="h-7 w-7 animate-spin" />
@@ -948,9 +948,17 @@ export function HomePage({ searchApi }: HomePageProps) {
                       Results
                     </p>
 
-                    <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] text-slate-950">
-                      {visibleLeads.length} visible leads
-                    </h2>
+                    <div className="mt-2 flex flex-wrap items-center gap-3">
+                      <h2 className="text-2xl font-black tracking-[-0.04em] text-slate-950">
+                        {visibleLeads.length} visible leads
+                      </h2>
+                      {isWaiting ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+                          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                          Live scan
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
 
                   <p className="rounded-2xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-600">

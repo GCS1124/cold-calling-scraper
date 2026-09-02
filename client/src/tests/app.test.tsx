@@ -139,6 +139,23 @@ const waitingResponse: SearchResponse = {
   },
 };
 
+const streamingResponse: SearchResponse = {
+  ...completedResponse,
+  searchId: 'search-streaming',
+  meta: {
+    ...completedResponse.meta,
+    status: 'enriching',
+    progress: {
+      ...completedResponse.meta.progress,
+      currentSource: 'Public Contact Enrichment',
+      discovered: 2,
+      enriched: 1,
+      batchesCompleted: 1,
+      estimatedRemaining: 48,
+    },
+  },
+};
+
 const queuedResponse: SearchResponse = {
   ...waitingResponse,
   searchId: 'search-queued',
@@ -556,6 +573,28 @@ describe('App', () => {
     await waitForText(container, /finding your leads/i, 10000);
     expect(normalizedText(container)).toContain('Results will appear here when the search finishes');
     expect(normalizedText(container)).not.toContain('click any company row to verify details before export');
+    expect(normalizedText(container)).not.toContain('Download Excel');
+
+    await unmount();
+  });
+
+  it('shows discovered rows while public contact enrichment is still running', async () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(streamingResponse),
+      getSearch: vi.fn().mockResolvedValue(streamingResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await typeValue(getCompanyTypeInput(container), 'Dental Clinics');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+
+    await waitForText(container, /live scan/i, 10000);
+    expect(normalizedText(container)).toContain('2 visible leads');
+    expect(normalizedText(container)).toContain('Northstar Labs');
+    expect(normalizedText(container)).toContain('Collecting contact details');
+    expect(normalizedText(container)).not.toContain('Results will appear here when the search finishes');
     expect(normalizedText(container)).not.toContain('Download Excel');
 
     await unmount();

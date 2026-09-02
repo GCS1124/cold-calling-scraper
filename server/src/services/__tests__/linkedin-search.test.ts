@@ -173,6 +173,34 @@ Owner at Austin Dental Spa.
     expect(result.coverage?.providersChecked).toBe(3);
   });
 
+  it('extracts multiple public profiles from compact search-result lines', async () => {
+    const compactBody = `Title: LinkedIn search results
+
+Markdown Content:
+1. [Alicia Stone - Owner at Austin Dental Spa | LinkedIn](https://www.linkedin.com/in/alicia-stone-austin/) [Jordan Carter - Operations Manager at Austin Dental Spa | LinkedIn](https://www.linkedin.com/in/jordan-carter-austin/)
+Both are public decision-makers at an Austin dental practice in Austin, Texas.
+`;
+    const { fetchMock } = makeQueryCaptureFetch(compactBody);
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Dentist', city: 'Austin', count: 50 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(2);
+    expect(result.leads.map((lead) => lead.name)).toEqual([
+      'Alicia Stone',
+      'Jordan Carter',
+    ]);
+    expect(result.leads.map((lead) => lead.listingUrl)).toEqual([
+      'https://linkedin.com/in/alicia-stone-austin',
+      'https://linkedin.com/in/jordan-carter-austin',
+    ]);
+  });
+
   it('bounds public LinkedIn evidence before returning a lead', async () => {
     const longTitle = 'Sam Carter - Dentist and practice owner at Austin Dental Clinic - ' +
       'Public clinic leader '.repeat(20) +

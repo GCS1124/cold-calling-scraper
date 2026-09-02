@@ -123,6 +123,16 @@ const sourceLabel = 'LinkedIn';
 const leadSourceLabel = 'LinkedIn, Public Profile';
 const providerId = 'linkedin-search';
 
+// Collect a small ranked headroom above the requested count. Public search
+// engines often repeat the same employer or surface a weak profile first; the
+// extra candidates let the final ranking prefer stronger, better corroborated
+// public matches without ever returning more than the requested count.
+const getCandidateBudget = (requestedCount: number) =>
+  Math.min(
+    600,
+    requestedCount + Math.max(12, Math.ceil(requestedCount * 0.2)),
+  );
+
 const queryCache = new Map<
   string,
   { expiresAt: number; result: ProviderSearchResult }
@@ -894,6 +904,34 @@ const extractLinkedInProfileReference = (value: string) => {
   );
 };
 
+const extractLinkedInProfileReferences = (
+  value: string,
+  decodedUrls: string[] = [],
+) => {
+  const profiles = new Set<string>();
+  const addProfile = (candidate?: string) => {
+    const profile = normalizeLinkedInProfileUrl(candidate);
+    if (profile) {
+      profiles.add(profile);
+    }
+  };
+
+  decodedUrls.forEach(addProfile);
+  for (const match of value.matchAll(
+    /(?:https?:\/\/)?(?:[a-z]{2,3}\.)?(?:www\.)?linkedin\.com\/(?:in|pub)\/[^\s<>\")\]]+/gi,
+  )) {
+    addProfile(match[0]);
+  }
+
+  for (const match of value.matchAll(
+    /linkedin\.com\s*[›>]\s*(in|pub)\s*[›>]\s*([a-z0-9][a-z0-9-]{1,120})/gi,
+  )) {
+    addProfile(`https://linkedin.com/${match[1]}/${match[2]}`);
+  }
+
+  return [...profiles];
+};
+
 const isLinkedInProfileUrl = (value: string) => Boolean(normalizeLinkedInProfileUrl(value));
 
 const slugToName = (value?: string) => {
@@ -1365,8 +1403,9 @@ const parseMarkdownResults = (markdown: string, decodeUrl: (value: string) => st
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) {
-      if (current?.snippet) {
-        current.snippet += ' ';
+      const activeResult = current as SearchResult | null;
+      if (activeResult?.snippet) {
+        activeResult.snippet += ' ';
       }
       continue;
     }
@@ -1382,18 +1421,47 @@ const parseMarkdownResults = (markdown: string, decodeUrl: (value: string) => st
     }
 
     const urls = extractUrls(line).map((url) => decodeUrl(url));
-    const profileUrl =
-      urls.map(normalizeLinkedInProfileUrl).find(Boolean) ??
-      extractLinkedInProfileReference(line);
+    const linkedProfileEntries = [...line.matchAll(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+    )]
+      .map((match) => ({
+        profileUrl: normalizeLinkedInProfileUrl(decodeUrl(match[2] ?? '')),
+        title: stripMarkdown(match[1] ?? ''),
+      }))
+      .filter(
+        (entry): entry is { profileUrl: string; title: string } => Boolean(entry.profileUrl),
+      );
+    const profileUrls = [
+      ...new Set([
+        ...linkedProfileEntries.map((entry) => entry.profileUrl),
+        ...extractLinkedInProfileReferences(line, urls),
+      ]),
+    ];
     const visibleText = stripMarkdown(line);
 
-    if (profileUrl) {
+    if (profileUrls.length) {
       flush();
-      current = {
-        title: visibleText,
-        url: profileUrl,
-        snippet: '',
-      };
+      for (let index = 0; index < profileUrls.length; index += 1) {
+        const profileUrl = profileUrls[index];
+        if (!profileUrl) {
+          continue;
+        }
+
+        const title =
+          linkedProfileEntries.find((entry) => entry.profileUrl === profileUrl)?.title ||
+          visibleText;
+        const nextResult = {
+          title,
+          url: profileUrl,
+          snippet: '',
+        };
+
+        if (index === profileUrls.length - 1) {
+          current = nextResult;
+        } else {
+          results.push(nextResult);
+        }
+      }
       continue;
     }
 
@@ -1401,7 +1469,8 @@ const parseMarkdownResults = (markdown: string, decodeUrl: (value: string) => st
       continue;
     }
 
-    current.snippet = `${current.snippet} ${visibleText}`.trim();
+    const activeResult = current as SearchResult;
+    activeResult.snippet = `${activeResult.snippet} ${visibleText}`.trim();
   }
 
   flush();
@@ -1987,13 +2056,14 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
   const fallbackQueries = buildFallbackQueryVariants(request, location).filter(
     (query) => !primaryQueryKeys.has(query.toLowerCase()),
   );
+  const candidateBudget = getCandidateBudget(request.count);
   const configuredMaxResults = readBoundedNumber(
     process.env.LINKEDIN_SEARCH_MAX_RESULTS,
-    request.count,
+    candidateBudget,
     1,
-    request.count,
+    candidateBudget,
   );
-  const maxResults = Math.min(request.count, configuredMaxResults);
+  const maxResults = Math.min(candidateBudget, configuredMaxResults);
   const candidates = new Map<string, LinkedInCandidate>();
   const warnings: ProviderWarning[] = [];
   const providerHealth = createProviderHealth();
