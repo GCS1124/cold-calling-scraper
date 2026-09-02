@@ -837,6 +837,21 @@ describe('App', () => {
     expect(content).toMatch(/Missing Email\s*1/);
     expect(content).toMatch(/Missing Phone\s*1/);
 
+    const inspectButton = container.querySelector(
+      'button[aria-label="Inspect Public LinkedIn Dentist"]',
+    );
+    if (!inspectButton) {
+      throw new Error('Could not find LinkedIn lead inspect button');
+    }
+
+    await clickElement(inspectButton);
+    const expandedContent = normalizedText(container);
+    expect(expandedContent).toContain('Lead snapshot');
+    expect(expandedContent).toContain('Profile identity is public');
+    expect(expandedContent).toContain('Role matched');
+    expect(expandedContent).toContain('Location matched');
+    expect(expandedContent).toContain('3 query paths · 2 public sources');
+
     await unmount();
   });
 
