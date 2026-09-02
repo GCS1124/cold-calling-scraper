@@ -767,6 +767,8 @@ const quoteQueryTerm = (value: string) => {
 
 type LinkedInProfilePath = 'in' | 'pub';
 
+const publicLinkedInProfilePaths: LinkedInProfilePath[] = ['in', 'pub'];
+
 const buildLinkedInQuery = (
   company: string,
   location: string,
@@ -790,6 +792,11 @@ const buildLinkedInQueryFromPhrase = (
 ) =>
   normalizeText(
     [`site:linkedin.com/${profilePath}/`, phrase].filter(Boolean).join(' '),
+  );
+
+const buildLinkedInProfilePathQueries = (phrase: string) =>
+  publicLinkedInProfilePaths.map((profilePath) =>
+    buildLinkedInQueryFromPhrase(phrase, profilePath),
   );
 
 const prioritizeRoleTerms = (genericRoleTerms: string[], categoryRoleTerms: string[]) => {
@@ -1197,8 +1204,12 @@ const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocati
   const isBroadLocation = location.mode === 'timezone' || location.mode === 'nationwide';
   const broadLocationLabel = normalizeMatchText(location.label);
   const discoveryQueries = buildDiscoveryQueryVariants(request.companyType, location, profile)
-    .slice(0, 16)
-    .map((phrase) => buildLinkedInQueryFromPhrase(phrase))
+    .slice(0, 12)
+    .flatMap((phrase, index) =>
+      index < 4
+        ? buildLinkedInProfilePathQueries(phrase)
+        : [buildLinkedInQueryFromPhrase(phrase)],
+    )
     .filter(
       (query) =>
         !isBroadLocation ||
@@ -1244,18 +1255,24 @@ const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocati
      return buildLinkedInQuery(alias, locationTerm, role);
    });
 
- const legacyProfileQueries = [
-   buildLinkedInQueryFromPhrase(`${request.companyType} in ${primaryLocation}`, 'pub'),
- ];
+ const legacyProfileQuery = buildLinkedInQueryFromPhrase(
+   `${request.companyType} in ${primaryLocation}`,
+   'pub',
+ );
+ const legacyRoleQueries = prioritizedRoleTerms.slice(0, 3).map((role) =>
+   buildLinkedInQuery(primaryCompany, primaryLocation, role, 'pub'),
+ );
 
  const queryCandidates = unique([
    buildLinkedInQueryFromPhrase(`${request.companyType} in ${primaryLocation}`),
-    ...legacyProfileQueries,
-   ...aliasQueries,
-    ...roleQueries.slice(0, 10),
+    ...roleQueries.slice(0, 4),
+    legacyProfileQuery,
+    ...aliasQueries,
+    ...legacyRoleQueries,
+    ...roleQueries.slice(4, 10),
     ...discoveryQueries.slice(0, 5),
     ...companyQueries.slice(0, 5),
-    ...roleQueries.slice(6),
+    ...roleQueries.slice(10),
     ...discoveryQueries.slice(5),
     ...companyQueries.slice(5),
   ]);
@@ -1287,6 +1304,7 @@ const buildFallbackQueryVariants = (request: SearchRequest, location: Normalized
 
       return [
         buildLinkedInQuery(company, locationTerm, role),
+        buildLinkedInQuery(company, locationTerm, role, 'pub'),
         buildLinkedInQueryFromPhrase(`${company} ${role ?? 'owner'} ${locationTerm}`),
       ];
     }),

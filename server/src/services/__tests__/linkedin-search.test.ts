@@ -207,6 +207,27 @@ Owner at Austin Dental Spa.
     expect(queries.some((query) => query.includes('site:linkedin.com/pub/'))).toBe(true);
   });
 
+  it('rotates legacy /pub role queries alongside modern /in/ queries', async () => {
+    const { fetchMock, queries } = makeQueryCaptureFetch(emptyDuckDuckGoBody);
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Dentist', city: 'Austin', count: 50 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(
+      [...queries].some(
+        (query) =>
+          query.includes('site:linkedin.com/pub/') &&
+          /practice owner|clinic owner|office manager/i.test(query),
+      ),
+    ).toBe(true);
+    expect([...queries].some((query) => query.includes('site:linkedin.com/in/'))).toBe(true);
+  });
+
   it('ranks profiles corroborated by multiple public providers above single-provider matches', async () => {
     const corroboratedProfile = `1. [Morgan Chen - Owner at Austin Dental Care | LinkedIn](https://www.linkedin.com/in/morgan-chen-dental/)
 Dentist and practice owner in Austin, Texas.`;
