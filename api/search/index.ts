@@ -4,6 +4,10 @@ import { searchRequestSchema } from '../_lib/search-contract.js';
 import { getVercelSearchService } from '../_lib/vercel-search-service.js';
 import { flattenSearchRequest } from '../../server/src/utils/search-location.js';
 
+const isSearchPersistenceFailure = (error: unknown) =>
+  error instanceof Error &&
+  (error as Error & { code?: unknown }).code === 'SEARCH_PERSISTENCE_UNAVAILABLE';
+
 export default async function handler(req: any, res: any) {
   if (req.method === 'GET') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -28,6 +32,14 @@ export default async function handler(req: any, res: any) {
       res.status(400).json({
         error: 'Invalid search request',
         details: error.flatten(),
+      });
+      return;
+    }
+
+    if (isSearchPersistenceFailure(error)) {
+      res.status(503).json({
+        error: error.message,
+        code: 'SEARCH_PERSISTENCE_UNAVAILABLE',
       });
       return;
     }

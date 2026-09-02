@@ -107,4 +107,32 @@ describe('/api/search', () => {
     expect(vercelSearchService.advanceSearch).toHaveBeenCalledWith('search-1');
     expect(waitUntil).toHaveBeenCalledTimes(1);
   });
+
+  it('returns a configuration error when search persistence is unavailable', async () => {
+    const error = Object.assign(
+      new Error('Search persistence is not configured.'),
+      { code: 'SEARCH_PERSISTENCE_UNAVAILABLE' },
+    );
+    vi.mocked(vercelSearchService.startSearch).mockRejectedValue(error);
+    const { response, state } = createResponse();
+
+    await handler(
+      {
+        method: 'POST',
+        body: {
+          companyType: 'Dentist',
+          sourceMode: 'linkedin',
+          location: { mode: 'timezone', timeZone: 'EST' },
+          count: 50,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(503);
+    expect(state.body).toEqual({
+      error: 'Search persistence is not configured.',
+      code: 'SEARCH_PERSISTENCE_UNAVAILABLE',
+    });
+  });
 });

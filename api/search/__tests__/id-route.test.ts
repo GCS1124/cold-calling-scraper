@@ -185,4 +185,29 @@ describe('/api/search/[id]', () => {
     expect(vercelSearchService.advanceSearch).toHaveBeenCalledWith('search-1');
     expect(waitUntil).toHaveBeenCalledTimes(1);
   });
+
+  it('returns a configuration error when the snapshot store is unavailable', async () => {
+    const error = Object.assign(
+      new Error('Search persistence is unavailable.'),
+      { code: 'SEARCH_PERSISTENCE_UNAVAILABLE' },
+    );
+    vi.mocked(getSearchJobSnapshot).mockRejectedValue(error);
+    const { response, state } = createResponse();
+
+    await handler(
+      {
+        method: 'GET',
+        query: {
+          id: 'search-1',
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(503);
+    expect(state.body).toEqual({
+      error: 'Search persistence is unavailable.',
+      code: 'SEARCH_PERSISTENCE_UNAVAILABLE',
+    });
+  });
 });

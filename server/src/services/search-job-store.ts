@@ -55,6 +55,22 @@ export type SearchJobStore = {
   close?: () => Promise<void>;
 };
 
+export class SearchPersistenceError extends Error {
+  readonly code = 'SEARCH_PERSISTENCE_UNAVAILABLE';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'SearchPersistenceError';
+  }
+}
+
+export const isSearchPersistenceError = (
+  error: unknown,
+): error is SearchPersistenceError =>
+  error instanceof SearchPersistenceError ||
+  (error instanceof Error &&
+    (error as Error & { code?: unknown }).code === 'SEARCH_PERSISTENCE_UNAVAILABLE');
+
 export const CURRENT_SCHEMA_VERSION = 2;
 
 const DEFAULT_JOB_TTL_MS = 1000 * 60 * 60 * 6;
@@ -87,6 +103,8 @@ const connectionString =
 const sanitizedConnectionString = connectionString
   ? normalizeConnectionString(connectionString)
   : '';
+
+const isVercelRuntime = process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV);
 
 const shouldUseSsl = (url: string) => {
   if (!url) return false;
@@ -300,6 +318,20 @@ const parsePayload = (payload: SearchJobRecord | string | unknown) => {
   } catch {
     return null;
   }
+};
+
+const unavailableStore = (message: string): SearchJobStore => {
+  const fail = async (): Promise<never> => {
+    throw new SearchPersistenceError(message);
+  };
+
+  return {
+    ensureSchema: fail,
+    get: fail,
+    claim: fail,
+    upsert: fail,
+    deleteExpired: fail,
+  };
 };
 
 const memoryStore = (): SearchJobStore => {
@@ -591,6 +623,12 @@ export const createSearchJobStore = (): SearchJobStore => {
   const fallback = memoryStore();
 
   if (!connectionString) {
+    if (isVercelRuntime) {
+      return unavailableStore(
+        'Search persistence is not configured. Add a Postgres connection string to the Vercel project before running searches.',
+      );
+    }
+
     return fallback;
   }
 
@@ -604,6 +642,13 @@ export const createSearchJobStore = (): SearchJobStore => {
     try {
       return await operation();
     } catch (error) {
+      if (isVercelRuntime) {
+        console.error(`[search-job-store] postgres ${label} failed`, error);
+        throw new SearchPersistenceError(
+          `Search persistence is unavailable while ${label}. Check the Vercel Postgres connection settings and try again.`,
+        );
+      }
+
       console.error(`[search-job-store] postgres ${label} failed; using memory fallback`, error);
       return fallbackOperation();
     }

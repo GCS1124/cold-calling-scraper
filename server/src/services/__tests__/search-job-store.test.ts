@@ -47,6 +47,18 @@ describe('createSearchJobStore', () => {
     );
   });
 
+  it('fails fast on Vercel when durable search storage is not configured', async () => {
+    vi.stubEnv('VERCEL', '1');
+    vi.stubEnv('VERCEL_ENV', 'production');
+
+    const { createSearchJobStore } = await import('../search-job-store');
+    const store = createSearchJobStore();
+
+    await expect(store.ensureSchema()).rejects.toMatchObject({
+      code: 'SEARCH_PERSISTENCE_UNAVAILABLE',
+    });
+  });
+
   it('never exposes more leads than the requested count', async () => {
     const { createSearchJobRecord, toSearchResponse } = await import('../search-job-store');
     const leads = Array.from({ length: 62 }, (_, index): Lead => ({
