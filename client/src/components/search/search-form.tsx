@@ -36,6 +36,11 @@ export function SearchForm({
     : isAiMode
       ? 'Free AI mode expands the category into decision-maker searches, merges public results, and checks only publicly listed business contacts.'
       : 'Tailored to Google Business listings: try dentist, orthodontist, plumber, roofer, HVAC contractor, real estate agent, attorney, urgent care, mechanic, or commercial cleaning.';
+  const locationSummary = value.locationMode === 'timezone'
+    ? timeZoneOptions.find((option) => option.code === value.timeZone)?.label ?? 'Choose a time zone'
+    : value.city.trim() && value.stateCode
+      ? `${value.city.trim()}, ${value.stateCode}`
+      : 'Choose a city and state';
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -134,6 +139,39 @@ export function SearchForm({
                 <p className="mt-1 text-xs leading-5 text-slate-400">
                   Openly listed business contact details
                 </p>
+              </div>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/35 p-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                  Live search blueprint
+                </p>
+                <span className="text-[11px] font-semibold text-blue-200">
+                  Built from your inputs
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    Category
+                  </p>
+                  <p className="mt-1 truncate text-sm font-semibold text-white">
+                    {value.companyType.trim() || 'Your business type'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    Region
+                  </p>
+                  <p className="mt-1 truncate text-sm font-semibold text-white">{locationSummary}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    Intent
+                  </p>
+                  <p className="mt-1 truncate text-sm font-semibold text-white">Decision-makers</p>
+                </div>
               </div>
             </div>
           </div>

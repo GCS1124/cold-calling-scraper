@@ -574,7 +574,13 @@ describe('App', () => {
     expect(normalizedText(container)).toContain('LinkedIn discovery recipe');
     expect(normalizedText(container)).toContain('Role expansion');
     expect(normalizedText(container)).toContain('Public-site enrichment');
+    expect(normalizedText(container)).toContain('Live search blueprint');
+    expect(normalizedText(container)).toContain('Category');
+    expect(normalizedText(container)).toContain('Your business type');
+    expect(normalizedText(container)).toContain('Intent');
+    expect(normalizedText(container)).toContain('Decision-makers');
     await typeValue(getCompanyTypeInput(container), 'Founders');
+    expect(normalizedText(container)).toContain('Founders');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
 
