@@ -190,7 +190,11 @@ const stripMarkdown = (value: string) =>
       .trim(),
   );
 
-const extractUrls = (value: string) => Array.from(value.matchAll(/https?:\/\/[^\s<>"')\]]+/gi), (match) => match[0]);
+const publicWebsiteTokenPattern =
+  /(?:(?:https?:\/\/|www\.)[^\s<>"')\]]+|(?<![@\w])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?:\/[^\s<>"')\]]*)?)/gi;
+
+const extractUrls = (value: string) =>
+  Array.from(value.matchAll(publicWebsiteTokenPattern), (match) => match[0]);
 
 const excludedPublicWebsiteHosts = new Set([
   'bing.com',
@@ -214,7 +218,10 @@ const extractPublicWebsite = (...values: string[]) => {
   for (const value of values) {
     for (const rawUrl of extractUrls(value)) {
       try {
-        const url = new URL(rawUrl.replace(/[),.;:!?]+$/, ''));
+        const candidateUrl = /^(?:https?:\/\/)/i.test(rawUrl)
+          ? rawUrl
+          : `https://${rawUrl}`;
+        const url = new URL(candidateUrl.replace(/[),.;:!?]+$/, ''));
         const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
 
         if (

@@ -249,9 +249,12 @@ const stripMarkdown = (value: string) =>
       .trim(),
   );
 
+const publicWebsiteTokenPattern =
+  /(?:(?:https?:\/\/|www\.)[^\s<>"')\]]+|(?<![@\w])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?:\/[^\s<>"')\]]*)?)/gi;
+
 const extractUrls = (value: string) =>
   Array.from(
-    value.matchAll(/https?:\/\/[^\s<>"')\]]+/gi),
+    value.matchAll(publicWebsiteTokenPattern),
     (match) => match[0].replace(/[.,;:]+$/, ''),
   );
 
@@ -285,7 +288,10 @@ const decodeDuckDuckGoUrl = (value: string) => {
 
 const normalizeWebsite = (value: string) => {
   try {
-    const url = new URL(value);
+    const candidateUrl = /^(?:https?:\/\/)/i.test(value)
+      ? value
+      : `https://${value}`;
+    const url = new URL(candidateUrl);
     url.hash = '';
 
     if (!/^https?:$/i.test(url.protocol)) {

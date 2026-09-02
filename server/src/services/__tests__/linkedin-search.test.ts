@@ -711,6 +711,30 @@ Markdown Content:
     expect(result.leads[0]?.hasWebsite).toBe(true);
   });
 
+  it('normalizes www and bare public website domains from LinkedIn snippets', async () => {
+    const { fetchMock } = makeQueryCaptureFetch(
+      [
+        'Title: LinkedIn search results',
+        '',
+        'Markdown Content:',
+        '1. [Jordan Carter - Owner at Austin Dental Spa | LinkedIn](https://www.linkedin.com/in/jordan-carter-dental/)',
+        'Dentist and practice owner in Austin, TX. Website: www.austindentalspa.com',
+      ].join('\n'),
+    );
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Dentist', city: 'Austin', count: 50 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(1);
+    expect(result.leads[0]?.website).toBe('https://www.austindentalspa.com/');
+    expect(result.leads[0]?.hasWebsite).toBe(true);
+  });
+
   it('does not expose a private-network URL found in a public LinkedIn result', async () => {
     const { fetchMock } = makeQueryCaptureFetch(
       [
