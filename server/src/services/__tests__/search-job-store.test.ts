@@ -7,11 +7,13 @@ vi.mock('pg', () => {
   const on = vi.fn();
 
   return {
-    Pool: vi.fn().mockImplementation(() => ({
-      on,
-      query,
-      end: vi.fn().mockResolvedValue(undefined),
-    })),
+    Pool: vi.fn(function MockPool() {
+      return {
+        on,
+        query,
+        end: vi.fn().mockResolvedValue(undefined),
+      };
+    }),
   };
 });
 
