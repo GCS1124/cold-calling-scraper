@@ -821,6 +821,9 @@ describe('App', () => {
     expect(content).toContain('12 query paths');
     expect(content).toContain('3 public search sources');
     expect(content).toContain('Public match');
+    expect(content).toContain('Role signal');
+    expect(content).toContain('Location signal');
+    expect(content).toContain('3 query paths');
     expect(content).toContain('Match intelligence');
     expect(content).toContain('Cross-source');
     expect(content).toContain('Role signals');

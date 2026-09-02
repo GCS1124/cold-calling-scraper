@@ -96,22 +96,52 @@ export function ResultsTable({
                       </div>
                     ) : null}
                     {isPublicLinkedInLead ? (
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold">
-                        <span className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">
-                          Public match
-                        </span>
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
-                          {matchLabel} · {lead.confidence}%
-                        </span>
-                        {lead.matchSignals?.publicSources && lead.matchSignals.publicSources > 1 ? (
-                          <span
-                            className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-700"
-                            title={`${lead.matchSignals.queryMatches} public query matches across ${lead.matchSignals.publicSources} public sources`}
-                          >
-                            {lead.matchSignals.publicSources}-source signal
+                      <>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold">
+                          <span className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">
+                            Public match
                           </span>
+                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
+                            {matchLabel} · {lead.confidence}%
+                          </span>
+                          {lead.matchSignals?.publicSources && lead.matchSignals.publicSources > 1 ? (
+                            <span
+                              className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-700"
+                              title={`${lead.matchSignals.queryMatches} public query matches across ${lead.matchSignals.publicSources} public sources`}
+                            >
+                              {lead.matchSignals.publicSources}-source signal
+                            </span>
+                          ) : null}
+                        </div>
+                        {lead.matchSignals ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-slate-500">
+                            {lead.matchSignals.roleMatched ? (
+                              <span
+                                className="rounded-full border border-violet-100 bg-violet-50 px-2 py-1 text-violet-700"
+                                title="The public profile matched an expanded decision-maker role term."
+                              >
+                                Role signal
+                              </span>
+                            ) : null}
+                            {lead.matchSignals.locationMatched ? (
+                              <span
+                                className="rounded-full border border-amber-100 bg-amber-50 px-2 py-1 text-amber-700"
+                                title="The public result contained a matching city, state, or regional signal."
+                              >
+                                Location signal
+                              </span>
+                            ) : null}
+                            {lead.matchSignals.queryMatches > 0 ? (
+                              <span
+                                className="rounded-full border border-slate-200 bg-white px-2 py-1 text-slate-600"
+                                title="Number of public query paths that matched this lead."
+                              >
+                                {lead.matchSignals.queryMatches} query paths
+                              </span>
+                            ) : null}
+                          </div>
                         ) : null}
-                      </div>
+                      </>
                     ) : null}
                   </td>
                   <td className="px-4 py-4">{lead.mobile || '—'}</td>
