@@ -169,4 +169,24 @@ describe('deduplicateLeads', () => {
       locationMatched: true,
     });
   });
+
+  it('keeps different public LinkedIn profiles at the same employer separate', () => {
+    const leads = deduplicateLeads([
+      makeLead({
+        id: 'linkedin-owner',
+        name: 'Alicia Stone',
+        website: 'https://austin-dental.example',
+        listingUrl: 'https://linkedin.com/in/alicia-stone',
+      }),
+      makeLead({
+        id: 'linkedin-manager',
+        name: 'Jordan Carter',
+        website: 'https://austin-dental.example',
+        listingUrl: 'https://linkedin.com/in/jordan-carter',
+      }),
+    ]);
+
+    expect(leads).toHaveLength(2);
+    expect(leads.map((lead) => lead.name)).toEqual(['Alicia Stone', 'Jordan Carter']);
+  });
 });

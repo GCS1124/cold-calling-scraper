@@ -16,6 +16,24 @@ const normalizeText = (value?: string) =>
     .toLowerCase()
     .replace(/\s+/g, ' ');
 
+const isLinkedInProfileListing = (value?: string) => {
+  if (!value?.trim()) {
+    return false;
+  }
+
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    const hostname = url.hostname.replace(/^www\./i, '').toLowerCase();
+
+    return (
+      (hostname === 'linkedin.com' || hostname.endsWith('.linkedin.com')) &&
+      /^\/(?:in|pub)\//i.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
+};
+
 const pickValue = (...values: Array<string | undefined>) =>
   values.find((value) => Boolean(value?.trim())) ?? '';
 
@@ -156,7 +174,10 @@ const buildIdentityKeys = (lead: Lead) => {
   const nameKey = canonicalizeName(lead.name);
   const cityKey = normalizeText(lead.city);
 
-  if (domain) {
+  // A LinkedIn profile represents a person, while its public website usually
+  // represents the employer. Do not collapse multiple people at one employer
+  // into one lead just because their profiles expose the same domain.
+  if (domain && !isLinkedInProfileListing(lead.listingUrl)) {
     keys.push(`domain:${domain}`);
   }
 
