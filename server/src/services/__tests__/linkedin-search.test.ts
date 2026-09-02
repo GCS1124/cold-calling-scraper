@@ -835,6 +835,52 @@ Markdown Content:
     expect(result.leads[0]?.hasWebsite).toBe(true);
   });
 
+  it('preserves a public website when a later provider omits it', async () => {
+    const websiteBody = [
+      'Title: LinkedIn search results',
+      '',
+      'Markdown Content:',
+      '1. [Jordan Carter - Owner at Austin Dental Spa | LinkedIn](https://www.linkedin.com/in/jordan-carter-dental/)',
+      'Dentist and practice owner in Austin, TX. Official website: https://austindentalspa.example',
+    ].join('\n');
+    const sparseBody = [
+      'Title: LinkedIn search results',
+      '',
+      'Markdown Content:',
+      '1. [Jordan Carter - Owner at Austin Dental Spa | LinkedIn](https://www.linkedin.com/in/jordan-carter-dental/)',
+      'Owner at Austin Dental Spa in Austin, TX.',
+    ].join('\n');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes('search.brave.com')) {
+        return makeResponse(websiteBody);
+      }
+
+      if (url.includes('bing.com')) {
+        return makeResponse(sparseBody);
+      }
+
+      if (url.includes('html.duckduckgo.com')) {
+        return makeResponse(emptyDuckDuckGoBody);
+      }
+
+      throw new Error('Unexpected fetch: ' + url);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Dentist', city: 'Austin', count: 50 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(1);
+    expect(result.leads[0]?.website).toBe('https://austindentalspa.example/');
+    expect(result.leads[0]?.hasWebsite).toBe(true);
+  });
+
   it('keeps an external business website exposed by a public LinkedIn result title', async () => {
     const { fetchMock } = makeQueryCaptureFetch(
       [

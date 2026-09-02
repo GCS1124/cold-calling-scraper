@@ -1897,7 +1897,7 @@ const runLinkedInQuerySet = async ({
             (candidateWithoutScore.headline?.length ?? 0) > (existing.headline?.length ?? 0)
               ? candidateWithoutScore.headline
               : existing.headline,
-          website: candidateWithoutScore.website ?? existing.website,
+          website: candidateWithoutScore.website || existing.website,
           snippet:
             candidateWithoutScore.snippet.length > existing.snippet.length
               ? candidateWithoutScore.snippet
