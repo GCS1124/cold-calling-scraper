@@ -62,6 +62,7 @@ Austin Dental Spa provides dental care in Austin, TX. Call (512) 555-0199 or ema
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.mocked(httpClient.get).mockReset();
 });
 
 describe('enrichLinkedinLeadsWithPublicContacts', () => {
@@ -667,6 +668,67 @@ AVMSmiles is a dentist in Austin, TX. Call (512) 555-0199 or email hello@avmsmil
     expect(result.leads[0]?.email).toBe('');
     expect(result.leads[0]?.mobile).toBe('');
     expect(httpClient.get).not.toHaveBeenCalled();
+  });
+
+  it('ignores headline attribution suffixes when matching a business website', async () => {
+    const attributionSearchBody = `Title: public website results
+
+Markdown Content:
+1. [Board directory](https://board.example)
+Board member directory and professional resources in Austin, TX.
+2. [Restimulate Health](https://restimulate.example)
+Restimulate Health is a dental practice in Austin, TX. Call (512) 555-0188.
+`;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('search.brave.com') || url.includes('bing.com')) {
+          return new Response(attributionSearchBody, {
+            status: 200,
+            headers: { 'Content-Type': 'text/plain' },
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      }) as typeof fetch,
+    );
+
+    vi.mocked(httpClient.get).mockImplementation(async (url) => {
+      if (String(url).includes('board.example')) {
+        throw new Error('Unrelated website must not be crawled');
+      }
+
+      return {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+        data: '<a href="tel:+15125550188">Call</a>',
+      } as never;
+    });
+
+    const result = await enrichLinkedinLeadsWithPublicContacts({
+      leads: [
+        makeLead({
+          name: 'Dr. Edward Alvarez',
+          headline: 'Founder & CEO, Restimulate Health | Board Member at Board',
+        }),
+      ],
+      request: { companyType: 'Dentist', city: 'Austin', count: 1 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 10_000,
+    });
+
+    expect(result.leads[0]?.website).toBe('https://restimulate.example');
+    expect(result.leads[0]?.mobile).toBe('+1 512 555 0188');
+    expect(httpClient.get).toHaveBeenCalledWith(
+      'https://restimulate.example/',
+      expect.anything(),
+    );
+    expect(
+      vi.mocked(httpClient.get).mock.calls.some(([url]) => String(url).includes('board.example')),
+    ).toBe(false);
   });
 
   it('does not crawl loopback or private-network websites from public lead data', async () => {

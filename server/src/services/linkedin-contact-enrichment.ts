@@ -81,6 +81,7 @@ const providerFailureThreshold = 2;
 const queryCacheTtlMs = 15 * 60 * 1000;
 const maxQueryCacheEntries = 300;
 const maxWebsiteCandidates = 3;
+const minimumWebsiteMatchScore = 60;
 
 const queryCache = new Map<
   string,
@@ -665,12 +666,19 @@ const roleOnlyHeadlinePattern =
 const headlineRolePrefixPattern =
   /^(?:(?:co-)?founder|owner operator|business owner|practice owner|clinic owner|franchise owner|owner|chief executive officer|ceo|president|managing partner|partner|principal|director|general manager|operations manager|office manager|practice manager|service manager|store manager|operator|dentist|doctor|physician|contractor|realtor|attorney|lawyer|consultant|(?:[a-z][a-z'-]*(?:\s+[a-z][a-z'-]*){0,3})\s+(?:manager|director|partner|administrator|advisor|consultant|superintendent|controller|executive|officer|owner|founder))(?:\s+|\s*[,;:/|–—-]\s*)(.+)$/i;
 
+const roleOrganizationPattern =
+  /^(?:.*\b(?:co[- ]?founder|owner(?:\s+operator)?|chief executive officer|ceo|president|managing partner|partner|principal|director|manager|operator|dentist|doctor|physician|contractor|realtor|attorney|lawyer|consultant)\b)\s*(?:[,;:]|\s+(?:at|with|for|of)\s+|\s+-\s+)\s*([^|•·]+)/i;
+
 const extractOrganizationHint = (headline: string, category: string) => {
   const normalizedHeadline = normalizeText(headline);
+  const headlineWithoutAttribution = normalizeText(
+    normalizedHeadline.split(/\s*[|•·]\s*/)[0] ?? normalizedHeadline,
+  );
   const candidates = [
-    normalizedHeadline.match(/\b(?:at|with|for|of)\s+(.+)$/i)?.[1] ?? '',
-    normalizedHeadline.match(/\s[-|]\s(.+)$/)?.[1] ?? '',
-    headlineRolePrefixPattern.exec(normalizedHeadline)?.[1] ?? '',
+    roleOrganizationPattern.exec(headlineWithoutAttribution)?.[1] ?? '',
+    headlineWithoutAttribution.match(/\b(?:at|with|for|of)\s+(.+)$/i)?.[1] ?? '',
+    headlineWithoutAttribution.match(/\s-\s(.+)$/)?.[1] ?? '',
+    headlineRolePrefixPattern.exec(headlineWithoutAttribution)?.[1] ?? '',
   ];
 
   for (const candidate of candidates) {
@@ -690,12 +698,12 @@ const extractOrganizationHint = (headline: string, category: string) => {
   }
 
   if (
-    normalizedHeadline.length >= 4 &&
-    normalizedHeadline.length <= 100 &&
-    !roleOnlyHeadlinePattern.test(normalizedHeadline) &&
-    normalizeIdentityText(normalizedHeadline) !== normalizeIdentityText(category)
+    headlineWithoutAttribution.length >= 4 &&
+    headlineWithoutAttribution.length <= 100 &&
+    !roleOnlyHeadlinePattern.test(headlineWithoutAttribution) &&
+    normalizeIdentityText(headlineWithoutAttribution) !== normalizeIdentityText(category)
   ) {
-    return normalizedHeadline;
+    return headlineWithoutAttribution;
   }
 
   return '';
@@ -765,6 +773,8 @@ const scoreResult = (
   const hasOrganizationEvidence =
     organization.length >= 5 &&
     (searchable.includes(organization) || compactSearchable.includes(compactOrganization));
+  const hasOrganizationInTitle =
+    organization.length >= 5 && normalizeIdentityText(result.title).includes(organization);
   const category = normalizeIdentityText(request.companyType || lead.category);
   const city = normalizeIdentityText(location.city || location.label);
 
@@ -779,6 +789,7 @@ const scoreResult = (
   }
 
   score += hasOrganizationEvidence ? 52 : 0;
+  score += hasOrganizationInTitle ? 10 : 0;
   score += category && searchable.includes(category) ? 10 : 0;
   score += city && searchable.includes(city) ? 6 : 0;
 
@@ -848,19 +859,19 @@ const resolveBusinessWebsite = async (
       }
     }
 
-    if ([...candidates.values()].some((candidate) => candidate.score >= 42)) {
+    if ([...candidates.values()].some((candidate) => candidate.score >= minimumWebsiteMatchScore)) {
       break;
     }
   }
 
   const best = [...candidates.values()].sort((left, right) => right.score - left.score)[0];
   const rankedCandidates = [...candidates.values()]
-    .filter((candidate) => candidate.score >= 42)
+    .filter((candidate) => candidate.score >= minimumWebsiteMatchScore)
     .sort((left, right) => right.score - left.score)
     .slice(0, maxWebsiteCandidates);
 
   return {
-    website: best && best.score >= 42 ? best.result.url : '',
+    website: best && best.score >= minimumWebsiteMatchScore ? best.result.url : '',
     candidates: rankedCandidates.map(({ result }) => ({
       website: result.url,
       snippet: result.snippet,
