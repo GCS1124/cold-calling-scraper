@@ -150,6 +150,8 @@ Owner at Austin Dental Spa.
     expect(result.leads[0]?.matchSignals).toMatchObject({
       queryMatches: expect.any(Number),
       publicSources: expect.any(Number),
+      publicProviderNames: expect.arrayContaining(['Brave Search', 'Bing']),
+      categoryMatched: true,
       roleMatched: true,
       locationMatched: true,
     });

@@ -775,6 +775,8 @@ describe('App', () => {
           matchSignals: {
             queryMatches: 3,
             publicSources: 2,
+            publicProviderNames: ['Brave Search', 'Bing'],
+            categoryMatched: true,
             roleMatched: true,
             locationMatched: true,
           },
@@ -848,9 +850,11 @@ describe('App', () => {
     const expandedContent = normalizedText(container);
     expect(expandedContent).toContain('Lead snapshot');
     expect(expandedContent).toContain('Profile identity is public');
+    expect(expandedContent).toContain('Category matched');
     expect(expandedContent).toContain('Role matched');
     expect(expandedContent).toContain('Location matched');
     expect(expandedContent).toContain('3 query paths · 2 public sources');
+    expect(expandedContent).toContain('Brave Search + Bing');
 
     await unmount();
   });

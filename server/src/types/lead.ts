@@ -20,6 +20,8 @@ export type Lead = {
   matchSignals?: {
     queryMatches: number;
     publicSources: number;
+    publicProviderNames?: string[];
+    categoryMatched?: boolean;
     roleMatched: boolean;
     locationMatched: boolean;
   };

@@ -1688,6 +1688,10 @@ const buildLeadFromCandidate = (
     matchSignals: {
       queryMatches: candidate.matchedQueries.length,
       publicSources: candidate.matchedProviders.length,
+      publicProviderNames: candidate.matchedProviders.map(
+        (name) => searchSources.find((source) => source.name === name)?.label ?? name,
+      ),
+      categoryMatched: true,
       roleMatched: decisionMakerPattern.test(
         normalizeMatchText(`${candidate.title} ${candidate.headline ?? ''}`),
       ),

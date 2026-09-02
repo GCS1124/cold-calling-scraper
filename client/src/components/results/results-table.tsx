@@ -124,7 +124,7 @@ export function ResultsTable({
                             {lead.matchSignals?.publicSources && lead.matchSignals.publicSources > 1 ? (
                               <span
                                 className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-700"
-                                title={`${lead.matchSignals.queryMatches} public query matches across ${lead.matchSignals.publicSources} public sources`}
+                                title={`${lead.matchSignals.queryMatches} public query matches across ${lead.matchSignals.publicProviderNames?.join(', ') || `${lead.matchSignals.publicSources} public sources`}`}
                               >
                                 {lead.matchSignals.publicSources}-source signal
                               </span>
@@ -267,6 +267,11 @@ export function ResultsTable({
                               </span>
                               {isPublicLinkedInLead && lead.matchSignals ? (
                                 <>
+                                  {lead.matchSignals.categoryMatched ? (
+                                    <span className="rounded-full bg-blue-50 px-3 py-2 text-blue-700">
+                                      Category matched
+                                    </span>
+                                  ) : null}
                                   <span className="rounded-full bg-violet-50 px-3 py-2 text-violet-700">
                                     {lead.matchSignals.roleMatched ? 'Role matched' : 'Role not confirmed'}
                                   </span>
@@ -275,6 +280,9 @@ export function ResultsTable({
                                   </span>
                                   <span className="rounded-full bg-emerald-50 px-3 py-2 text-emerald-700">
                                     {lead.matchSignals.queryMatches} query paths · {lead.matchSignals.publicSources} public sources
+                                  </span>
+                                  <span className="rounded-full bg-blue-50 px-3 py-2 text-blue-700">
+                                    {lead.matchSignals.publicProviderNames?.join(' + ') || 'Public search sources'}
                                   </span>
                                 </>
                               ) : null}
