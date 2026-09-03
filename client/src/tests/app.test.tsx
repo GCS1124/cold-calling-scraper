@@ -515,7 +515,7 @@ describe('App', () => {
         id: `linkedin-public-contact-${index}`,
         name: `Public LinkedIn ${lead.name}`,
         source: 'LinkedIn',
-        listingUrl: `https://www.linkedin.com/in/public-linkedin-${index}`,
+        listingUrl: index === 1 ? undefined : `https://www.linkedin.com/in/public-linkedin-${index}`,
         contactSourceUrl: lead.website,
         publicEvidence: {
           profileTitle: `Public LinkedIn ${lead.name} - Founder`,
@@ -547,6 +547,14 @@ describe('App', () => {
         .querySelector('a[aria-label="Open LinkedIn profile for Public LinkedIn Northstar Labs"]')
         ?.getAttribute('href'),
     ).toBe('https://www.linkedin.com/in/public-linkedin-0');
+    expect(
+      container
+        .querySelector('a[aria-label="Open business website for Public LinkedIn Orbit Data Works"]')
+        ?.getAttribute('href'),
+    ).toBe('https://orbitdataworks.com');
+    expect(
+      container.querySelector('a[aria-label="Open LinkedIn profile for Public LinkedIn Orbit Data Works"]'),
+    ).toBeNull();
 
     await unmount();
   });

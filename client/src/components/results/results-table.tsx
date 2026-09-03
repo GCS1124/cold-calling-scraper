@@ -110,6 +110,11 @@ export function ResultsTable({
               const websiteUrl = lead.website && lead.website !== profileUrl ? lead.website : undefined;
               const fallbackUrl = !profileUrl && !websiteUrl ? lead.listingUrl : undefined;
               const primaryActionUrl = profileUrl || websiteUrl || fallbackUrl;
+              const primaryActionLabel = profileUrl
+                ? 'LinkedIn profile'
+                : websiteUrl
+                  ? 'business website'
+                  : 'lead source';
               const isExpanded = expandedLeadId === lead.id;
               const matchLabel =
                 lead.confidence >= 85
@@ -271,20 +276,23 @@ export function ResultsTable({
                     <td className="px-4 py-4">
                       <div className="flex gap-2">
                         <button
+                          aria-label={`Copy lead details for ${lead.name}`}
                           className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-blue-200 hover:text-blue-700"
                           onClick={() => onCopyRow(lead)}
+                          title="Copy lead details"
                           type="button"
                         >
                           <Copy className="h-4 w-4" />
                         </button>
                         <a
-                          aria-label={`Open ${isLinkedInLead ? 'LinkedIn profile' : 'lead source'} for ${lead.name}`}
+                          aria-label={`Open ${primaryActionLabel} for ${lead.name}`}
                           className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-blue-200 hover:text-blue-700"
                           href={primaryActionUrl || '#'}
                           onClick={(event) => {
                             if (!primaryActionUrl) event.preventDefault();
                           }}
                           rel="noreferrer"
+                          title={`Open ${primaryActionLabel}`}
                           target="_blank"
                         >
                           <ExternalLink className="h-4 w-4" />
