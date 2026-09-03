@@ -1108,6 +1108,8 @@ const publicLocationPrefixNoiseWords = new Set([
 
 const foreignLocationPattern =
   /\b(?:india|canada|mexico|brazil|australia|new zealand|singapore|pakistan|bangladesh|philippines|germany|france|spain|italy|china|japan|south africa|united kingdom|uae|united arab emirates)\b/i;
+const foreignCityPattern =
+  /\b(?:noida|gurgaon|gurugram|new delhi|bengaluru|bangalore|hyderabad|chennai|pune|kolkata|mumbai|karachi|lahore|dhaka|manila|toronto|vancouver|montreal|calgary|sydney|melbourne|auckland|dubai|abu dhabi)\b/i;
 
 const extractPublicProfileLocation = (
   candidate: Pick<LinkedInCandidate, 'title' | 'headline' | 'snippet'>,
@@ -1317,7 +1319,7 @@ const scoreCandidateRelevance = (
 
   if (
     (location.mode === 'timezone' || location.mode === 'nationwide') &&
-    foreignLocationPattern.test(searchable)
+    (foreignLocationPattern.test(searchable) || foreignCityPattern.test(searchable))
   ) {
     return 0;
   }

@@ -1471,6 +1471,54 @@ Markdown Content:
     expect(result.warnings[0]?.message).toContain('No public LinkedIn profiles');
   });
 
+  it.each([
+    {
+      companyType: 'Dentist',
+      title: 'Dr Ashish Singh - Owner at City Dental Clinic, Noida | LinkedIn',
+      slug: 'dr-ashish-singh-noida',
+      snippet: 'Dentist and practice owner at City Dental Clinic in Noida.',
+    },
+    {
+      companyType: 'HVAC contractor',
+      title: 'Rohan Mehta - Owner at Cooling Pro, Gurgaon | LinkedIn',
+      slug: 'rohan-mehta-gurgaon',
+      snippet: 'HVAC contractor and owner serving Gurgaon.',
+    },
+  ])('rejects explicit non-US city signals for $companyType timezone searches', async ({
+    companyType,
+    title,
+    slug,
+    snippet,
+  }) => {
+    const { fetchMock } = makeQueryCaptureFetch(
+      [
+        'Title: LinkedIn search results',
+        '',
+        'Markdown Content:',
+        `1. [${title}](https://www.linkedin.com/in/${slug}/)`,
+        snippet,
+      ].join('\n'),
+    );
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType, city: 'Eastern Time', count: 50 },
+      location: {
+        ...sampleLocation,
+        mode: 'timezone',
+        label: 'Eastern Time',
+        city: '',
+        stateCode: '',
+        timeZoneCode: 'ET',
+      },
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(0);
+    expect(result.warnings[0]?.message).toContain('No public LinkedIn profiles');
+  });
+
   it('ranks timezone profiles with public location evidence above unknown-location profiles', async () => {
     const { fetchMock } = makeQueryCaptureFetch(
       [
