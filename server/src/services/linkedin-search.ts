@@ -61,6 +61,9 @@ type LinkedInCandidate = {
   relevanceScore: number;
   matchedQueries: string[];
   matchedProviders: string[];
+  matchedCategoryTerms: string[];
+  matchedRoleTerms: string[];
+  matchedLocationTerms: string[];
   location?: PublicProfileLocation;
 };
 
@@ -1269,6 +1272,75 @@ const matchesEvidence = (searchable: string, terms: string[]) =>
     return new RegExp(`(?:^|\\s)${escapedTerm}(?=$|\\s)`).test(searchable);
   });
 
+const matchingEvidenceTerms = (searchable: string, terms: string[]) =>
+  unique(terms.filter((term) => matchesEvidence(searchable, [term]))).slice(0, 8);
+
+type CandidateMatchEvidence = {
+  categoryMatchedTerms: string[];
+  categoryIdentityMatchedTerms: string[];
+  roleMatchedTerms: string[];
+  locationMatchedTerms: string[];
+  hasCategoryEvidence: boolean;
+  hasCategoryIdentityEvidence: boolean;
+  hasRoleEvidence: boolean;
+  hasCredentialEvidence: boolean;
+  hasProfessionalTitleEvidence: boolean;
+  hasLocationEvidence: boolean;
+  hasProfileEvidence: boolean;
+};
+
+const getCandidateMatchEvidence = (
+  candidate: Pick<
+    LinkedInCandidate,
+    'title' | 'headline' | 'profileUrl' | 'website' | 'snippet' | 'location' | 'name'
+  >,
+  request: SearchRequest,
+  location: NormalizedUsLocation,
+): CandidateMatchEvidence => {
+  const profile = resolveCategoryProfile(request.companyType);
+  const categoryTerms = buildCategoryEvidenceTerms(request, profile);
+  const locationTerms = buildLocationEvidenceTerms(location);
+  const { primary: genericRoleTerms, category: categoryRoleTerms } = buildRoleTerms(
+    request,
+    profile,
+  );
+  const roleTerms = unique([...genericRoleTerms, ...categoryRoleTerms]);
+  const identitySearchable = normalizeMatchText(
+    `${candidate.title} ${candidate.headline ?? ''}`,
+  );
+  const searchable = normalizeMatchText(
+    `${candidate.title} ${candidate.headline ?? ''} ${candidate.snippet}`,
+  );
+  const categoryMatchedTerms = matchingEvidenceTerms(searchable, categoryTerms);
+  const categoryIdentityMatchedTerms = matchingEvidenceTerms(
+    identitySearchable,
+    categoryTerms,
+  );
+  const roleMatchedTerms = matchingEvidenceTerms(identitySearchable, roleTerms);
+  const fallbackRoleTerm = identitySearchable.match(decisionMakerPattern)?.[0] ?? '';
+
+  if (fallbackRoleTerm && !roleMatchedTerms.some((term) => term.toLowerCase() === fallbackRoleTerm.toLowerCase())) {
+    roleMatchedTerms.push(fallbackRoleTerm);
+  }
+
+  const locationMatchedTerms = matchingEvidenceTerms(searchable, locationTerms);
+
+  return {
+    categoryMatchedTerms,
+    categoryIdentityMatchedTerms,
+    roleMatchedTerms,
+    locationMatchedTerms,
+    hasCategoryEvidence: categoryMatchedTerms.length > 0,
+    hasCategoryIdentityEvidence: categoryIdentityMatchedTerms.length > 0,
+    hasRoleEvidence: roleMatchedTerms.length > 0 || decisionMakerPattern.test(identitySearchable),
+    hasCredentialEvidence: credentialIdentityPattern.test(identitySearchable),
+    hasProfessionalTitleEvidence: professionalTitlePattern.test(identitySearchable),
+    hasLocationEvidence: locationMatchedTerms.length > 0,
+    hasProfileEvidence:
+      hasLinkedInProfileSignals(candidate.title) || hasLinkedInProfileSignals(candidate.snippet),
+  };
+};
+
 const scoreCandidateRelevance = (
   candidate: Pick<
     LinkedInCandidate,
@@ -1276,6 +1348,7 @@ const scoreCandidateRelevance = (
   >,
   request: SearchRequest,
   location: NormalizedUsLocation,
+  evidence: CandidateMatchEvidence,
 ) => {
   if (
     !isLikelyPersonName(candidate.name) ||
@@ -1285,22 +1358,12 @@ const scoreCandidateRelevance = (
   }
 
   const profile = resolveCategoryProfile(request.companyType);
-  const categoryTerms = buildCategoryEvidenceTerms(request, profile);
-  const locationTerms = buildLocationEvidenceTerms(location);
   const identitySearchable = normalizeMatchText(
     `${candidate.title} ${candidate.headline ?? ''}`,
   );
   const searchable = normalizeMatchText(
     `${candidate.title} ${candidate.headline ?? ''} ${candidate.snippet}`,
   );
-  const hasCategoryEvidence = matchesEvidence(searchable, categoryTerms);
-  const hasCategoryIdentityEvidence = matchesEvidence(identitySearchable, categoryTerms);
-  const hasRoleEvidence = decisionMakerPattern.test(identitySearchable);
-  const hasCredentialEvidence = credentialIdentityPattern.test(identitySearchable);
-  const hasProfessionalTitleEvidence = professionalTitlePattern.test(identitySearchable);
-  const hasLocationEvidence = matchesEvidence(searchable, locationTerms);
-  const hasProfileEvidence =
-    hasLinkedInProfileSignals(candidate.title) || hasLinkedInProfileSignals(candidate.snippet);
 
   if (
     candidate.location &&
@@ -1326,7 +1389,7 @@ const scoreCandidateRelevance = (
 
   // A specific vertical must appear in the public result itself. This prevents
   // an owner from an unrelated industry slipping through a broad search page.
-  if (!hasCategoryEvidence) {
+  if (!evidence.hasCategoryEvidence) {
     return 0;
   }
 
@@ -1334,8 +1397,8 @@ const scoreCandidateRelevance = (
   // search-engine snippet that may describe an unrelated page or employer.
   if (
     profile.key !== 'keyword-fallback' &&
-    !hasCategoryIdentityEvidence &&
-    !hasRoleEvidence
+    !evidence.hasCategoryIdentityEvidence &&
+    !evidence.hasRoleEvidence
   ) {
     return 0;
   }
@@ -1344,9 +1407,9 @@ const scoreCandidateRelevance = (
   // is usually a company page published under a profile URL, not a lead.
   if (
     companyIdentityPattern.test(identitySearchable) &&
-    !hasRoleEvidence &&
-    !hasCredentialEvidence &&
-    !hasProfessionalTitleEvidence
+    !evidence.hasRoleEvidence &&
+    !evidence.hasCredentialEvidence &&
+    !evidence.hasProfessionalTitleEvidence
   ) {
     return 0;
   }
@@ -1363,27 +1426,29 @@ const scoreCandidateRelevance = (
 
   // Keep academic and training profiles out unless their identity also shows
   // a decision-making role for the requested business category.
-  if (nonLeadContextPattern.test(identitySearchable) && !hasRoleEvidence) {
+  if (nonLeadContextPattern.test(identitySearchable) && !evidence.hasRoleEvidence) {
     return 0;
   }
 
   // Local searches should not accept a profile that the public result places in
   // another city, even when its category and role match the query.
-  if (location.mode === 'local' && !hasLocationEvidence) {
+  if (location.mode === 'local' && !evidence.hasLocationEvidence) {
     return 0;
   }
 
   let score = 35;
-  score += hasCategoryEvidence ? 28 : 0;
-  score += hasRoleEvidence ? 16 : 0;
-  score += hasLocationEvidence ? 12 : 0;
-  score += hasProfileEvidence ? 5 : 0;
+  score += evidence.hasCategoryEvidence ? 28 : 0;
+  score += evidence.hasCategoryIdentityEvidence ? 8 : 0;
+  score += Math.min(6, Math.max(0, evidence.categoryMatchedTerms.length - 1) * 3);
+  score += evidence.hasRoleEvidence ? 16 : 0;
+  score += evidence.hasLocationEvidence ? 12 : 0;
+  score += evidence.hasProfileEvidence ? 5 : 0;
   score += candidate.headline ? 3 : 0;
   score += candidate.snippet ? 2 : 0;
 
   // Keep profiles without an explicit public location available for recall,
   // but prefer results that prove their geographic fit in the public excerpt.
-  if (location.mode === 'timezone' && !hasLocationEvidence) {
+  if (location.mode === 'timezone' && !evidence.hasLocationEvidence) {
     score -= 10;
   }
 
@@ -2053,10 +2118,11 @@ const buildLeadFromCandidate = (
       publicProviderNames: candidate.matchedProviders.map(
         (name) => searchSources.find((source) => source.name === name)?.label ?? name,
       ),
-      categoryMatched: true,
-      roleMatched: decisionMakerPattern.test(
-        normalizeMatchText(`${candidate.title} ${candidate.headline ?? ''}`),
-      ),
+      categoryMatchedTerms: candidate.matchedCategoryTerms,
+      roleMatchedTerms: candidate.matchedRoleTerms,
+      locationEvidence: publicLocation?.label,
+      categoryMatched: candidate.matchedCategoryTerms.length > 0,
+      roleMatched: candidate.matchedRoleTerms.length > 0,
       locationMatched: Boolean(publicLocation),
     },
     listingUrl: candidate.profileUrl,
@@ -2146,10 +2212,18 @@ const runLinkedInQuerySet = async ({
           snippet: normalizeText(result.snippet),
         }, location),
       };
+      const evidence = getCandidateMatchEvidence(candidateWithoutScore, request, location);
+      const candidateWithEvidence = {
+        ...candidateWithoutScore,
+        matchedCategoryTerms: evidence.categoryMatchedTerms,
+        matchedRoleTerms: evidence.roleMatchedTerms,
+        matchedLocationTerms: evidence.locationMatchedTerms,
+      };
       const relevanceScore = scoreCandidateRelevance(
-        candidateWithoutScore,
+        candidateWithEvidence,
         request,
         location,
+        evidence,
       );
 
       if (relevanceScore < 60) {
@@ -2169,23 +2243,35 @@ const runLinkedInQuerySet = async ({
         candidates.set(profileUrl, {
           ...existing,
           title:
-            candidateWithoutScore.title.length > existing.title.length
-              ? candidateWithoutScore.title
+            candidateWithEvidence.title.length > existing.title.length
+              ? candidateWithEvidence.title
               : existing.title,
           headline:
-            (candidateWithoutScore.headline?.length ?? 0) > (existing.headline?.length ?? 0)
-              ? candidateWithoutScore.headline
+            (candidateWithEvidence.headline?.length ?? 0) > (existing.headline?.length ?? 0)
+              ? candidateWithEvidence.headline
               : existing.headline,
-          website: candidateWithoutScore.website || existing.website,
+          website: candidateWithEvidence.website || existing.website,
           snippet:
-            candidateWithoutScore.snippet.length > existing.snippet.length
-              ? candidateWithoutScore.snippet
+            candidateWithEvidence.snippet.length > existing.snippet.length
+              ? candidateWithEvidence.snippet
               : existing.snippet,
           publicEvidence: mergePublicEvidence(
             existing.publicEvidence,
-            candidateWithoutScore.publicEvidence,
+            candidateWithEvidence.publicEvidence,
           ),
-          location: candidateWithoutScore.location ?? existing.location,
+          location: candidateWithEvidence.location ?? existing.location,
+          matchedCategoryTerms: unique([
+            ...existing.matchedCategoryTerms,
+            ...candidateWithEvidence.matchedCategoryTerms,
+          ]),
+          matchedRoleTerms: unique([
+            ...existing.matchedRoleTerms,
+            ...candidateWithEvidence.matchedRoleTerms,
+          ]),
+          matchedLocationTerms: unique([
+            ...existing.matchedLocationTerms,
+            ...candidateWithEvidence.matchedLocationTerms,
+          ]),
           baseRelevanceScore,
           matchedQueries,
           matchedProviders,
@@ -2199,7 +2285,7 @@ const runLinkedInQuerySet = async ({
       }
 
       candidates.set(profileUrl, {
-        ...candidateWithoutScore,
+        ...candidateWithEvidence,
         baseRelevanceScore: relevanceScore,
         relevanceScore,
         matchedQueries: [queryKey],

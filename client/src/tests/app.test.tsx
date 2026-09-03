@@ -928,6 +928,9 @@ describe('App', () => {
             queryMatches: 3,
             publicSources: 2,
             publicProviderNames: ['Brave Search', 'Bing'],
+            categoryMatchedTerms: ['Dentist', 'dental clinic'],
+            roleMatchedTerms: ['Founder', 'owner'],
+            locationEvidence: 'Austin, TX',
             categoryMatched: true,
             roleMatched: true,
             locationMatched: true,
@@ -1008,9 +1011,9 @@ describe('App', () => {
     expect(expandedContent).toContain('2 public result traces');
     expect(expandedContent).toContain('Brave Search');
     expect(expandedContent).toContain('Bing');
-    expect(expandedContent).toContain('Category matched');
-    expect(expandedContent).toContain('Role matched');
-    expect(expandedContent).toContain('Location matched');
+    expect(expandedContent).toContain('Category: Dentist, dental clinic');
+    expect(expandedContent).toContain('Role: Founder, owner');
+    expect(expandedContent).toContain('Public location: Austin, TX');
     expect(expandedContent).toContain('3 query paths · 2 public sources');
     expect(expandedContent).toContain('Brave Search + Bing');
 

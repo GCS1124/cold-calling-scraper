@@ -407,15 +407,27 @@ export function ResultsTable({
                                 <>
                                   {lead.matchSignals.categoryMatched ? (
                                     <span className="rounded-full bg-blue-50 px-3 py-2 text-blue-700">
-                                      Category matched
+                                      Category: {lead.matchSignals.categoryMatchedTerms?.join(', ') || 'matched'}
                                     </span>
                                   ) : null}
-                                  <span className="rounded-full bg-violet-50 px-3 py-2 text-violet-700">
-                                    {lead.matchSignals.roleMatched ? 'Role matched' : 'Role not confirmed'}
-                                  </span>
-                                  <span className="rounded-full bg-amber-50 px-3 py-2 text-amber-700">
-                                    {lead.matchSignals.locationMatched ? 'Location matched' : 'Location not confirmed'}
-                                  </span>
+                                  {lead.matchSignals.roleMatched ? (
+                                    <span className="rounded-full bg-violet-50 px-3 py-2 text-violet-700">
+                                      Role: {lead.matchSignals.roleMatchedTerms?.join(', ') || 'matched'}
+                                    </span>
+                                  ) : (
+                                    <span className="rounded-full bg-violet-50 px-3 py-2 text-violet-700">
+                                      Role not confirmed
+                                    </span>
+                                  )}
+                                  {lead.matchSignals.locationMatched ? (
+                                    <span className="rounded-full bg-amber-50 px-3 py-2 text-amber-700">
+                                      Public location: {lead.matchSignals.locationEvidence || 'matched'}
+                                    </span>
+                                  ) : (
+                                    <span className="rounded-full bg-amber-50 px-3 py-2 text-amber-700">
+                                      Location not confirmed
+                                    </span>
+                                  )}
                                   <span className="rounded-full bg-emerald-50 px-3 py-2 text-emerald-700">
                                     {lead.matchSignals.queryMatches} query paths · {lead.matchSignals.publicSources} public sources
                                   </span>

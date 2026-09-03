@@ -104,6 +104,26 @@ const mergeMatchSignals = (group: Lead[]) => {
     ).values(),
   ];
 
+  const categoryMatchedTerms = [
+    ...new Set(
+      signals
+        .flatMap((signal) => signal.categoryMatchedTerms ?? [])
+        .map((term) => term.trim())
+        .filter(Boolean),
+    ),
+  ];
+  const roleMatchedTerms = [
+    ...new Set(
+      signals
+        .flatMap((signal) => signal.roleMatchedTerms ?? [])
+        .map((term) => term.trim())
+        .filter(Boolean),
+    ),
+  ];
+  const locationEvidence = signals
+    .map((signal) => signal.locationEvidence?.trim())
+    .find(Boolean);
+
   return {
     queryMatches: Math.max(...signals.map((signal) => signal.queryMatches)),
     publicSources: Math.max(
@@ -111,6 +131,9 @@ const mergeMatchSignals = (group: Lead[]) => {
       publicProviderNames.length,
     ),
     ...(publicProviderNames.length > 0 ? { publicProviderNames } : {}),
+    ...(categoryMatchedTerms.length > 0 ? { categoryMatchedTerms } : {}),
+    ...(roleMatchedTerms.length > 0 ? { roleMatchedTerms } : {}),
+    ...(locationEvidence ? { locationEvidence } : {}),
     categoryMatched: signals.some((signal) => signal.categoryMatched),
     roleMatched: signals.some((signal) => signal.roleMatched),
     locationMatched: signals.some((signal) => signal.locationMatched),
