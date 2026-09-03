@@ -42,7 +42,7 @@ export default async function handler(req: any, res: any) {
   } catch (error) {
     if (isSearchPersistenceFailure(error)) {
       res.status(503).json({
-        error: error.message,
+        error: error instanceof Error ? error.message : 'Search persistence unavailable',
         code: 'SEARCH_PERSISTENCE_UNAVAILABLE',
       });
       return;
