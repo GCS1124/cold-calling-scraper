@@ -62,7 +62,7 @@ export function FiltersPanel({ filters, onChange, sourceMode }: FiltersPanelProp
                 onChange={(event) => onChange({ ...filters, highFitOnly: event.target.checked })}
                 type="checkbox"
               />
-              High-fit score (85%+)
+              High-fit score (85%+ with location proof)
             </label>
             <label className="flex items-center gap-3">
               <input

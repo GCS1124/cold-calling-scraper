@@ -1045,6 +1045,18 @@ describe('App', () => {
             locationMatched: true,
           },
         },
+        {
+          ...completedResponse.leads[1],
+          id: 'lead-linkedin-unknown-location',
+          name: 'Unverified Location Dentist',
+          confidence: 94,
+          matchSignals: {
+            queryMatches: 3,
+            publicSources: 2,
+            roleMatched: true,
+            locationMatched: false,
+          },
+        },
       ],
       meta: {
         ...completedResponse.meta,
@@ -1073,11 +1085,12 @@ describe('App', () => {
     await waitForText(container, /public linkedin discovery complete/i, 6000);
     await waitForText(container, /Northstar Labs/i, 1000);
 
-    expect(normalizedText(container)).toContain('2 visible leads');
+    expect(normalizedText(container)).toContain('3 visible leads');
     await clickElement(getCheckboxByLabel(container, /high-fit score/i));
     await waitForText(container, /Northstar Labs/i, 1000);
     expect(normalizedText(container)).toContain('1 visible leads');
     expect(normalizedText(container)).toContain('Northstar Labs');
+    expect(normalizedText(container)).not.toContain('Unverified Location Dentist');
 
     await clickElement(getCheckboxByLabel(container, /cross-source match/i));
     expect(normalizedText(container)).toContain('1 visible leads');

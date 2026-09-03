@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import { Fragment, useState } from 'react';
 
 import type { Lead } from '../../types/lead';
+import { isHighFitLinkedInLead } from '../../utils/linkedin-quality';
 
 type ResultsTableProps = {
   leads: Lead[];
@@ -116,8 +117,11 @@ export function ResultsTable({
                   ? 'business website'
                   : 'lead source';
               const isExpanded = expandedLeadId === lead.id;
+              const isStrongMatch = isLinkedInLead
+                ? isHighFitLinkedInLead(lead)
+                : lead.confidence >= 85;
               const matchLabel =
-                lead.confidence >= 85
+                isStrongMatch
                   ? 'Strong match'
                   : lead.confidence >= 70
                     ? 'Good match'

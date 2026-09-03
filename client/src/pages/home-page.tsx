@@ -32,6 +32,7 @@ import {
   createSearchDraft,
   formatLocationLabel,
 } from '../utils/search-location';
+import { isHighFitLinkedInLead } from '../utils/linkedin-quality';
 import { sourceModeLabelsByCode } from '../data/search-options';
 import type { Lead, SearchDraft, SearchRequest, SearchResponse } from '../types/lead';
 
@@ -96,7 +97,11 @@ export function HomePage({ searchApi }: HomePageProps) {
         if (filters.hasEmail && !lead.hasEmail) return false;
         if (filters.hasPhone && !lead.hasPhone) return false;
         if (filters.hasWebsite && !lead.hasWebsite) return false;
-        if (activeSourceMode === 'linkedin' && filters.highFitOnly && lead.confidence < 85) {
+        if (
+          activeSourceMode === 'linkedin' &&
+          filters.highFitOnly &&
+          !isHighFitLinkedInLead(lead)
+        ) {
           return false;
         }
         if (

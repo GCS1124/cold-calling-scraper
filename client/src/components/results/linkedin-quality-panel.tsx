@@ -1,6 +1,7 @@
 import { Check, Crosshair, Globe2, Radar, ShieldCheck } from 'lucide-react';
 
 import type { Lead } from '../../types/lead';
+import { isHighFitLinkedInLead } from '../../utils/linkedin-quality';
 
 type LinkedInQualityPanelProps = {
   leads: Lead[];
@@ -77,7 +78,7 @@ export function LinkedInQualityPanel({
   const averageConfidence = total
     ? Math.round(leads.reduce((sum, lead) => sum + lead.confidence, 0) / total)
     : 0;
-  const highFit = leads.filter((lead) => lead.confidence >= 85).length;
+  const highFit = leads.filter(isHighFitLinkedInLead).length;
   const corroborated = leads.filter((lead) => (lead.matchSignals?.publicSources ?? 0) > 1).length;
   const roleSignals = leads.filter((lead) => lead.matchSignals?.roleMatched).length;
   const evidenceBacked = leads.filter(
@@ -125,7 +126,7 @@ export function LinkedInQualityPanel({
         <div className="rounded-2xl bg-slate-950 p-3 text-white">
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">High-fit score</p>
           <p className="mt-2 text-2xl font-black">{highFit}</p>
-          <p className="mt-1 text-[11px] text-slate-400">85%+ match confidence</p>
+          <p className="mt-1 text-[11px] text-slate-400">85%+ with location and role proof</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-3">
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Cross-source</p>
