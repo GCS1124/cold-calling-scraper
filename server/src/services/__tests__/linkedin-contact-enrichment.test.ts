@@ -359,6 +359,60 @@ Jordan Lee is the owner of Stone Dental, a dentist in Austin, TX. Call (512) 555
     expect(result.warnings.some((warning) => warning.providerName === 'Bing')).toBe(true);
   });
 
+  it('uses Yahoo as a final public contact-search fallback', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (
+          url.includes('search.brave.com') ||
+          url.includes('www.bing.com') ||
+          url.includes('html.duckduckgo.com')
+        ) {
+          return new Response('Verify you are not a bot. Too many requests.', {
+            status: 200,
+            headers: { 'Content-Type': 'text/plain' },
+          });
+        }
+
+        if (url.includes('search.yahoo.com')) {
+          return new Response(
+            `<!doctype html><html><body>
+              <div class="algo-sr">
+                <a href="https://search.yahoo.com/r/RU=https%3A%2F%2Faustindentalspa.example%2Fcontact/RK=2">Austin Dental Spa official website</a>
+                <p class="compText aAbs">Austin Dental Spa in Austin, TX. Call (512) 555-0199 or email hello@austindentalspa.example.</p>
+              </div>
+            </body></html>`,
+            { status: 200, headers: { 'Content-Type': 'text/html' } },
+          );
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      }) as typeof fetch,
+    );
+
+    vi.mocked(httpClient.get).mockResolvedValue({
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+      data: '<a href="mailto:hello@austindentalspa.example">Email</a><a href="tel:+15125550199">Call</a>',
+    } as never);
+
+    const result = await enrichLinkedinLeadsWithPublicContacts({
+      leads: [makeLead()],
+      request: { companyType: 'Dentist', city: 'Austin', count: 1 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 10_000,
+    });
+
+    expect(result.leads[0]?.website).toBe('https://austindentalspa.example/contact');
+    expect(result.leads[0]?.email).toBe('hello@austindentalspa.example');
+    expect(result.leads[0]?.mobile).toBe('+1 512 555 0199');
+    expect(result.warnings.map((warning) => warning.providerName)).toEqual(
+      expect.arrayContaining(['Brave Search', 'Bing', 'DuckDuckGo']),
+    );
+  });
+
   it('uses a simple LinkedIn headline as organization context for enrichment', async () => {
     const publicOrganizationSearchBody = `Title: public website results
 

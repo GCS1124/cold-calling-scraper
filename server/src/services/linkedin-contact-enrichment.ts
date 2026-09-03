@@ -18,7 +18,7 @@ type PublicSearchResult = {
 type ContactSearchSource = {
   name: string;
   label: string;
-  kind: 'markdown' | 'bing-html' | 'duckduckgo-html';
+  kind: 'markdown' | 'bing-html' | 'duckduckgo-html' | 'yahoo-html';
   buildUrl: (query: string) => string;
   decodeUrl: (value: string) => string;
 };
@@ -199,6 +199,14 @@ const searchSources: ContactSearchSource[] = [
       `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
     decodeUrl: (value: string) => decodeDuckDuckGoUrl(value),
   },
+  {
+    name: 'yahoo',
+    label: 'Yahoo Search',
+    kind: 'yahoo-html',
+    buildUrl: (query: string) =>
+      `https://search.yahoo.com/search?p=${encodeURIComponent(query)}&b=1&n=10`,
+    decodeUrl: (value: string) => decodeYahooUrl(value),
+  },
 ] as const;
 
 const normalizeText = (value?: string | null) =>
@@ -284,6 +292,34 @@ const decodeDuckDuckGoUrl = (value: string) => {
     return destination ? decodeURIComponent(destination) : normalized;
   } catch {
     return value;
+  }
+};
+
+const decodeYahooUrl = (value: string) => {
+  const decode = (candidate: string) => {
+    try {
+      return decodeURIComponent(candidate.replace(/&amp;/g, '&'));
+    } catch {
+      return candidate;
+    }
+  };
+
+  try {
+    const normalized = value.startsWith('//') ? `https:${value}` : value;
+    const url = new URL(normalized, 'https://search.yahoo.com');
+    const destination =
+      url.searchParams.get('RU') ??
+      url.searchParams.get('u') ??
+      url.searchParams.get('url');
+    const pathDestination = normalized.match(/(?:^|\/)RU=([^/?#]+)/i)?.[1];
+
+    return destination
+      ? decode(destination)
+      : pathDestination
+        ? decode(pathDestination)
+        : normalized;
+  } catch {
+    return decode(value);
   }
 };
 
@@ -491,6 +527,39 @@ const parseBingResults = (html: string, decodeUrl: (value: string) => string) =>
   return results.length ? results : parsePublicSearchResults(html, decodeUrl);
 };
 
+const parseYahooResults = (html: string, decodeUrl: (value: string) => string) => {
+  const results: PublicSearchResult[] = [];
+  const anchors = [
+    ...html.matchAll(
+      /<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+    ),
+  ];
+
+  anchors.forEach((match, index) => {
+    const rawUrl = decodeHtmlEntities(match[1] ?? '').trim();
+    const url = isCandidateWebsite(decodeUrl(rawUrl));
+
+    if (!url) {
+      return;
+    }
+
+    const start = (match.index ?? 0) + match[0].length;
+    const end = anchors[index + 1]?.index ?? Math.min(html.length, start + 4_000);
+    const resultTail = html.slice(start, end);
+    const snippetMatch = resultTail.match(
+      /<(?:p|div)\b[^>]*\bclass=["'][^"']*(?:compText|aAbs|snippet|description)[^"']*["'][^>]*>([\s\S]*?)<\/(?:p|div)>/i,
+    );
+
+    results.push({
+      title: stripMarkdown(match[2] ?? ''),
+      url,
+      snippet: stripMarkdown(snippetMatch?.[1] ?? resultTail),
+    });
+  });
+
+  return results;
+};
+
 const fetchTextWithTimeout = async (url: string, timeoutMs = searchTimeoutMs) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -599,9 +668,11 @@ const searchPublicWebsiteSource = async (
     const results =
       source.kind === 'duckduckgo-html'
         ? parseDuckDuckGoResults(body, source.decodeUrl)
-        : source.kind === 'bing-html'
-          ? parseBingResults(body, source.decodeUrl)
-          : parsePublicSearchResults(body, source.decodeUrl);
+        : source.kind === 'yahoo-html'
+          ? parseYahooResults(body, source.decodeUrl)
+          : source.kind === 'bing-html'
+            ? parseBingResults(body, source.decodeUrl)
+            : parsePublicSearchResults(body, source.decodeUrl);
     setCachedSearchResults(cacheKey, results);
     return results;
   } catch {
@@ -834,15 +905,43 @@ const resolveBusinessWebsite = async (
 
     const requestTimeoutMs = Math.min(searchTimeoutMs, remainingTimeMs);
 
-    const rotatedSources = availableSources.map(
-      (_, index) => availableSources[(index + queryIndex) % availableSources.length]!,
+    // Keep Yahoo as a reserve so normal searches retain the current latency
+    // and request profile; use it when the other free providers are paused.
+    const preferredSources = availableSources.filter((source) => source.name !== 'yahoo');
+    const rotationPool = preferredSources.length ? preferredSources : availableSources;
+    const rotatedSources = rotationPool.map(
+      (_, index) => rotationPool[(index + queryIndex) % rotationPool.length]!,
     );
     const selectedSources = rotatedSources.slice(0, Math.min(2, rotatedSources.length));
-    const results = await Promise.all(
+    let results = await Promise.all(
       selectedSources.map((source) =>
         searchPublicWebsiteSource(source, query, providerHealth, requestTimeoutMs),
       ),
     );
+
+    const reserveSource = availableSources.find((source) => source.name === 'yahoo');
+    const preferredProvidersFailed =
+      preferredSources.length > 0 &&
+      preferredSources.every((source) => (providerHealth.get(source.name)?.failures ?? 0) > 0);
+
+    // A provider can be unhealthy before it reaches the pause threshold. If
+    // every preferred provider has failed and this query is still empty, use
+    // the reserve immediately instead of waiting for another query variant.
+    if (
+      reserveSource &&
+      preferredProvidersFailed &&
+      !results.some((sourceResults) => sourceResults.length > 0)
+    ) {
+      results = [
+        ...results,
+        await searchPublicWebsiteSource(
+          reserveSource,
+          query,
+          providerHealth,
+          requestTimeoutMs,
+        ),
+      ];
+    }
 
     for (const sourceResults of results) {
       for (const result of sourceResults) {
