@@ -12,6 +12,8 @@ export const createSearchDraft = (): SearchDraft => ({
   city: '',
   stateCode: '',
   count: 50,
+  researchDepth: 'verified',
+  researchBrief: '',
 });
 
 export const serializeLocationValue = (location: SearchLocation) => {
@@ -58,6 +60,12 @@ export const buildSearchRequestFromDraft = (draft: SearchDraft): SearchRequest =
       },
       count: draft.count,
       phoneRequired: true,
+      ...(draft.researchDepth !== 'verified'
+        ? { researchDepth: draft.researchDepth }
+        : {}),
+      ...(draft.researchBrief.trim()
+        ? { researchBrief: draft.researchBrief.trim() }
+        : {}),
     };
   }
 
@@ -79,5 +87,11 @@ export const buildSearchRequestFromDraft = (draft: SearchDraft): SearchRequest =
     },
     count: draft.count,
     phoneRequired: true,
+    ...(draft.researchDepth !== 'verified'
+      ? { researchDepth: draft.researchDepth }
+      : {}),
+    ...(draft.researchBrief.trim()
+      ? { researchBrief: draft.researchBrief.trim() }
+      : {}),
   };
 };

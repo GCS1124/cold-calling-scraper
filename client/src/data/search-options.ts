@@ -23,6 +23,26 @@ export const sourceModeOptions = [
 
 export type SearchSourceMode = (typeof sourceModeOptions)[number]['code'];
 
+export const researchDepthOptions = [
+  {
+    code: 'quick',
+    label: 'Quick',
+    description: 'Fast public discovery',
+  },
+  {
+    code: 'verified',
+    label: 'Verified',
+    description: 'Evidence and contact checks',
+  },
+  {
+    code: 'pro',
+    label: 'Pro',
+    description: 'Deeper public research',
+  },
+] as const;
+
+export type ResearchDepth = (typeof researchDepthOptions)[number]['code'];
+
 export const sourceModeLabelsByCode = Object.fromEntries(
   sourceModeOptions.map((option) => [
     option.code,

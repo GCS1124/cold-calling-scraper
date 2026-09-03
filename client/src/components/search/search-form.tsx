@@ -3,6 +3,7 @@ import type { Dispatch, FormEvent, SetStateAction } from 'react';
 
 import {
   companyTypeOptions,
+  researchDepthOptions,
   sourceModeLabelsByCode,
   sourceModeOptions,
   timeZoneOptions,
@@ -307,6 +308,60 @@ export function SearchForm({
           </div>
         )}
       </fieldset>
+
+      <fieldset className="space-y-3 text-sm font-semibold text-slate-900 md:col-span-2">
+        <legend>Research depth</legend>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {researchDepthOptions.map((option) => {
+            const active = value.researchDepth === option.code;
+
+            return (
+              <button
+                key={option.code}
+                className={`rounded-2xl border px-4 py-3 text-left transition ${
+                  active
+                    ? 'border-blue-500 bg-blue-50 text-blue-950 shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50/40'
+                }`}
+                disabled={loading}
+                onClick={() =>
+                  onChange((current) => ({ ...current, researchDepth: option.code }))
+                }
+                type="button"
+                aria-pressed={active}
+              >
+                <span className="block text-sm font-bold">{option.label}</span>
+                <span className="mt-1 block text-xs font-normal text-slate-500">
+                  {option.description}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs font-normal leading-5 text-slate-500">
+          Every depth uses public sources. Deeper searches spend more time validating evidence and
+          contact details, not accessing private or paid data.
+        </p>
+      </fieldset>
+
+      {isAiMode ? (
+        <label className="flex flex-col gap-2 text-sm font-semibold text-slate-900 md:col-span-2">
+          Research brief <span className="font-normal text-slate-400">Optional</span>
+          <textarea
+            className="min-h-24 w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
+            maxLength={1_000}
+            placeholder="Find owner-led HVAC companies in Austin that publicly list a mobile number and show signs they need a new website."
+            value={value.researchBrief}
+            onChange={(event) =>
+              onChange((current) => ({ ...current, researchBrief: event.target.value }))
+            }
+          />
+          <span className="text-xs font-normal leading-5 text-slate-500">
+            AI turns this into a research plan. Gemini may help word queries, but public sources
+            and deterministic checks decide what becomes a lead.
+          </span>
+        </label>
+      ) : null}
 
       <datalist id="company-type-options">
         {companyTypeOptions.map((option) => (

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractContactDetailsFromHtml } from '../website-enrichment';
+import {
+  extractContactDetailsFromHtml,
+  extractPublicOpportunitySignals,
+} from '../website-enrichment';
 
 describe('extractContactDetailsFromHtml', () => {
   it('extracts emails and US phones from mailto, tel, visible text, and JSON-LD', () => {
@@ -89,5 +92,17 @@ describe('extractContactDetailsFromHtml', () => {
 
     expect(extracted.emails).toContain('office@austintradegroup.com');
     expect(extracted.phones).toContain('+1 512 555 0444');
+  });
+
+  it('labels conservative public opportunity signals without extracting private data', () => {
+    const signals = extractPublicOpportunitySignals(
+      'Now hiring technicians. Expanding to a new location. Request a free estimate today.',
+    );
+
+    expect(signals).toEqual([
+      'Public hiring signal',
+      'Public growth signal',
+      'Public active-service CTA',
+    ]);
   });
 });

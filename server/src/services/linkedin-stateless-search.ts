@@ -65,6 +65,8 @@ const buildResponse = ({
     meta: {
       query: `${request.companyType} in ${locationLabel}`,
       locationLabel,
+      researchDepth: request.researchDepth ?? 'verified',
+      researchBrief: request.researchBrief,
       status: 'complete',
       progress: {
         discovered,

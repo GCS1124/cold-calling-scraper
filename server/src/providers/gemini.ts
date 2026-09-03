@@ -37,7 +37,7 @@ export const expandQueryWithGemini = async (
         {
           parts: [
             {
-              text: `Rewrite this public-web lead discovery query for local United States business search. Focus on category synonyms, metro-area phrasing, and decision-maker roles. Return one short search phrase only. Do not include personal contact data, login instructions, or private sources.\nCategory: ${request.companyType}\nCity: ${request.city}\nOriginal: ${rawQuery}`,
+              text: `Rewrite this public-web lead discovery query for local United States business search. Focus on category synonyms, metro-area phrasing, and decision-maker roles. Return one short search phrase only. Do not include personal contact data, login instructions, or private sources.\nCategory: ${request.companyType}\nCity: ${request.city}\nResearch brief: ${request.researchBrief?.trim() || 'No additional brief'}\nOriginal: ${rawQuery}`,
             },
           ],
         },

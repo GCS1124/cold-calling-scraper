@@ -3,6 +3,9 @@ import type { SearchRequest, SearchResponse } from '../../server/src/types/searc
 type VercelSearchService = {
   startSearch: (request: SearchRequest) => Promise<SearchResponse>;
   advanceSearch: (searchId: string) => Promise<SearchResponse | null>;
+  cancelSearch: (searchId: string) => Promise<SearchResponse | null>;
+  resumeSearch: (searchId: string) => Promise<SearchResponse | null>;
+  reverifySearch: (searchId: string) => Promise<SearchResponse | null>;
 };
 
 let servicePromise: Promise<VercelSearchService> | undefined;

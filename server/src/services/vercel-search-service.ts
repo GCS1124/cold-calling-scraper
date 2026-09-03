@@ -31,6 +31,9 @@ import {
 import { resolveCategoryProfile } from './us-category-mapping';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { buildDiscoverySeeds } from './discovery-seeds';
+import { getResearchDepthConfig } from './research-depth';
+import { createResearchQueue, type ResearchQueue } from './research-queue';
+import { reverifyLeads } from './research-reverification';
 import {
   leadSourceModeLabels,
   normalizeLeadSourceMode,
@@ -42,10 +45,14 @@ type VercelSearchService = {
   getSearch: (searchId: string) => Promise<SearchResponse | null>;
   getSearchSnapshot: (searchId: string) => Promise<SearchResponse | null>;
   advanceSearch: (searchId: string) => Promise<SearchResponse | null>;
+  cancelSearch: (searchId: string) => Promise<SearchResponse | null>;
+  resumeSearch: (searchId: string) => Promise<SearchResponse | null>;
+  reverifySearch: (searchId: string) => Promise<SearchResponse | null>;
 };
 
 type VercelSearchServiceDeps = {
   store?: ReturnType<typeof createSearchJobStore>;
+  queue?: ResearchQueue;
   googlePlaces?: typeof googlePlacesProvider;
   normalizeLocation?: typeof normalizeUsLocation;
   discoverGoogleMapsLeads?: (args: {
@@ -111,6 +118,9 @@ const getAiDiscoveryWindowMs = (requestedCount: number) =>
 const getMaxTickDurationMs = (requestedCount: number) =>
   requestedCount >= 50 ? 45_000 : 30_000;
 const processingLeaseMs = 70_000;
+
+const isVercelRuntime = () =>
+  process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV);
 
 const withNow = () => Date.now();
 
@@ -465,7 +475,7 @@ const discoverRegionLeads = async (
         location: discoveryLocation,
         queryVariants,
         maxResults: googleMapsRequestCount,
-        queryLimit: 12,
+        queryLimit: getResearchDepthConfig(request.researchDepth).googleMapsQueryLimit,
         deadlineMs: googleMapsDeadlineMs,
       });
     } catch (error) {
@@ -497,6 +507,12 @@ const tickJob = async (
       | 'enrichLinkedinLeads'
     >,
 ): Promise<SearchJobRecord> => {
+  if (job.cancelRequested || job.status === 'cancelled') {
+    job.status = 'cancelled';
+    job.progress.currentSource = 'Cancelled';
+    return job;
+  }
+
   let targetLocation = job.targetLocation as NormalizedUsLocation | undefined;
   const shouldInitializeLocation = !targetLocation;
 
@@ -783,12 +799,15 @@ export const createVercelSearchServiceWithDeps = (
   deps: VercelSearchServiceDeps,
 ): VercelSearchService => {
   const store = deps.store ?? createSearchJobStore();
+  const queue = deps.queue ?? createResearchQueue();
   const inFlightTicks = new Map<string, Promise<SearchJobRecord>>();
   const googlePlaces = deps.googlePlaces ?? googlePlacesProvider;
   const normalizeLocation = deps.normalizeLocation ?? normalizeUsLocation;
   const discoverGoogleMapsLeads =
     deps.discoverGoogleMapsLeads ??
-    (process.env.NODE_ENV === 'test' ? undefined : discoverGoogleMapsLeadsOnDemand);
+    (process.env.NODE_ENV === 'test' || isVercelRuntime()
+      ? undefined
+      : discoverGoogleMapsLeadsOnDemand);
   const discoverLinkedinLeads =
     deps.discoverLinkedinLeads ??
     (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
@@ -874,15 +893,19 @@ export const createVercelSearchServiceWithDeps = (
 
       const searchId = idFactory();
       const createdAt = now();
+      const normalizedRequest: SearchRequest = {
+        ...request,
+        researchDepth: request.researchDepth ?? 'verified',
+      };
       let job: SearchJobRecord = {
         schemaVersion: CURRENT_SCHEMA_VERSION,
         searchId,
-        request,
-        query: `${request.companyType} in ${request.city}`,
-        locationLabel: request.city,
+        request: normalizedRequest,
+        query: `${normalizedRequest.companyType} in ${normalizedRequest.city}`,
+        locationLabel: normalizedRequest.city,
         locationMode: 'local',
         status: 'queued',
-        progress: createProgress(request.count),
+        progress: createProgress(normalizedRequest.count),
         leads: [],
         providerWarnings: [],
         searchSeeds: [],
@@ -894,6 +917,58 @@ export const createVercelSearchServiceWithDeps = (
         updatedAt: createdAt,
       };
 
+      await store.upsert(job);
+      await queue.enqueue(searchId, createdAt);
+
+      return toSearchResponse(job);
+    },
+
+    async cancelSearch(searchId) {
+      await store.ensureSchema();
+      const cancelled = await store.requestCancel(searchId, now());
+      return cancelled ? toSearchResponse(cancelled) : null;
+    },
+
+    async resumeSearch(searchId) {
+      await store.ensureSchema();
+      const job = await store.get(searchId);
+
+      if (!job) {
+        return null;
+      }
+
+      if (job.status === 'cancelled') {
+        job.cancelRequested = false;
+        job.status = 'discovering';
+        job.discoveryComplete = false;
+        job.progress.currentSource = 'Resuming research';
+        job.lastProgressAt = now();
+        job.updatedAt = now();
+        await store.upsert(job);
+        await queue.enqueue(searchId, now());
+      }
+
+      return toSearchResponse(job);
+    },
+
+    async reverifySearch(searchId) {
+      await store.ensureSchema();
+      const job = await store.get(searchId);
+
+      if (!job) {
+        return null;
+      }
+
+      job.leads = reverifyLeads(job.leads);
+      appendWarningOnce(job, {
+        providerId: 'reverification',
+        providerName: 'Deterministic verification',
+        message:
+          'Reverification refreshed public phone, email, website, evidence, and scores without refetching provider pages.',
+        severity: 'info',
+      });
+      finalizeLeads(job);
+      job.updatedAt = now();
       await store.upsert(job);
 
       return toSearchResponse(job);

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { usStateNames, usStateProfiles, type UsStateCode } from '../data/us-states';
-import type { Lead } from '../types/lead';
+import type { EmploymentStatus, Lead } from '../types/lead';
 import type { ProviderWarning, SearchRequest } from '../types/search';
 import type { NormalizedUsLocation } from './us-location';
 import { timezoneStateQueries } from './us-timezones';
@@ -10,6 +10,7 @@ import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { buildQueryTermVariants } from './query-term-variants';
 import { isPublicHttpUrl } from '../utils/public-url';
+import { getResearchDepthConfig } from './research-depth';
 
 type SearchResult = {
   title: string;
@@ -136,11 +137,17 @@ const providerId = 'linkedin-search';
 // engines often repeat the same employer or surface a weak profile first; the
 // extra candidates let the final ranking prefer stronger, better corroborated
 // public matches without ever returning more than the requested count.
-const getCandidateBudget = (requestedCount: number) =>
-  Math.min(
+const getCandidateBudget = (
+  requestedCount: number,
+  researchDepth?: SearchRequest['researchDepth'],
+) => {
+  const { queryMultiplier } = getResearchDepthConfig(researchDepth);
+
+  return Math.min(
     600,
-    requestedCount + Math.max(24, Math.ceil(requestedCount * 0.35)),
+    requestedCount + Math.max(18, Math.ceil(requestedCount * 0.35 * queryMultiplier)),
   );
+};
 
 const queryCache = new Map<
   string,
@@ -1599,7 +1606,7 @@ const buildQueryVariants = (
   const isBroadLocation = location.mode === 'timezone' || location.mode === 'nationwide';
   const broadLocationLabel = normalizeMatchText(location.label);
   const discoveryQueries = buildDiscoveryQueryVariants(request.companyType, location, profile)
-    .slice(0, 12)
+    .slice(0, getResearchDepthConfig(request.researchDepth).maxQueryFamilies)
     .flatMap((phrase, index) =>
       index < 4
         ? buildLinkedInProfilePathQueries(phrase)
@@ -1713,9 +1720,13 @@ const buildQueryVariants = (
 
   const minimumBudget =
     location.mode === 'timezone' || location.mode === 'nationwide' ? 16 : 13;
+  const { queryMultiplier } = getResearchDepthConfig(request.researchDepth);
   const queryBudget = Math.min(
     maxQueries,
-    Math.max(minimumBudget, Math.ceil(request.count / 35) + 8),
+    Math.max(
+      Math.ceil(minimumBudget * queryMultiplier),
+      Math.ceil((Math.ceil(request.count / 35) + 8) * queryMultiplier),
+    ),
   );
 
   return queryCandidates.slice(0, queryBudget);
@@ -1744,7 +1755,13 @@ const buildFallbackQueryVariants = (request: SearchRequest, location: Normalized
     }),
   ]);
 
-  const fallbackBudget = Math.min(maxQueries, Math.max(10, Math.ceil(request.count / 50) + 6));
+  const fallbackBudget = Math.min(
+    maxQueries,
+    Math.max(
+      6,
+      Math.ceil((Math.ceil(request.count / 50) + 6) * getResearchDepthConfig(request.researchDepth).queryMultiplier),
+    ),
+  );
 
   return fallbackCandidates.slice(0, fallbackBudget);
 };
@@ -2239,6 +2256,43 @@ const mergePublicEvidence = (
   return [...merged.values()];
 };
 
+const formerEmploymentPattern =
+  /\b(former|ex[- ]|previously|past)\b/i;
+const currentEmploymentPattern =
+  /\b(currently|current role|present|serving as|works? as|working as)\b/i;
+const activeRoleContextPattern =
+  /\b(founder|co-founder|owner|co-owner|ceo|president|principal|partner|director|manager|operator|administrator|head of|vice president|vp)\b[^.]{0,80}\b(?:at|@|of|for)\b/i;
+
+/**
+ * Employment status is deliberately conservative: public snippets rarely
+ * prove a current job, so role wording without an explicit current marker is
+ * reported as probable rather than confirmed.
+ */
+export const inferPublicEmploymentStatus = (publicProfileText: string): EmploymentStatus => {
+  const text = normalizeText(publicProfileText);
+  const hasFormerSignal = formerEmploymentPattern.test(text);
+  const hasCurrentSignal = currentEmploymentPattern.test(text);
+  const hasActiveRoleContext = activeRoleContextPattern.test(text);
+
+  if (hasFormerSignal && hasCurrentSignal) {
+    return 'conflicting';
+  }
+
+  if (hasFormerSignal) {
+    return 'former';
+  }
+
+  if (hasCurrentSignal) {
+    return 'current';
+  }
+
+  if (hasActiveRoleContext) {
+    return 'probable';
+  }
+
+  return 'unverified';
+};
+
 const buildLeadFromCandidate = (
   candidate: LinkedInCandidate,
   request: SearchRequest,
@@ -2264,11 +2318,15 @@ const buildLeadFromCandidate = (
   const publicEvidence = profileTitle || profileSnippet || publicEvidenceSources.length
     ? { profileTitle, profileSnippet, sources: publicEvidenceSources }
     : undefined;
+  const publicProfileText = normalizeText(
+    `${candidate.title} ${candidate.headline ?? ''} ${candidate.snippet}`,
+  );
 
   return {
     id: createId(candidate.profileUrl || `${candidate.name}-${candidate.headline ?? ''}`),
     name: normalizeText(candidate.name || slugToName(candidate.profileUrl) || candidate.profileUrl),
     headline: candidate.headline,
+    employmentStatus: inferPublicEmploymentStatus(publicProfileText),
     mobile: '',
     email: '',
     website: candidate.website ?? '',
@@ -2539,7 +2597,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
   const fallbackQueries = buildFallbackQueryVariants(request, location).filter(
     (query) => !primaryQueryKeys.has(query.toLowerCase()),
   );
-  const candidateBudget = getCandidateBudget(request.count);
+  const candidateBudget = getCandidateBudget(request.count, request.researchDepth);
   const configuredMaxResults = readBoundedNumber(
     process.env.LINKEDIN_SEARCH_MAX_RESULTS,
     candidateBudget,
@@ -2595,11 +2653,13 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
   // get a wider window, while the hard cap, deadline, and provider circuit
   // breakers keep public-search traffic predictable.
   const paginationQueries = unique([...queries, ...fallbackQueries]);
-  const secondPageQueryLimit = getSecondPageQueryLimit(
-    request.count,
-    paginationQueries.length,
+  const depthConfig = getResearchDepthConfig(request.researchDepth);
+  const secondPageQueryLimit = Math.min(
+    depthConfig.secondPageQueryLimit,
+    getSecondPageQueryLimit(request.count, paginationQueries.length),
   );
   if (
+    secondPageQueryLimit > 0 &&
     candidates.size < maxResults &&
     Date.now() < deadline &&
     [...providerHealth.values()].some((health) => !health.disabled)

@@ -55,6 +55,7 @@ const waitForLocalApi = async (fallbackMessage: string) => {
 const normalizeRequest = (request: SearchRequest): SearchRequest => ({
   ...request,
   count: Math.max(request.count, minimumRequestedCount),
+  ...(request.researchDepth ? { researchDepth: request.researchDepth } : {}),
 });
 
 const getSearchServiceError = (sourceMode?: SearchRequest['sourceMode']) =>
@@ -157,6 +158,9 @@ const fetchSearchSnapshot = async (searchId: string) => {
 export type SearchApi = {
   startSearch: (request: SearchRequest) => Promise<SearchResponse>;
   getSearch: (searchId: string) => Promise<SearchResponse | null>;
+  cancelSearch?: (searchId: string) => Promise<SearchResponse | null>;
+  resumeSearch?: (searchId: string) => Promise<SearchResponse | null>;
+  reverifySearch?: (searchId: string) => Promise<SearchResponse | null>;
 };
 
 export const searchApi: SearchApi = {
@@ -184,6 +188,36 @@ export const searchApi: SearchApi = {
     if (response.status === 204) {
       return null;
     }
+
+    return response.json() as Promise<SearchResponse>;
+  },
+
+  async cancelSearch(searchId) {
+    const response = await fetchFromApi(
+      `/api/search/${searchId}/cancel`,
+      { method: 'POST' },
+      'Unable to cancel this search. Please try again.',
+    );
+
+    return response.json() as Promise<SearchResponse>;
+  },
+
+  async resumeSearch(searchId) {
+    const response = await fetchFromApi(
+      `/api/search/${searchId}/resume`,
+      { method: 'POST' },
+      'Unable to resume this search. Please try again.',
+    );
+
+    return response.json() as Promise<SearchResponse>;
+  },
+
+  async reverifySearch(searchId) {
+    const response = await fetchFromApi(
+      `/api/search/${searchId}/reverify`,
+      { method: 'POST' },
+      'Unable to reverify this search. Please try again.',
+    );
 
     return response.json() as Promise<SearchResponse>;
   },

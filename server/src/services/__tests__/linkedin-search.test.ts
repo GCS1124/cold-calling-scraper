@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { discoverUsLeadsFromLinkedinSearch } from '../linkedin-search';
+import {
+  discoverUsLeadsFromLinkedinSearch,
+  inferPublicEmploymentStatus,
+} from '../linkedin-search';
 
 const sampleLocation = {
   mode: 'local' as const,
@@ -1947,5 +1950,15 @@ Researcher studying dental public health in Austin, Texas.
     expect(providerCalls.get('bing')).toBe(2);
     expect(result.warnings.filter((warning) => warning.providerName === 'Brave Search')).toHaveLength(1);
     expect(result.warnings.filter((warning) => warning.providerName === 'Bing')).toHaveLength(1);
+  });
+});
+
+describe('inferPublicEmploymentStatus', () => {
+  it('distinguishes explicit current, probable, former, and conflicting wording', () => {
+    expect(inferPublicEmploymentStatus('Currently serving as CEO at Example HVAC')).toBe('current');
+    expect(inferPublicEmploymentStatus('Owner at Example Dental')).toBe('probable');
+    expect(inferPublicEmploymentStatus('Former owner of Example Dental')).toBe('former');
+    expect(inferPublicEmploymentStatus('Former owner, currently CEO at Example HVAC')).toBe('conflicting');
+    expect(inferPublicEmploymentStatus('Public profile with no role')).toBe('unverified');
   });
 });

@@ -43,6 +43,7 @@ export type SearchJobRecord = {
   updatedAt: number;
   processingToken?: string;
   processingUntil?: number;
+  cancelRequested?: boolean;
 };
 
 export type SearchJobStore = {
@@ -55,6 +56,7 @@ export type SearchJobStore = {
     token: string,
   ) => Promise<SearchJobRecord | null>;
   upsert: (job: SearchJobRecord) => Promise<void>;
+  requestCancel: (searchId: string, now: number) => Promise<SearchJobRecord | null>;
   deleteExpired: (now: number) => Promise<void>;
   close?: () => Promise<void>;
 };
@@ -75,7 +77,7 @@ export const isSearchPersistenceError = (
   (error instanceof Error &&
     (error as Error & { code?: unknown }).code === 'SEARCH_PERSISTENCE_UNAVAILABLE');
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 const DEFAULT_JOB_TTL_MS = 1000 * 60 * 60 * 6;
 const MEMORY_MAX_JOBS = Number(process.env.SEARCH_JOB_MEMORY_MAX_JOBS ?? 500);
@@ -272,6 +274,8 @@ const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
     processingUntil: Number.isFinite(job.processingUntil)
       ? job.processingUntil
       : undefined,
+    cancelRequested:
+      typeof job.cancelRequested === 'boolean' ? job.cancelRequested : undefined,
     expiresAt: Number.isFinite(job.expiresAt)
       ? job.expiresAt
       : currentTime + DEFAULT_JOB_TTL_MS,
@@ -317,6 +321,8 @@ const migrateJobPayload = (payload: unknown): SearchJobRecord | null => {
     processingUntil: Number.isFinite(raw.processingUntil)
       ? raw.processingUntil
       : undefined,
+    cancelRequested:
+      typeof raw.cancelRequested === 'boolean' ? raw.cancelRequested : undefined,
   });
 };
 
@@ -343,6 +349,7 @@ const unavailableStore = (message: string): SearchJobStore => {
     get: fail,
     claim: fail,
     upsert: fail,
+    requestCancel: fail,
     deleteExpired: fail,
   };
 };
@@ -394,7 +401,12 @@ const memoryStore = (): SearchJobStore => {
       }
 
       const job = jobs.get(normalized);
-      if (!job || (job.processingUntil ?? 0) > now) {
+      if (
+        !job ||
+        job.cancelRequested ||
+        !['queued', 'discovering', 'enriching'].includes(job.status) ||
+        (job.processingUntil ?? 0) > now
+      ) {
         return null;
       }
 
@@ -410,7 +422,22 @@ const memoryStore = (): SearchJobStore => {
 
     upsert: async (job: SearchJobRecord) => {
       const sanitized = sanitizeJob(job);
-      jobs.set(sanitized.searchId, sanitized);
+      const existing = jobs.get(sanitized.searchId);
+      const cancelledDuringWork =
+        existing?.cancelRequested === true &&
+        sanitized.cancelRequested !== false &&
+        sanitized.status !== 'cancelled';
+      jobs.set(
+        sanitized.searchId,
+        cancelledDuringWork
+          ? {
+              ...sanitized,
+              cancelRequested: true,
+              status: 'cancelled',
+              progress: { ...sanitized.progress, currentSource: 'Cancelled' },
+            }
+          : sanitized,
+      );
 
       if (jobs.size > MEMORY_MAX_JOBS) {
         const oldest = [...jobs.entries()]
@@ -421,6 +448,25 @@ const memoryStore = (): SearchJobStore => {
           jobs.delete(searchId);
         }
       }
+    },
+
+    requestCancel: async (searchId: string, now: number) => {
+      const normalized = normalizeSearchId(searchId);
+      const job = jobs.get(normalized);
+
+      if (!job || ['complete', 'failed', 'cancelled'].includes(job.status)) {
+        return job ?? null;
+      }
+
+      const cancelled = sanitizeJob({
+        ...job,
+        cancelRequested: true,
+        status: 'cancelled',
+        updatedAt: now,
+        progress: { ...job.progress, currentSource: 'Cancelled' },
+      });
+      jobs.set(normalized, cancelled);
+      return cancelled;
     },
 
     deleteExpired: async (now: number) => {
@@ -556,6 +602,7 @@ const postgresStore = (): SearchJobStore => {
               0
             ) <= $4
             and coalesce(payload->>'status', '') in ('queued', 'discovering', 'enriching')
+            and coalesce(payload->>'cancelRequested', 'false') <> 'true'
           returning payload
         `,
         [normalized, leaseUntil, token, now],
@@ -591,7 +638,19 @@ const postgresStore = (): SearchJobStore => {
             $5
           )
           on conflict (search_id) do update set
-            payload = excluded.payload,
+            payload = case
+              when lead_finder_jobs.payload->>'cancelRequested' = 'true'
+                and excluded.payload->>'cancelRequested' is distinct from 'false'
+                and excluded.payload->>'status' <> 'cancelled'
+                then jsonb_set(
+                  jsonb_set(
+                    jsonb_set(excluded.payload, '{cancelRequested}', 'true'::jsonb, true),
+                    '{status}', '"cancelled"'::jsonb, true
+                  ),
+                  '{progress,currentSource}', '"Cancelled"'::jsonb, true
+                )
+              else excluded.payload
+            end,
             expires_at = excluded.expires_at,
             updated_at = excluded.updated_at
         `,
@@ -603,6 +662,43 @@ const postgresStore = (): SearchJobStore => {
           sanitized.updatedAt,
         ],
       );
+    },
+
+    requestCancel: async (searchId: string, now: number) => {
+      const normalized = normalizeSearchId(searchId);
+
+      if (!isValidSearchId(normalized)) {
+        return null;
+      }
+
+      await ensureSchema();
+
+      const client = getPool();
+
+      if (!client) {
+        throw new Error('Missing Postgres connection string');
+      }
+
+      const result = await client.query<{ payload: SearchJobRecord | string }>(
+        `
+          update lead_finder_jobs
+          set payload = jsonb_set(
+            jsonb_set(
+              jsonb_set(payload, '{cancelRequested}', 'true'::jsonb, true),
+              '{status}', '"cancelled"'::jsonb, true
+            ),
+            '{progress,currentSource}', '"Cancelled"'::jsonb, true
+          ),
+          updated_at = $2
+          where search_id = $1
+            and expires_at > $2
+            and coalesce(payload->>'status', '') in ('queued', 'discovering', 'enriching')
+          returning payload
+        `,
+        [normalized, now],
+      );
+
+      return parsePayload(result.rows[0]?.payload);
     },
 
     deleteExpired: async (now: number) => {
@@ -700,6 +796,14 @@ export const createSearchJobStore = (): SearchJobStore => {
       );
     },
 
+    requestCancel: async (searchId: string, now: number) => {
+      return withFallback(
+        () => postgres.requestCancel(searchId, now),
+        () => fallback.requestCancel(searchId, now),
+        'requestCancel',
+      );
+    },
+
     deleteExpired: async (now: number) => {
       await withFallback(
         () => postgres.deleteExpired(now),
@@ -742,6 +846,8 @@ export const toSearchResponse = (job: SearchJobRecord): SearchResponse => {
     meta: {
       query: job.query,
       locationLabel: job.locationLabel,
+      researchDepth: job.request.researchDepth ?? 'verified',
+      researchBrief: job.request.researchBrief,
       status: job.status,
       progress,
       totals: countLeadTotals(leads),

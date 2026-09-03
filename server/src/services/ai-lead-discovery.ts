@@ -141,7 +141,9 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     ];
     const coverage = buildCoverage();
     let aiAssistance: AiDiscoveryResult['aiAssistance'] = 'disabled';
-    let queryHints: string[] = [];
+    let queryHints: string[] = request.researchBrief?.trim()
+      ? [request.researchBrief.trim()]
+      : [];
 
     if (isGeminiQueryAssistanceEnabled()) {
       const rawQuery = `${request.companyType} in ${location.label}`;
@@ -155,7 +157,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
         const normalizedAssistedQuery = assistedQuery.trim().slice(0, 180);
 
         if (normalizedAssistedQuery && normalizedAssistedQuery.toLowerCase() !== rawQuery.toLowerCase()) {
-          queryHints = [normalizedAssistedQuery];
+          queryHints = [...queryHints, normalizedAssistedQuery];
         }
 
         aiAssistance = 'enabled';
@@ -309,6 +311,8 @@ const buildResponse = ({
     meta: {
       query: `${request.companyType} in ${locationLabel}`,
       locationLabel,
+      researchDepth: request.researchDepth ?? 'verified',
+      researchBrief: request.researchBrief,
       status: 'complete',
       progress: {
         discovered: visibleLeads.length,

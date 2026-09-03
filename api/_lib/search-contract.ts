@@ -4,6 +4,7 @@ import { usStateCodes } from '../../server/src/data/us-states.js';
 
 const publicTimeZoneCodes = ['EST', 'CST', 'MST', 'PST'] as const;
 const publicSearchSourceModes = ['gmb', 'linkedin', 'ai'] as const;
+const publicResearchDepths = ['quick', 'verified', 'pro'] as const;
 
 const cityPattern = /^[\p{L}][\p{L}\s.'-]*$/u;
 
@@ -31,6 +32,8 @@ export const searchLocationSchema = z.discriminatedUnion('mode', [
 export const searchRequestSchema = z.object({
   companyType: z.string().trim().min(2).max(80),
   sourceMode: z.enum(publicSearchSourceModes).optional(),
+  researchDepth: z.enum(publicResearchDepths).optional(),
+  researchBrief: z.string().trim().max(1_000).optional(),
   location: searchLocationSchema,
   count: z.number().int().min(50).max(500),
   // Older clients may omit this, but disabling it is never accepted.
@@ -77,6 +80,8 @@ export const formatLocationLabel = (location: SearchLocation) => {
 export const flattenSearchRequest = (request: PublicSearchRequest) => ({
   companyType: request.companyType.trim(),
   sourceMode: request.sourceMode ?? 'gmb',
+  researchDepth: request.researchDepth ?? 'verified',
+  researchBrief: request.researchBrief,
   city: serializeLocationValue(request.location),
   count: Math.max(request.count, 50),
   phoneRequired: request.phoneRequired,

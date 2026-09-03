@@ -12,3 +12,4 @@ server/coverage
 server/.env
 .vercel
 .env*.local
+.playwright-cli/

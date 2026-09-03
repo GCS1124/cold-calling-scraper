@@ -20,6 +20,7 @@ type ExtractedContactDetails = {
   phones: string[];
   addresses: string[];
   socialUrls: string[];
+  opportunitySignals: string[];
 };
 
 const blockedPattern =
@@ -522,6 +523,7 @@ const parseJsonLdContacts = (html: string): ExtractedContactDetails => {
     phones: [...phones],
     addresses: [...addresses],
     socialUrls: [...socialUrls],
+    opportunitySignals: [],
   };
 };
 
@@ -533,6 +535,17 @@ const extractVisibleText = ($: cheerio.CheerioAPI) => {
     .replace(/\s+/g, ' ')
     .trim();
 };
+
+const publicOpportunityPatterns: Array<[RegExp, string]> = [
+  [/\b(now hiring|we(?:'re| are) hiring|join our team|careers?|job openings?)\b/i, 'Public hiring signal'],
+  [/\b(expanding|expansion|new location|grand opening|now serving)\b/i, 'Public growth signal'],
+  [/\b(request (?:a|an) quote|free estimate|book (?:now|today)|schedule (?:a|an)? appointment)\b/i, 'Public active-service CTA'],
+];
+
+export const extractPublicOpportunitySignals = (text: string) =>
+  publicOpportunityPatterns
+    .filter(([pattern]) => pattern.test(text))
+    .map(([, label]) => label);
 
 const extractAddressesFromHtml = ($: cheerio.CheerioAPI) => {
   const addresses = new Set<string>();
@@ -601,6 +614,7 @@ export const extractContactDetailsFromHtml = (
   const phones = new Set<string>();
   const addresses = new Set<string>();
   const socialUrls = new Set<string>();
+  const opportunitySignals = new Set<string>(extractPublicOpportunitySignals(text));
 
   $('a[href^="mailto:"]').each((_index, element) => {
     const value = normalizeEmail($(element).attr('href') ?? '');
@@ -658,6 +672,10 @@ export const extractContactDetailsFromHtml = (
     socialUrls.add(socialUrl);
   }
 
+  for (const signal of jsonLd.opportunitySignals) {
+    opportunitySignals.add(signal);
+  }
+
   if (pageUrl) {
     try {
       for (const socialUrl of extractSocialUrlsFromHtml($, new URL(pageUrl))) {
@@ -673,6 +691,7 @@ export const extractContactDetailsFromHtml = (
     phones: [...phones],
     addresses: [...addresses],
     socialUrls: [...socialUrls],
+    opportunitySignals: [...opportunitySignals],
   };
 };
 
@@ -887,6 +906,7 @@ export const enrichLeadFromWebsite = async (
   const phones = new Set<string>();
   const addresses = new Set<string>();
   const socialUrls = new Set<string>();
+  const opportunitySignals = new Set<string>();
   const warnings: ProviderWarning[] = [];
 
   let blockedCount = 0;
@@ -978,6 +998,7 @@ export const enrichLeadFromWebsite = async (
       extracted.phones.forEach((phone) => phones.add(phone));
       extracted.addresses.forEach((address) => addresses.add(address));
       extracted.socialUrls.forEach((socialUrl) => socialUrls.add(socialUrl));
+      extracted.opportunitySignals.forEach((signal) => opportunitySignals.add(signal));
 
       for (const link of getInternalLinks(html, new URL(currentUrl), origin)) {
         if (visited.has(link.url)) {
@@ -1019,6 +1040,9 @@ export const enrichLeadFromWebsite = async (
       .map(normalizePublicSocialLink)
       .filter((link): link is PublicSocialLink => Boolean(link)),
   );
+  const mergedOpportunitySignals = [
+    ...new Set([...(lead.opportunitySignals ?? []), ...opportunitySignals]),
+  ];
 
   const email = shouldKeepExistingValue(lead.email) ? lead.email ?? '' : crawledEmail;
   const phone = shouldKeepExistingValue(lead.mobile) ? lead.mobile ?? '' : crawledPhone;
@@ -1028,6 +1052,7 @@ export const enrichLeadFromWebsite = async (
     (!lead.email && email) ||
       (!lead.mobile && phone) ||
       (!lead.address && address) ||
+      mergedOpportunitySignals.length > (lead.opportunitySignals?.length ?? 0) ||
       publicSocialLinks.length > (lead.publicSocialLinks?.length ?? 0),
   );
 
@@ -1043,6 +1068,7 @@ export const enrichLeadFromWebsite = async (
         ...lead,
         website,
         publicSocialLinks,
+        opportunitySignals: mergedOpportunitySignals,
         crawlAttempts: visited.size,
         rejectionReason: lead.rejectionReason ?? 'blocked_website',
       },
@@ -1062,6 +1088,7 @@ export const enrichLeadFromWebsite = async (
       address,
       website,
       publicSocialLinks,
+      opportunitySignals: mergedOpportunitySignals,
       hasEmail: Boolean(email),
       hasPhone: Boolean(phone),
       hasWebsite: Boolean(website),

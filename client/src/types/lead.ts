@@ -1,4 +1,4 @@
-import type { SearchSourceMode, TimeZoneCode } from '../data/search-options';
+import type { ResearchDepth, SearchSourceMode, TimeZoneCode } from '../data/search-options';
 import type { UsStateCode } from '../data/us-states';
 
 export type PublicSocialLink = {
@@ -15,10 +15,43 @@ export type PublicSocialLink = {
   url: string;
 };
 
+export type LeadEvidence = {
+  sourceUrl: string;
+  sourceName: string;
+  claim: string;
+  status:
+    | 'confirmed'
+    | 'corroborated'
+    | 'inferred'
+    | 'stale'
+    | 'conflicting'
+    | 'rejected'
+    | 'unknown';
+  observedAt?: string;
+};
+
+export type LeadScores = {
+  trust: number;
+  fit: number;
+  contactability: number;
+  opportunity: number;
+  priority: number;
+  reasons: string[];
+};
+
+export type EmploymentStatus =
+  | 'current'
+  | 'probable'
+  | 'uncertain'
+  | 'conflicting'
+  | 'former'
+  | 'unverified';
+
 export type Lead = {
   id: string;
   name: string;
   headline?: string;
+  employmentStatus?: EmploymentStatus;
   mobile?: string;
   email?: string;
   website?: string;
@@ -36,6 +69,9 @@ export type Lead = {
       profileSnippet?: string;
     }>;
   };
+  evidence?: LeadEvidence[];
+  scores?: LeadScores;
+  opportunitySignals?: string[];
   address?: string;
   category: string;
   city: string;
@@ -93,6 +129,8 @@ export type SearchRequest = {
   /** The app only accepts leads with a validated public phone/mobile number. */
   phoneRequired?: true;
   sourceMode?: SearchSourceMode;
+  researchDepth?: ResearchDepth;
+  researchBrief?: string;
   filters?: {
     hasEmail?: boolean;
     hasPhone?: boolean;
@@ -109,6 +147,8 @@ export type SearchDraft = {
   city: string;
   stateCode: UsStateCode | '';
   count: number;
+  researchDepth: ResearchDepth;
+  researchBrief: string;
 };
 
 export type SearchStatus =
@@ -116,6 +156,7 @@ export type SearchStatus =
   | 'discovering'
   | 'enriching'
   | 'complete'
+  | 'cancelled'
   | 'failed';
 
 export type SearchResponse = {
@@ -124,6 +165,8 @@ export type SearchResponse = {
   meta: {
     query: string;
     locationLabel: string;
+    researchDepth?: ResearchDepth;
+    researchBrief?: string;
     status: SearchStatus;
     progress: {
       discovered: number;

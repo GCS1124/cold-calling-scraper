@@ -158,4 +158,46 @@ describe('createSearchJobStore', () => {
     const afterRelease = await store.claim('claim-job', 1000, 10_000, 'token-b');
     expect(afterRelease?.processingToken).toBe('token-b');
   });
+
+  it('does not let an in-flight active snapshot overwrite cancellation', async () => {
+    const { createSearchJobRecord, createSearchJobStore } = await import('../search-job-store');
+    const store = createSearchJobStore();
+    const job = createSearchJobRecord({
+      searchId: 'cancel-race-job',
+      request: {
+        companyType: 'Dentist',
+        sourceMode: 'gmb',
+        city: 'Austin, TX',
+        count: 50,
+      },
+      query: 'Dentist in Austin, TX',
+      locationLabel: 'Austin, TX',
+      locationMode: 'local',
+      status: 'discovering',
+      progress: {
+        discovered: 0,
+        enriched: 0,
+        totalCandidates: 0,
+        requestedCount: 50,
+        foundCount: 0,
+        duplicatesRemoved: 0,
+        currentSource: 'Google Places API',
+        batchesCompleted: 0,
+        estimatedRemaining: 50,
+      },
+    });
+
+    await store.upsert(job);
+    await store.requestCancel('cancel-race-job', 2000);
+    await store.upsert({
+      ...job,
+      status: 'complete',
+      updatedAt: 3000,
+    });
+
+    const persisted = await store.get('cancel-race-job');
+    expect(persisted?.status).toBe('cancelled');
+    expect(persisted?.cancelRequested).toBe(true);
+    expect(persisted?.progress.currentSource).toBe('Cancelled');
+  });
 });

@@ -108,6 +108,55 @@ describe('createSearchService', () => {
     expect(failed?.meta.providerWarnings[0]?.message).toContain('No US location match found');
   });
 
+  it('preserves cancellation when queued work starts after the user stops it', async () => {
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const service = createSearchService({
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      idFactory: () => 'search-cancelled-queued',
+      schedule: (task) => {
+        scheduledTasks.push(task);
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin',
+      count: 50,
+    });
+    const cancelled = await service.cancelSearch('search-cancelled-queued');
+
+    expect(cancelled?.meta.status).toBe('cancelled');
+    await scheduledTasks[0]!();
+    expect((await service.getSearch('search-cancelled-queued'))?.meta.status).toBe('cancelled');
+  });
+
+  it('resumes a cancelled local job without allowing the stale run to overwrite it', async () => {
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    let resolveLocation: ((value: typeof sampleLocation) => void) | undefined;
+    const locationPromise = new Promise<typeof sampleLocation>((resolve) => {
+      resolveLocation = resolve;
+    });
+    const service = createSearchService({
+      normalizeLocation: vi.fn().mockReturnValue(locationPromise),
+      idFactory: () => 'search-cancel-race',
+      schedule: (task) => {
+        scheduledTasks.push(task);
+      },
+    });
+
+    await service.startSearch({ companyType: 'Dentist', city: 'Austin', count: 50 });
+    const staleRun = scheduledTasks[0]!();
+    await service.cancelSearch('search-cancel-race');
+    const resumed = await service.resumeSearch('search-cancel-race');
+
+    expect(resumed?.meta.status).toBe('discovering');
+    resolveLocation!(sampleLocation);
+    await staleRun;
+
+    expect((await service.getSearch('search-cancel-race'))?.meta.status).toBe('discovering');
+    expect(scheduledTasks).toHaveLength(2);
+  });
+
   it('progresses from queued to discovering while background work continues under target', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 

@@ -28,6 +28,15 @@ function isPublicLinkedInLead(lead: Lead) {
   return lead.source.toLowerCase().includes('linkedin');
 }
 
+const employmentStatusLabels: Record<NonNullable<Lead['employmentStatus']>, string> = {
+  current: 'Current role signal',
+  probable: 'Probable current role',
+  uncertain: 'Role status uncertain',
+  conflicting: 'Conflicting role signals',
+  former: 'Former role signal',
+  unverified: 'Employment unverified',
+};
+
 const queryFamilyLabels: Record<string, string> = {
   'category-location': 'Category + location',
   'legacy-profile': 'Legacy profile',
@@ -216,6 +225,20 @@ export function ResultsTable({
                             <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700">
                               {getLinkedInReadinessLabel(lead)}
                             </span>
+                            {lead.employmentStatus ? (
+                              <span
+                                className={`rounded-full px-2 py-1 ${
+                                  lead.employmentStatus === 'current'
+                                    ? 'bg-emerald-50 text-emerald-700'
+                                    : lead.employmentStatus === 'conflicting'
+                                      ? 'bg-red-50 text-red-700'
+                                      : 'bg-slate-100 text-slate-600'
+                                }`}
+                                title="Conservative status inferred from public search-result wording only."
+                              >
+                                {employmentStatusLabels[lead.employmentStatus]}
+                              </span>
+                            ) : null}
                           </div>
                           {lead.matchSignals ? (
                             <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-slate-500">
@@ -464,6 +487,63 @@ export function ResultsTable({
                             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
                               Match evidence
                             </p>
+                            {lead.scores ? (
+                              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                                {(
+                                  [
+                                    ['Trust', lead.scores.trust],
+                                    ['Fit', lead.scores.fit],
+                                    ['Contact', lead.scores.contactability],
+                                    ['Opportunity', lead.scores.opportunity],
+                                    ['Priority', lead.scores.priority],
+                                  ] as const
+                                ).map(([label, value]) => (
+                                  <div className="rounded-xl border border-slate-200 bg-white p-2.5" key={label}>
+                                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
+                                      {label}
+                                    </p>
+                                    <p className="mt-1 text-lg font-black text-slate-950">{value}%</p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            {lead.scores?.reasons.length ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {lead.scores.reasons.map((reason) => (
+                                  <span
+                                    className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700"
+                                    key={reason}
+                                  >
+                                    {reason}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                            {lead.evidence?.length ? (
+                              <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-700">
+                                  Source-backed claims
+                                </p>
+                                <div className="mt-2 space-y-2">
+                                  {lead.evidence.slice(0, 6).map((evidence) => (
+                                    <div className="text-xs leading-5 text-slate-700" key={`${evidence.sourceUrl}-${evidence.claim}`}>
+                                      <span className="font-semibold">{evidence.claim}</span>{' '}
+                                      <a
+                                        className="text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+                                        href={evidence.sourceUrl}
+                                        rel="noreferrer"
+                                        target="_blank"
+                                      >
+                                        ({evidence.sourceName})
+                                      </a>
+                                      <span className="ml-1 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold uppercase text-emerald-700">
+                                        {evidence.status}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
                             <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
                               <span className="rounded-full bg-white px-3 py-2 text-slate-700">
                                 Confidence {lead.confidence}%

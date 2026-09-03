@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  handleCancelSearch,
   handleGetSearch,
+  handleGetEvidence,
+  handleReverifySearch,
+  handleResumeSearch,
   handleStartSearch,
   type SearchService,
 } from '../search';
@@ -264,5 +268,102 @@ describe('/api/search handlers', () => {
 
     expect(state.statusCode).toBe(400);
     expect(state.body).toEqual({ error: 'Missing search id' });
+  });
+
+  it('cancels an active search through the route contract', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn(),
+      cancelSearch: vi.fn().mockResolvedValue({
+        ...sampleResponse,
+        meta: { ...sampleResponse.meta, status: 'cancelled' },
+      } as never),
+    };
+    const { response, state } = createResponse();
+
+    await handleCancelSearch(
+      search,
+      { params: { searchId: 'search-1' } },
+      response,
+    );
+
+    expect(state.statusCode).toBe(200);
+    expect(search.cancelSearch).toHaveBeenCalledWith('search-1');
+    expect(state.body).toMatchObject({ meta: { status: 'cancelled' } });
+  });
+
+  it('returns a clear not-found response when cancellation misses a job', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn(),
+      cancelSearch: vi.fn().mockResolvedValue(null),
+    };
+    const { response, state } = createResponse();
+
+    await handleCancelSearch(
+      search,
+      { params: { searchId: 'missing-search' } },
+      response,
+    );
+
+    expect(state.statusCode).toBe(404);
+    expect(state.body).toEqual({ error: 'Search not found' });
+  });
+
+  it('resumes a cancelled search through the route contract', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn(),
+      resumeSearch: vi.fn().mockResolvedValue({
+        ...sampleResponse,
+        meta: { ...sampleResponse.meta, status: 'discovering' },
+      } as never),
+    };
+    const { response, state } = createResponse();
+
+    await handleResumeSearch(
+      search,
+      { params: { searchId: 'search-1' } },
+      response,
+    );
+
+    expect(state.statusCode).toBe(200);
+    expect(search.resumeSearch).toHaveBeenCalledWith('search-1');
+    expect(state.body).toMatchObject({ meta: { status: 'discovering' } });
+  });
+
+  it('reverifies a stored search through the route contract', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn(),
+      reverifySearch: vi.fn().mockResolvedValue(sampleResponse as never),
+    };
+    const { response, state } = createResponse();
+
+    await handleReverifySearch(search, { params: { searchId: 'search-1' } }, response);
+
+    expect(state.statusCode).toBe(200);
+    expect(search.reverifySearch).toHaveBeenCalledWith('search-1');
+  });
+
+  it('returns source evidence for a stored search', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn().mockResolvedValue(sampleResponse as never),
+    };
+    const { response, state } = createResponse();
+
+    await handleGetEvidence(
+      search,
+      { params: { searchId: 'search-1' }, query: {} },
+      response,
+    );
+
+    expect(state.statusCode).toBe(200);
+    expect(state.body).toMatchObject({
+      searchId: 'search-1',
+      leads: [],
+      limitations: expect.any(Array),
+    });
   });
 });

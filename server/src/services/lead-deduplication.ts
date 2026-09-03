@@ -1,4 +1,4 @@
-import type { Lead, PublicSocialLink } from '../types/lead';
+import type { EmploymentStatus, Lead, PublicSocialLink } from '../types/lead';
 
 const companySuffixPattern =
   /\b(private limited|pvt ltd|pvt\. ltd\.|private ltd|ltd|limited|llc|inc|inc\.|incorporated|corp|corp\.|corporation|co|co\.)\b/gi;
@@ -105,6 +105,45 @@ const mergePublicEvidence = (group: Lead[]) => {
     ...(profileSnippet ? { profileSnippet } : {}),
     ...(sources.size > 0 ? { sources: [...sources.values()] } : {}),
   } satisfies PublicEvidence;
+};
+
+const mergeResearchEvidence = (group: Lead[]) => {
+  const evidence = new Map<string, NonNullable<Lead['evidence']>[number]>();
+
+  group.flatMap((lead) => lead.evidence ?? []).forEach((item) => {
+    const key = `${item.sourceUrl}|${item.claim}`.toLowerCase();
+    if (!evidence.has(key)) {
+      evidence.set(key, { ...item });
+    }
+  });
+
+  return [...evidence.values()].slice(0, 30);
+};
+
+const employmentStatusRank: EmploymentStatus[] = [
+  'current',
+  'probable',
+  'uncertain',
+  'former',
+  'unverified',
+];
+
+const mergeEmploymentStatus = (group: Lead[]): EmploymentStatus | undefined => {
+  const statuses = new Set(
+    group
+      .map((lead) => lead.employmentStatus)
+      .filter((status): status is EmploymentStatus => Boolean(status)),
+  );
+
+  if (!statuses.size) {
+    return undefined;
+  }
+
+  if (statuses.has('conflicting') || (statuses.has('current') && statuses.has('former'))) {
+    return 'conflicting';
+  }
+
+  return employmentStatusRank.find((status) => statuses.has(status)) ?? 'unverified';
 };
 
 const mergeMatchSignals = (group: Lead[]) => {
@@ -267,6 +306,7 @@ const mergeGroup = (group: Lead[]) => {
     ...sorted[0],
     name: shortestNamed.name,
     headline: pickValue(...sorted.map((lead) => lead.headline)),
+    employmentStatus: mergeEmploymentStatus(group),
     mobile: pickValue(...sorted.map((lead) => lead.mobile)),
     email: pickValue(...sorted.map((lead) => lead.email)),
     website: pickValue(...sorted.map((lead) => lead.website)),
@@ -283,6 +323,11 @@ const mergeGroup = (group: Lead[]) => {
     source: sources.join(', '),
     confidence: Math.max(...sorted.map((lead) => lead.confidence)),
     publicEvidence: mergePublicEvidence(group),
+    evidence: mergeResearchEvidence(group),
+    opportunitySignals: [
+      ...new Set(group.flatMap((lead) => lead.opportunitySignals ?? []).map((signal) => signal.trim()).filter(Boolean)),
+    ],
+    scores: sorted[0]?.scores,
     matchSignals: mergeMatchSignals(group),
     hasEmail: sorted.some((lead) => lead.hasEmail),
     hasPhone: sorted.some((lead) => lead.hasPhone),

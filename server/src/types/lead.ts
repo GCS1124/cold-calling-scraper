@@ -12,10 +12,44 @@ export type PublicSocialLink = {
   url: string;
 };
 
+export type LeadEvidence = {
+  sourceUrl: string;
+  sourceName: string;
+  claim: string;
+  status:
+    | 'confirmed'
+    | 'corroborated'
+    | 'inferred'
+    | 'stale'
+    | 'conflicting'
+    | 'rejected'
+    | 'unknown';
+  observedAt?: string;
+};
+
+export type LeadScores = {
+  trust: number;
+  fit: number;
+  contactability: number;
+  opportunity: number;
+  priority: number;
+  reasons: string[];
+};
+
+export type EmploymentStatus =
+  | 'current'
+  | 'probable'
+  | 'uncertain'
+  | 'conflicting'
+  | 'former'
+  | 'unverified';
+
 export type Lead = {
   id: string;
   name: string;
   headline?: string;
+  /** Public-result status only; never inferred from a private or authenticated profile. */
+  employmentStatus?: EmploymentStatus;
   mobile?: string;
   email?: string;
   website?: string;
@@ -33,6 +67,9 @@ export type Lead = {
       profileSnippet?: string;
     }>;
   };
+  evidence?: LeadEvidence[];
+  scores?: LeadScores;
+  opportunitySignals?: string[];
   address?: string;
   state?: string;
   stateCode?: string;

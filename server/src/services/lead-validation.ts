@@ -1,6 +1,7 @@
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
 import type { Lead } from '../types/lead';
+import { attachLeadResearchSignals } from './lead-research-signals';
 
 export type LeadQualityLevel = 'excellent' | 'good' | 'fair' | 'weak' | 'rejected';
 
@@ -382,7 +383,7 @@ export const enrichLead = (lead: Lead): Lead => {
     sourceScore,
   };
 
-  return {
+  return attachLeadResearchSignals({
     ...enriched,
     confidence: Math.max(
       Number(enriched.confidence ?? 0),
@@ -394,7 +395,7 @@ export const enrichLead = (lead: Lead): Lead => {
      * qualityLevel?: LeadQualityLevel;
      */
     qualityLevel: getQualityLevel(enriched),
-  } as Lead;
+  } as Lead);
 };
 
 export const enrichLeads = (leads: Lead[]) => {

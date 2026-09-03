@@ -39,6 +39,8 @@ import {
   normalizeLeadSourceMode,
   type LeadSourceMode,
 } from './search-source-mode';
+import { getResearchDepthConfig } from './research-depth';
+import { reverifyLeads } from './research-reverification';
 
 type SearchJob = {
   searchId: string;
@@ -52,11 +54,16 @@ type SearchJob = {
   expiresAt: number;
   lastProgressAt: number;
   googleMapsUnavailable?: boolean;
+  cancelRequested?: boolean;
+  executionToken: string;
 };
 
 type SearchService = {
   startSearch: (request: SearchRequest) => Promise<SearchResponse>;
   getSearch: (searchId: string) => Promise<SearchResponse | null>;
+  cancelSearch: (searchId: string) => Promise<SearchResponse | null>;
+  resumeSearch: (searchId: string) => Promise<SearchResponse | null>;
+  reverifySearch: (searchId: string) => Promise<SearchResponse | null>;
 };
 
 type SearchDeps = {
@@ -195,6 +202,8 @@ const toResponse = (job: SearchJob): SearchResponse => ({
   meta: {
     query: job.query,
     locationLabel: job.locationLabel,
+    researchDepth: job.request.researchDepth ?? 'verified',
+    researchBrief: job.request.researchBrief,
     status: job.status,
     progress: job.progress,
     totals: computeTotals(job.leads),
@@ -534,7 +543,7 @@ const runRegionalDiscovery = async (
         location: discoveryLocation,
         queryVariants,
         maxResults: Math.min(Math.max(remainingCount, 15), 30),
-        queryLimit: 12,
+        queryLimit: getResearchDepthConfig(request.researchDepth).googleMapsQueryLimit,
         deadlineMs: Date.now() + googleMapsDiscoveryTimeoutMs,
       }),
         googleMapsDiscoveryTimeoutMs,
@@ -590,7 +599,14 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     refreshProgress(job);
   };
 
-  const processJob = async (job: SearchJob) => {
+  const isCurrentRun = (job: SearchJob, executionToken: string) =>
+    job.executionToken === executionToken && !job.cancelRequested && job.status !== 'cancelled';
+
+  const processJob = async (job: SearchJob, executionToken: string) => {
+    if (!isCurrentRun(job, executionToken)) {
+      return;
+    }
+
     job.status = 'discovering';
     job.progress.currentSource = 'Nominatim';
     const sourceMode: LeadSourceMode = normalizeLeadSourceMode(job.request.sourceMode);
@@ -614,6 +630,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
           : `${job.request.companyType} in ${job.locationLabel}`;
       job.providerWarnings.push(...location.warnings);
     } catch (error) {
+      if (!isCurrentRun(job, executionToken)) return;
       markFailed(job, {
         providerId: 'nominatim',
         providerName: 'Nominatim',
@@ -622,6 +639,8 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       });
       return;
     }
+
+    if (!isCurrentRun(job, executionToken)) return;
 
     job.progress.currentSource = leadSourceModeLabels[sourceMode];
 
@@ -645,6 +664,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
           now,
         );
       } catch (error) {
+        if (!isCurrentRun(job, executionToken)) return;
         markFailed(job, {
           providerId: 'linkedin-search',
           providerName: 'LinkedIn',
@@ -656,6 +676,8 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         return;
       }
 
+      if (!isCurrentRun(job, executionToken)) return;
+
       finalizeLeads(job);
       refreshProgress(job);
       job.status = 'complete';
@@ -666,6 +688,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
 
     if (sourceMode === 'ai') {
       await runAiDiscovery(job, job.request, location, discoverAiLeads, now);
+      if (!isCurrentRun(job, executionToken)) return;
       finalizeLeads(job);
       refreshProgress(job);
       job.status = 'complete';
@@ -696,6 +719,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     );
 
     for (const regionalLocation of discoveryLocations) {
+      if (!isCurrentRun(job, executionToken)) return;
       if (job.progress.foundCount >= job.request.count) {
         break;
       }
@@ -725,6 +749,8 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         discoverOsmLeads,
         now,
       );
+
+      if (!isCurrentRun(job, executionToken)) return;
 
       if (regionalResult.googleMapsUnavailable) {
         job.googleMapsUnavailable = true;
@@ -757,6 +783,8 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       }
     }
 
+    if (!isCurrentRun(job, executionToken)) return;
+
     finalizeLeads(job);
     job.status = 'complete';
     job.progress.currentSource = 'Complete';
@@ -771,7 +799,10 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       const searchId = idFactory();
       const job: SearchJob = {
         searchId,
-        request,
+        request: {
+          ...request,
+          researchDepth: request.researchDepth ?? 'verified',
+        },
         leads: [],
         locationLabel: request.city.trim(),
         query: `${request.companyType} in ${request.city.trim()}`,
@@ -780,11 +811,13 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         providerWarnings: [],
         expiresAt: startedAt + jobTtlMs,
         lastProgressAt: startedAt,
+        executionToken: randomUUID(),
       };
 
       jobs.set(searchId, job);
+      const executionToken = job.executionToken;
       schedule(async () => {
-        await processJob(job);
+        await processJob(job, executionToken);
       });
 
       return toResponse(job);
@@ -794,6 +827,60 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       cleanupExpiredJobs(jobs, now);
       const job = jobs.get(searchId);
       return job ? toResponse(job) : null;
+    },
+
+    async cancelSearch(searchId) {
+      cleanupExpiredJobs(jobs, now);
+      const job = jobs.get(searchId);
+      if (!job) return null;
+
+      if (!['complete', 'failed', 'cancelled'].includes(job.status)) {
+        job.cancelRequested = true;
+        job.status = 'cancelled';
+        job.progress.currentSource = 'Cancelled';
+        job.executionToken = randomUUID();
+      }
+
+      return toResponse(job);
+    },
+
+    async resumeSearch(searchId) {
+      cleanupExpiredJobs(jobs, now);
+      const job = jobs.get(searchId);
+      if (!job) return null;
+
+      if (job.status === 'cancelled') {
+        job.cancelRequested = false;
+        job.status = 'discovering';
+        job.progress.currentSource = 'Resuming research';
+        job.lastProgressAt = now();
+        job.executionToken = randomUUID();
+        const executionToken = job.executionToken;
+        schedule(async () => {
+          await processJob(job, executionToken);
+        });
+      }
+
+      return toResponse(job);
+    },
+
+    async reverifySearch(searchId) {
+      cleanupExpiredJobs(jobs, now);
+      const job = jobs.get(searchId);
+      if (!job) return null;
+
+      job.leads = reverifyLeads(job.leads);
+      appendUniqueWarnings(job, [
+        {
+          providerId: 'reverification',
+          providerName: 'Deterministic verification',
+          message:
+            'Reverification refreshed public phone, email, website, evidence, and scores without refetching provider pages.',
+          severity: 'info',
+        },
+      ]);
+      refreshProgress(job);
+      return toResponse(job);
     },
   };
 };

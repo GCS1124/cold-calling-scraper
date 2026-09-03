@@ -4,9 +4,14 @@ import type { Lead } from './lead';
 
 const searchSourceModes = ['gmb', 'linkedin', 'ai'] as const;
 
+export const researchDepths = ['quick', 'verified', 'pro'] as const;
+export type ResearchDepth = (typeof researchDepths)[number];
+
 export const searchRequestSchema = z.object({
   companyType: z.string().trim().min(2).max(80),
   sourceMode: z.enum(searchSourceModes).optional(),
+  researchDepth: z.enum(researchDepths).optional(),
+  researchBrief: z.string().trim().max(1_000).optional(),
   city: z.string().trim().min(2).max(80),
   count: z.number().int().min(50).max(500),
   phoneRequired: z.literal(true).optional(),
@@ -42,6 +47,7 @@ export type SearchStatus =
   | 'discovering'
   | 'enriching'
   | 'complete'
+  | 'cancelled'
   | 'failed';
 
 export type SearchProgress = {
@@ -76,6 +82,8 @@ export type SearchResponse = {
   meta: {
     query: string;
     locationLabel: string;
+    researchDepth?: ResearchDepth;
+    researchBrief?: string;
     status: SearchStatus;
     progress: SearchProgress;
     totals: {

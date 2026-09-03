@@ -112,6 +112,8 @@ describe('/api/search', () => {
       city: 'EST',
       count: 50,
       phoneRequired: true,
+      researchDepth: 'verified',
+      researchBrief: undefined,
       filters: undefined,
     });
     expect(vercelSearchService.advanceSearch).toHaveBeenCalledWith('search-1');
@@ -203,6 +205,8 @@ describe('/api/search', () => {
       city: 'EST',
       count: 50,
       phoneRequired: true,
+      researchDepth: 'verified',
+      researchBrief: undefined,
       filters: undefined,
     });
     expect(waitUntil).not.toHaveBeenCalled();

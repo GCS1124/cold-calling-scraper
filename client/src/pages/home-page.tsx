@@ -12,6 +12,7 @@ import {
   Sparkles,
   Zap,
   BriefcaseBusiness,
+  RefreshCw,
 } from 'lucide-react';
 import {
   lazy,
@@ -71,6 +72,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reverifying, setReverifying] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [submittedSearch, setSubmittedSearch] = useState<SearchRequest | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
@@ -189,9 +191,8 @@ export function HomePage({ searchApi }: HomePageProps) {
     return visibleLeads.filter((lead) => selectedIdSet.has(lead.id));
   }, [selectedIdSet, selectedIds.length, visibleLeads]);
 
-  const isWaiting = Boolean(
-    result && !['complete', 'failed'].includes(result.meta.status),
-  );
+  const isWaiting = Boolean(result && pollingStatuses.includes(result.meta.status));
+  const isCancelled = result?.meta.status === 'cancelled';
 
   const summary = useMemo(() => {
     const allLeads = result?.leads ?? [];
@@ -272,9 +273,11 @@ export function HomePage({ searchApi }: HomePageProps) {
       ? `Queued ${result.meta.progress.requestedCount} leads`
       : result.meta.status === 'discovering'
         ? `Finding ${activeSourceMode === 'linkedin' ? 'prospects' : activeSourceMode === 'ai' ? 'AI-matched leads' : 'leads'} in ${result.meta.locationLabel}`
-        : result.meta.status === 'enriching'
-          ? 'Collecting contact details'
-          : result.meta.status === 'failed'
+      : result.meta.status === 'enriching'
+        ? 'Collecting contact details'
+        : result.meta.status === 'cancelled'
+          ? 'Search cancelled'
+        : result.meta.status === 'failed'
             ? 'Search failed'
             : linkedinDiscoveryBlocked
               ? 'LinkedIn discovery blocked'
@@ -294,8 +297,10 @@ export function HomePage({ searchApi }: HomePageProps) {
           : activeSourceMode === 'ai'
             ? 'Running free public discovery in parallel, merging duplicates, and keeping source limitations visible.'
             : 'Scanning matching businesses and removing duplicates.'
-          : result.meta.status === 'enriching'
+      : result.meta.status === 'enriching'
               ? 'Adding emails, phone numbers, websites, and source details.'
+              : result.meta.status === 'cancelled'
+                ? 'The partial research snapshot is preserved. Resume when you want to continue public-source discovery.'
               : result.meta.status === 'failed'
                   ? 'The search could not be completed. Adjust the query and try again.'
                     : linkedinDiscoveryBlocked
@@ -465,6 +470,55 @@ export function HomePage({ searchApi }: HomePageProps) {
     setPollRevision((current) => current + 1);
   };
 
+  const cancelCurrentSearch = async () => {
+    if (!result?.searchId || !searchApi.cancelSearch) {
+      return;
+    }
+
+    try {
+      const response = await searchApi.cancelSearch(result.searchId);
+      if (response) {
+        setResult(response);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to cancel this search');
+    }
+  };
+
+  const resumeCurrentSearch = async () => {
+    if (!result?.searchId || !searchApi.resumeSearch) {
+      return;
+    }
+
+    try {
+      const response = await searchApi.resumeSearch(result.searchId);
+      if (response) {
+        setResult(response);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to resume this search');
+    }
+  };
+
+  const reverifyCurrentSearch = async () => {
+    if (!result?.searchId || !searchApi.reverifySearch) {
+      return;
+    }
+
+    setReverifying(true);
+    try {
+      const response = await searchApi.reverifySearch(result.searchId);
+      if (response) {
+        setResult(response);
+        toast.success('Public evidence and contact validation refreshed.');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to reverify this search');
+    } finally {
+      setReverifying(false);
+    }
+  };
+
   const toggleSelected = (leadId: string) => {
     setSelectedIds((current) =>
       current.includes(leadId)
@@ -622,6 +676,8 @@ export function HomePage({ searchApi }: HomePageProps) {
               className={`rounded-[1.75rem] border p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] ${
                 result.meta.status === 'failed'
                   ? 'border-red-200 bg-red-50/90'
+                  : result.meta.status === 'cancelled'
+                    ? 'border-slate-300 bg-slate-100/90'
                   : linkedinDiscoveryBlocked
                     ? 'border-amber-200 bg-amber-50/90'
                   : result.meta.status === 'complete'
@@ -635,6 +691,8 @@ export function HomePage({ searchApi }: HomePageProps) {
                     className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${
                       result.meta.status === 'failed'
                         ? 'bg-red-100 text-red-700'
+                        : result.meta.status === 'cancelled'
+                          ? 'bg-slate-200 text-slate-700'
                         : linkedinDiscoveryBlocked
                           ? 'bg-amber-100 text-amber-700'
                         : result.meta.status === 'complete'
@@ -648,6 +706,8 @@ export function HomePage({ searchApi }: HomePageProps) {
                       <AlertTriangle className="h-6 w-6" />
                     ) : result.meta.status === 'complete' ? (
                       <CheckCircle2 className="h-6 w-6" />
+                    ) : result.meta.status === 'cancelled' ? (
+                      <Clock3 className="h-6 w-6" />
                     ) : (
                       <Search className="h-6 w-6" />
                     )}
@@ -666,6 +726,34 @@ export function HomePage({ searchApi }: HomePageProps) {
                     </p>
                   </div>
                 </div>
+
+                {isWaiting && searchApi.cancelSearch ? (
+                  <button
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                    onClick={() => void cancelCurrentSearch()}
+                    type="button"
+                  >
+                    Stop search
+                  </button>
+                ) : isCancelled && searchApi.resumeSearch ? (
+                  <button
+                    className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800"
+                    onClick={() => void resumeCurrentSearch()}
+                    type="button"
+                  >
+                    Resume search
+                  </button>
+                ) : result.meta.status === 'complete' && searchApi.reverifySearch ? (
+                  <button
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={reverifying}
+                    onClick={() => void reverifyCurrentSearch()}
+                    type="button"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${reverifying ? 'animate-spin' : ''}`} />
+                    {reverifying ? 'Reverifying...' : 'Reverify public data'}
+                  </button>
+                ) : null}
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:min-w-[420px]">
                   <div className="rounded-2xl bg-white/80 p-3">

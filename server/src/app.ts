@@ -21,6 +21,18 @@ const createLazySearchService = (): SearchService => {
   return {
     startSearch: async (request) => (await getService()).startSearch(request),
     getSearch: async (searchId) => (await getService()).getSearch(searchId),
+    cancelSearch: async (searchId) => {
+      const service = await getService();
+      return service.cancelSearch ? service.cancelSearch(searchId) : null;
+    },
+    resumeSearch: async (searchId) => {
+      const service = await getService();
+      return service.resumeSearch ? service.resumeSearch(searchId) : null;
+    },
+    reverifySearch: async (searchId) => {
+      const service = await getService();
+      return service.reverifySearch ? service.reverifySearch(searchId) : null;
+    },
   };
 };
 
