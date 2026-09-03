@@ -18,6 +18,10 @@ type ContactCellProps = {
   verified: boolean;
 };
 
+function isPublicLinkedInLead(lead: Lead) {
+  return lead.source.toLowerCase().includes('linkedin');
+}
+
 function ContactCell({ value, verified }: ContactCellProps) {
   if (!value) {
     return <>—</>;
@@ -48,6 +52,19 @@ export function ResultsTable({
 }: ResultsTableProps) {
   const allSelected = leads.length > 0 && leads.every((lead) => selectedIds.includes(lead.id));
   const [expandedLeadId, setExpandedLeadId] = useState<string | null>(null);
+  const containsLinkedInLeads = leads.some(isPublicLinkedInLead);
+  const allLeadsAreLinkedIn = leads.length > 0 && leads.every(isPublicLinkedInLead);
+  const identityColumnLabel = allLeadsAreLinkedIn
+    ? 'Profile'
+    : containsLinkedInLeads
+      ? 'Profile / Company'
+      : 'Company';
+  const linkColumnLabel = allLeadsAreLinkedIn ? 'Profile / Website' : 'Website / Profile';
+  const inspectionCopy = allLeadsAreLinkedIn
+    ? 'Inspect public profile evidence before export.'
+    : containsLinkedInLeads
+      ? 'Inspect profile or company details before export.'
+      : 'Open a company name to inspect details before export.';
 
   return (
     <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
@@ -57,7 +74,7 @@ export function ResultsTable({
             Results
           </p>
           <p className="mt-1 text-sm text-slate-600">
-            Open a company name to inspect details before export.
+            {inspectionCopy}
           </p>
         </div>
 
@@ -76,10 +93,10 @@ export function ResultsTable({
           <thead className="bg-slate-50 text-xs uppercase tracking-[0.18em] text-slate-400">
             <tr>
               <th className="px-4 py-3">#</th>
-              <th className="px-4 py-3">Company</th>
+              <th className="px-4 py-3">{identityColumnLabel}</th>
               <th className="px-4 py-3">Phone</th>
               <th className="px-4 py-3">Email</th>
-              <th className="px-4 py-3">Website / Profile</th>
+              <th className="px-4 py-3">{linkColumnLabel}</th>
               <th className="px-4 py-3">Address</th>
               <th className="px-4 py-3">Source</th>
               <th className="px-4 py-3">Actions</th>
@@ -88,8 +105,8 @@ export function ResultsTable({
           <tbody>
             {leads.map((lead, index) => {
               const isSelected = selectedIds.includes(lead.id);
-              const isPublicLinkedInLead = lead.source.toLowerCase().includes('linkedin');
-              const profileUrl = isPublicLinkedInLead ? lead.listingUrl : undefined;
+              const isLinkedInLead = isPublicLinkedInLead(lead);
+              const profileUrl = isLinkedInLead ? lead.listingUrl : undefined;
               const websiteUrl = lead.website && lead.website !== profileUrl ? lead.website : undefined;
               const fallbackUrl = !profileUrl && !websiteUrl ? lead.listingUrl : undefined;
               const primaryActionUrl = profileUrl || websiteUrl || fallbackUrl;
@@ -141,7 +158,7 @@ export function ResultsTable({
                           {lead.headline}
                         </div>
                       ) : null}
-                      {isPublicLinkedInLead ? (
+                      {isLinkedInLead ? (
                         <>
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold">
                             <span className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">
@@ -212,12 +229,12 @@ export function ResultsTable({
                         {websiteUrl ? (
                           <a
                             aria-label={`Open business website for ${lead.name}`}
-                            className={isPublicLinkedInLead ? 'text-xs text-slate-500 hover:text-blue-700' : 'text-blue-700 hover:text-blue-800'}
+                            className={isLinkedInLead ? 'text-xs text-slate-500 hover:text-blue-700' : 'text-blue-700 hover:text-blue-800'}
                             href={websiteUrl}
                             rel="noreferrer"
                             target="_blank"
                           >
-                            {isPublicLinkedInLead
+                            {isLinkedInLead
                               ? 'Business website'
                               : websiteUrl.replace(/^https?:\/\//, '')}
                           </a>
@@ -243,7 +260,7 @@ export function ResultsTable({
                     <td className="px-4 py-4">
                       <span
                         className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                          isPublicLinkedInLead
+                          isLinkedInLead
                             ? 'bg-blue-50 text-blue-700'
                             : 'bg-emerald-50 text-emerald-700'
                         }`}
@@ -261,7 +278,7 @@ export function ResultsTable({
                           <Copy className="h-4 w-4" />
                         </button>
                         <a
-                          aria-label={`Open ${isPublicLinkedInLead ? 'LinkedIn profile' : 'lead source'} for ${lead.name}`}
+                          aria-label={`Open ${isLinkedInLead ? 'LinkedIn profile' : 'lead source'} for ${lead.name}`}
                           className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-blue-200 hover:text-blue-700"
                           href={primaryActionUrl || '#'}
                           onClick={(event) => {
@@ -284,7 +301,7 @@ export function ResultsTable({
                               Lead snapshot
                             </p>
                             <p className="mt-2 text-sm leading-5 text-slate-600">
-                              {isPublicLinkedInLead
+                              {isLinkedInLead
                                 ? 'Profile identity is public; contact fields are kept only when openly listed on a business website.'
                                 : 'Review the available business details before adding this lead to your export.'}
                             </p>
@@ -301,7 +318,7 @@ export function ResultsTable({
                                 </a>
                               </p>
                             ) : null}
-                            {isPublicLinkedInLead &&
+                            {isLinkedInLead &&
                             (lead.publicEvidence?.profileTitle || lead.publicEvidence?.profileSnippet) ? (
                               <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
                                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-700">
@@ -374,7 +391,7 @@ export function ResultsTable({
                               <span className="rounded-full bg-white px-3 py-2 text-slate-700">
                                 Confidence {lead.confidence}%
                               </span>
-                              {isPublicLinkedInLead && lead.matchSignals ? (
+                              {isLinkedInLead && lead.matchSignals ? (
                                 <>
                                   {lead.matchSignals.categoryMatched ? (
                                     <span className="rounded-full bg-blue-50 px-3 py-2 text-blue-700">

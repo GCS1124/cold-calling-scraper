@@ -538,6 +538,8 @@ describe('App', () => {
     await waitForText(container, /public linkedin discovery complete/i, 6000);
     await waitForText(container, /Publicly validated/i, 1000);
     expect(normalizedText(container)).toContain('Public LinkedIn Northstar Labs');
+    expect(normalizedText(container)).toContain('Profile / Website');
+    expect(normalizedText(container)).toContain('Inspect public profile evidence before export.');
     expect(normalizedText(container)).toContain('LinkedIn profile');
     expect(normalizedText(container)).toContain('Business website');
     expect(
