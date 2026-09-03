@@ -182,6 +182,38 @@ Owner at Austin Dental Spa.
     expect(result.coverage?.providersChecked).toBe(4);
   });
 
+  it('fans out the highest-signal public query paths for corroboration', async () => {
+    const queryProviders = new Map<string, Set<string>>();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      const query = url.searchParams.get('q') ?? url.searchParams.get('p') ?? '';
+      const provider = url.href.includes('search.brave.com')
+        ? 'brave'
+        : url.href.includes('bing.com')
+          ? 'bing'
+          : url.href.includes('duckduckgo.com')
+            ? 'duckduckgo'
+            : 'yahoo';
+      const providers = queryProviders.get(query) ?? new Set<string>();
+      providers.add(provider);
+      queryProviders.set(query, providers);
+
+      return url.hostname === 'html.duckduckgo.com'
+        ? makeResponse(emptyDuckDuckGoBody)
+        : makeResponse('Title: no public profile matches');
+    });
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Orthodontic laboratory', city: 'Austin', count: 50 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(Math.max(...[...queryProviders.values()].map((providers) => providers.size))).toBe(4);
+  });
+
   it('extracts multiple public profiles from compact search-result lines', async () => {
     const compactBody = `Title: LinkedIn search results
 
@@ -839,6 +871,7 @@ Markdown Content:
         url.searchParams.get('offset') ??
         url.searchParams.get('first') ??
         url.searchParams.get('s') ??
+        url.searchParams.get('b') ??
         '0';
 
       return `${url.hostname}:${page}:${(

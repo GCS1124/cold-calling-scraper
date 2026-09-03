@@ -120,6 +120,8 @@ const providerFailureThreshold = 2;
 const queryCacheTtlMs = 15 * 60 * 1000;
 const maxQueryCacheEntries = 300;
 const publicSearchPageSize = 10;
+const topQuerySourceCount = 4;
+const rotatingQuerySourceCount = 2;
 const sourceLabel = 'LinkedIn';
 const leadSourceLabel = 'LinkedIn, Public Profile';
 const providerId = 'linkedin-search';
@@ -1803,6 +1805,7 @@ const collectSearchResults = async (
   queryIndex: number,
   providerHealth: Map<string, ProviderHealth>,
   deadline: number,
+  attemptedSearches: Set<string>,
   page = 0,
 ) => {
   const availableSources = searchSources.filter(
@@ -1823,7 +1826,21 @@ const collectSearchResults = async (
   const rotatedSources = availableSources.map(
     (_, index) => availableSources[(index + queryIndex) % availableSources.length]!,
   );
-  const selectedSources = rotatedSources.slice(0, Math.min(2, rotatedSources.length));
+  // Fan out only the first two high-signal paths so the shortlist gets
+  // corroborating public evidence without multiplying every query.
+  const sourceCount = queryIndex < 2 ? topQuerySourceCount : rotatingQuerySourceCount;
+  const selectedSources = rotatedSources
+    .slice(0, Math.min(sourceCount, rotatedSources.length))
+    .filter((source) => {
+      const requestKey = `${source.name}:${page}:${query.toLowerCase()}`;
+
+      if (attemptedSearches.has(requestKey)) {
+        return false;
+      }
+
+      attemptedSearches.add(requestKey);
+      return true;
+    });
   const resultSets = await Promise.all(
     selectedSources.map(async (source) => ({
       source,
@@ -2076,6 +2093,7 @@ const runLinkedInQuerySet = async ({
   request,
   location,
   providerHealth,
+  attemptedSearches,
   queryOffset = 0,
   page = 0,
 }: {
@@ -2086,6 +2104,7 @@ const runLinkedInQuerySet = async ({
   request: SearchRequest;
   location: NormalizedUsLocation;
   providerHealth: Map<string, ProviderHealth>;
+  attemptedSearches: Set<string>;
   queryOffset?: number;
   page?: number;
 }) => {
@@ -2212,6 +2231,7 @@ const runLinkedInQuerySet = async ({
           queryOffset + batchStart + batchIndex,
           providerHealth,
           deadline,
+          attemptedSearches,
           page,
         ),
       ),
@@ -2256,6 +2276,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
   const candidates = new Map<string, LinkedInCandidate>();
   const warnings: ProviderWarning[] = [];
   const providerHealth = createProviderHealth();
+  const attemptedSearches = new Set<string>();
 
   const primaryQueriesAttempted = await runLinkedInQuerySet({
     queries,
@@ -2265,6 +2286,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
     request,
     location,
     providerHealth,
+    attemptedSearches,
   });
 
   let fallbackQueriesAttempted = 0;
@@ -2279,6 +2301,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
       request,
       location,
       providerHealth,
+      attemptedSearches,
       queryOffset: primaryQueriesAttempted,
     });
   }
@@ -2305,6 +2328,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
       request,
       location,
       providerHealth,
+      attemptedSearches,
       queryOffset: primaryQueriesAttempted + fallbackQueriesAttempted,
       page: 1,
     });
