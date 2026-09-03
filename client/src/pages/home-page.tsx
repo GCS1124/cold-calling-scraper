@@ -221,6 +221,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   const publicQueriesAttempted = result?.meta.progress.publicQueriesAttempted;
   const publicProvidersChecked = result?.meta.progress.publicProvidersChecked;
   const publicQueryFamilies = result?.meta.progress.publicQueryFamilies ?? [];
+  const publicQueryFamilyCounts = result?.meta.progress.publicQueryFamilyCounts ?? {};
   const aiProviderCoverage = result?.meta.progress.providerCoverage ?? [];
   const displayedProviderWarnings =
     activeSourceMode === 'ai'
@@ -730,6 +731,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                       publicContactsFound={publicContactsFound}
                       publicProvidersChecked={publicProvidersChecked}
                       publicQueryFamilies={publicQueryFamilies}
+                      publicQueryFamilyCounts={publicQueryFamilyCounts}
                       publicQueriesAttempted={publicQueriesAttempted}
                     />
                   </div>
@@ -743,11 +745,11 @@ export function HomePage({ searchApi }: HomePageProps) {
                           Free AI mode coverage
                         </p>
                         <p className="mt-1 text-sm leading-5 text-slate-600">
-                          Public LinkedIn discovery and public website checks are merged and deduplicated. Commercial databases are audited but never called.
+                          Public LinkedIn discovery, public website checks, and published social links are merged and deduplicated. Commercial databases are audited but never called.
                         </p>
                       </div>
                       <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-bold text-blue-700 shadow-sm">
-                        No paid sources
+                        No paid lead databases
                       </span>
                     </div>
 
@@ -789,8 +791,10 @@ export function HomePage({ searchApi }: HomePageProps) {
 
                     <p className="mt-3 text-xs leading-5 text-slate-500">
                       {result.meta.progress.aiAssistance === 'enabled'
-                        ? 'AI query assistance enabled.'
-                        : 'AI query assistance is off so this mode stays free. Matching uses local category and role intelligence.'}
+                        ? 'Optional Gemini query assistance rewrote search wording only; public providers supplied the leads.'
+                        : result.meta.progress.aiAssistance === 'failed'
+                          ? 'Optional Gemini query assistance was unavailable; local public query expansion continued.'
+                          : 'Gemini query assistance is disabled by default. Matching uses local category and role intelligence, and public providers supply the leads.'}
                     </p>
                   </div>
                 ) : null}

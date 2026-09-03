@@ -50,4 +50,4 @@ export const salesProviderAudits: SalesProviderAudit[] = [
 ];
 
 export const freeAiModePolicy =
-  'Free AI mode uses public search results and publicly listed business contact details only. It does not use paid databases, private profiles, login sessions, paywall bypasses, or contact-reveal credits.';
+  'Free AI mode does not use paid databases, including commercial lead databases, private profiles, login sessions, paywall bypasses, or contact-reveal credits. It uses bounded public search results and publicly listed business contact details only. Optional Gemini query assistance is disabled by default and, when explicitly enabled with a user-provided key, rewrites search wording only and may be subject to that provider account\'s limits or charges.';

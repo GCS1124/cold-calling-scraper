@@ -1,4 +1,4 @@
-import type { Lead } from '../types/lead';
+import type { Lead, PublicSocialLink } from '../types/lead';
 
 const companySuffixPattern =
   /\b(private limited|pvt ltd|pvt\. ltd\.|private ltd|ltd|limited|llc|inc|inc\.|incorporated|corp|corp\.|corporation|co|co\.)\b/gi;
@@ -36,6 +36,20 @@ const isLinkedInProfileListing = (value?: string) => {
 
 const pickValue = (...values: Array<string | undefined>) =>
   values.find((value) => Boolean(value?.trim())) ?? '';
+
+const mergePublicSocialLinks = (group: Lead[]): PublicSocialLink[] => {
+  const links = new Map<string, PublicSocialLink>();
+
+  group.flatMap((lead) => lead.publicSocialLinks ?? []).forEach((link) => {
+    const url = link.url.trim();
+
+    if (url && !links.has(url)) {
+      links.set(url, { platform: link.platform, url });
+    }
+  });
+
+  return [...links.values()].slice(0, 20);
+};
 
 type PublicEvidence = NonNullable<Lead['publicEvidence']>;
 type PublicEvidenceSource = NonNullable<PublicEvidence['sources']>[number];
@@ -250,6 +264,7 @@ const mergeGroup = (group: Lead[]) => {
     email: pickValue(...sorted.map((lead) => lead.email)),
     website: pickValue(...sorted.map((lead) => lead.website)),
     contactSourceUrl: pickValue(...sorted.map((lead) => lead.contactSourceUrl)),
+    publicSocialLinks: mergePublicSocialLinks(group),
     listingUrl: pickValue(...sorted.map((lead) => lead.listingUrl)),
     address: pickValue(...sorted.map((lead) => lead.address)),
     state: pickValue(...sorted.map((lead) => lead.state)),

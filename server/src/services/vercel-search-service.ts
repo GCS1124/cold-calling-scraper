@@ -237,6 +237,7 @@ const runLinkedinDiscovery = async (
     job.progress.publicQueriesAttempted = linkedinResult.coverage.queriesAttempted;
     job.progress.publicProvidersChecked = linkedinResult.coverage.providersChecked;
     job.progress.publicQueryFamilies = linkedinResult.coverage.queryFamilies;
+    job.progress.publicQueryFamilyCounts = linkedinResult.coverage.queryFamilyCounts;
   }
 
   if (!linkedinResult.leads.length) {
@@ -344,6 +345,7 @@ const runAiDiscovery = async (
     job.progress.publicQueriesAttempted = result.publicCoverage.queriesAttempted;
     job.progress.publicProvidersChecked = result.publicCoverage.providersChecked;
     job.progress.publicQueryFamilies = result.publicCoverage.queryFamilies;
+    job.progress.publicQueryFamilyCounts = result.publicCoverage.queryFamilyCounts;
   }
 
   mergeLeads(job, result.leads, now);

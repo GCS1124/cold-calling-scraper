@@ -9,6 +9,8 @@ describe('extractContactDetailsFromHtml', () => {
         <body>
           <a href="mailto:hello@exampledental.com">Email us</a>
           <a href="tel:+15125550111">Call us</a>
+          <a href="https://www.facebook.com/exampledental">Facebook</a>
+          <a href="https://instagram.com/exampledental?utm_source=website">Instagram</a>
           <p>Questions? support@exampledental.com or (512) 555-0222.</p>
           <script type="application/ld+json">
             {
@@ -22,7 +24,7 @@ describe('extractContactDetailsFromHtml', () => {
       </html>
     `;
 
-    const extracted = extractContactDetailsFromHtml(html);
+    const extracted = extractContactDetailsFromHtml(html, 'https://exampledental.com/contact');
 
     expect(extracted.emails).toEqual(
       expect.arrayContaining([
@@ -33,6 +35,12 @@ describe('extractContactDetailsFromHtml', () => {
     );
     expect(extracted.phones).toEqual(
       expect.arrayContaining(['+1 512 555 0111', '+1 512 555 0222', '+1 512 555 0333']),
+    );
+    expect(extracted.socialUrls).toEqual(
+      expect.arrayContaining([
+        'https://www.facebook.com/exampledental',
+        'https://instagram.com/exampledental?utm_source=website',
+      ]),
     );
   });
 

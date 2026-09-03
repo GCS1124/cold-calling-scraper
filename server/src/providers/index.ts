@@ -1,4 +1,4 @@
-import { expandQueryWithGemini } from './gemini';
+import { expandQueryWithGemini, isGeminiQueryAssistanceEnabled } from './gemini';
 import { googlePlacesProvider } from './google-places';
 import { yellowPagesProvider } from './yellowpages';
 import { yelpProvider } from './yelp';
@@ -9,4 +9,4 @@ export const defaultProviders = [
   yellowPagesProvider,
 ];
 
-export { expandQueryWithGemini };
+export { expandQueryWithGemini, isGeminiQueryAssistanceEnabled };

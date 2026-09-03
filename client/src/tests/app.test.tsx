@@ -244,6 +244,13 @@ const aiModeResponse: SearchResponse = {
           status: 'returned',
           leadCount: 2,
         },
+        {
+          providerId: 'gemini-query-assistance',
+          providerName: 'Gemini query assistance',
+          status: 'not_configured',
+          leadCount: 0,
+          message: 'Disabled by default; requires a user-provided key and explicit opt-in.',
+        },
       ],
       aiAssistance: 'disabled',
       publicQueriesAttempted: 16,
@@ -769,11 +776,11 @@ describe('App', () => {
 
     await waitForText(container, /free ai mode coverage/i, 6000);
     const content = normalizedText(container);
-    expect(content).toContain('No paid sources');
+    expect(content).toContain('No paid lead databases');
     expect(content).toContain('Public LinkedIn Search');
     expect(content).toContain('Apollo');
     expect(content).toContain('Not used');
-    expect(content).toContain('AI query assistance is off so this mode stays free');
+    expect(content).toContain('Gemini query assistance is disabled by default');
 
     await unmount();
   });
@@ -912,6 +919,10 @@ describe('App', () => {
           name: 'Public LinkedIn Dentist',
           email: '',
           contactSourceUrl: 'https://austindentalspa.example/contact',
+          publicSocialLinks: [
+            { platform: 'Facebook', url: 'https://facebook.com/austin-dental-spa' },
+            { platform: 'Instagram', url: 'https://instagram.com/austin-dental-spa' },
+          ],
           publicEvidence: {
             profileTitle: 'Public LinkedIn Dentist - Founder at Austin Dental Spa',
             profileSnippet: 'Dentist and practice owner in Austin, Texas.',
@@ -974,6 +985,11 @@ describe('App', () => {
           publicQueriesAttempted: 12,
           publicProvidersChecked: 3,
           publicQueryFamilies: ['multi-term-cluster', 'role-led', 'legacy-profile'],
+          publicQueryFamilyCounts: {
+            'multi-term-cluster': 5,
+            'role-led': 4,
+            'legacy-profile': 3,
+          },
           totalCandidates: 2,
           foundCount: 2,
           estimatedRemaining: 49,
@@ -1007,6 +1023,8 @@ describe('App', () => {
     expect(content).toContain('Multi-term clusters');
     expect(content).toContain('Role-led paths');
     expect(content).toContain('Legacy profiles');
+    expect(content).toContain('5 queries');
+    expect(content).toContain('4 queries');
     expect(content).toContain('12 query paths');
     expect(content).toContain('3 public search sources');
     expect(content).toContain('Public match');
@@ -1033,6 +1051,9 @@ describe('App', () => {
     expect(expandedContent).toContain('Lead snapshot');
     expect(expandedContent).toContain('Profile identity is public');
     expect(expandedContent).toContain('Public contact source: austindentalspa.example/contact');
+    expect(expandedContent).toContain('Public social signals');
+    expect(expandedContent).toContain('Facebook');
+    expect(expandedContent).toContain('Instagram');
     expect(expandedContent).toContain('Public match excerpt');
     expect(expandedContent).toContain('Dentist and practice owner in Austin, Texas.');
     expect(expandedContent).toContain('2 public result traces');

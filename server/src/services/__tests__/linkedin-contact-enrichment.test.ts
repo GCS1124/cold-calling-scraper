@@ -91,6 +91,8 @@ describe('enrichLinkedinLeadsWithPublicContacts', () => {
           <body>
             <a href="mailto:hello@austindentalspa.example">Email</a>
             <a href="tel:+15125550199">Call</a>
+            <a href="https://facebook.com/austin-dental-spa">Facebook</a>
+            <a href="https://www.youtube.com/@austin-dental-spa">YouTube</a>
           </body>
         </html>
       `,
@@ -120,6 +122,12 @@ describe('enrichLinkedinLeadsWithPublicContacts', () => {
     expect(lead?.verifiedEmail).toBe(true);
     expect(lead?.verifiedPhone).toBe(true);
     expect(lead?.contactSourceUrl).toBe('https://austindentalspa.example/contact');
+    expect(lead?.publicSocialLinks).toEqual(
+      expect.arrayContaining([
+        { platform: 'Facebook', url: 'https://facebook.com/austin-dental-spa' },
+        { platform: 'YouTube', url: 'https://www.youtube.com/@austin-dental-spa' },
+      ]),
+    );
     expect(lead?.source).toContain('LinkedIn');
     expect(lead?.source).toContain('Public Web');
     expect(lead?.source).toContain('Website Crawl');

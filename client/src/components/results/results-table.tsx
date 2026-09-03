@@ -359,6 +359,31 @@ export function ResultsTable({
                                 </a>
                               </p>
                             ) : null}
+                            {lead.publicSocialLinks?.length ? (
+                              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                                  Public social signals
+                                </p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {lead.publicSocialLinks.map((socialLink) => (
+                                    <a
+                                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 hover:border-blue-200 hover:text-blue-800"
+                                      href={socialLink.url}
+                                      key={socialLink.url}
+                                      rel="noreferrer"
+                                      target="_blank"
+                                    >
+                                      {socialLink.platform}
+                                      <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                  ))}
+                                </div>
+                                <p className="mt-2 text-[11px] leading-4 text-slate-500">
+                                  Links published by the public business website. Social profiles were not
+                                  accessed for private contact data.
+                                </p>
+                              </div>
+                            ) : null}
                             {isLinkedInLead &&
                             (lead.publicEvidence?.profileTitle || lead.publicEvidence?.profileSnippet) ? (
                               <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-3">

@@ -189,6 +189,8 @@ Owner at Austin Dental Spa.
     expect(result.coverage?.queryFamilies).toEqual(
       expect.arrayContaining(['multi-term-cluster', 'role-led']),
     );
+    expect(result.coverage?.queryFamilyCounts['multi-term-cluster']).toBeGreaterThan(0);
+    expect(result.coverage?.queryFamilyCounts['role-led']).toBeGreaterThan(0);
   });
 
   it('opens multi-term category and role query clusters before narrow fallback paths', async () => {

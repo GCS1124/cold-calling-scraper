@@ -45,6 +45,9 @@ describe('deduplicateLeads', () => {
         hasPhone: true,
         hasWebsite: true,
         verifiedPhone: true,
+        publicSocialLinks: [
+          { platform: 'Facebook', url: 'https://facebook.com/alpha-dental' },
+        ],
       }),
       makeLead({
         id: 'lead-c',
@@ -62,6 +65,9 @@ describe('deduplicateLeads', () => {
     expect(leads[0]?.source).toContain('Google Maps');
     expect(leads[0]?.source).toContain('OpenStreetMap');
     expect(leads[0]?.mobile).toBe('5125550101');
+    expect(leads[0]?.publicSocialLinks).toEqual([
+      { platform: 'Facebook', url: 'https://facebook.com/alpha-dental' },
+    ]);
   });
 
   it('flattens repeated source tags when enriched records are merged', () => {

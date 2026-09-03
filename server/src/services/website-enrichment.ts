@@ -1,7 +1,7 @@
 import * as cheerio from 'cheerio';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
-import type { Lead } from '../types/lead';
+import type { Lead, PublicSocialLink } from '../types/lead';
 import type { ProviderWarning } from '../types/search';
 import { httpClient } from '../utils/http-client';
 import { isPublicHttpUrl } from '../utils/public-url';
@@ -209,10 +209,83 @@ const getHostnameWithoutWww = (value: string) => {
   }
 };
 
+const socialPlatformDomains: Array<[string, PublicSocialLink['platform']]> = [
+  ['facebook.com', 'Facebook'],
+  ['instagram.com', 'Instagram'],
+  ['linkedin.com', 'LinkedIn'],
+  ['x.com', 'X'],
+  ['twitter.com', 'X'],
+  ['tiktok.com', 'TikTok'],
+  ['youtube.com', 'YouTube'],
+  ['youtu.be', 'YouTube'],
+  ['google.com', 'Google Business'],
+  ['yelp.com', 'Yelp'],
+];
+
+const getSocialPlatform = (hostname: string): PublicSocialLink['platform'] => {
+  const normalized = hostname.replace(/^www\./i, '').toLowerCase();
+  const match = socialPlatformDomains.find(
+    ([domain]) => normalized === domain || normalized.endsWith(`.${domain}`),
+  );
+
+  return match?.[1] ?? 'Other';
+};
+
 const isSocialHost = (hostname: string) => {
   const normalized = hostname.replace(/^www\./i, '').toLowerCase();
 
-  return socialHosts.has(hostname.toLowerCase()) || socialHosts.has(normalized);
+  return (
+    socialHosts.has(hostname.toLowerCase()) ||
+    socialHosts.has(normalized) ||
+    socialPlatformDomains.some(
+      ([domain]) => normalized === domain || normalized.endsWith(`.${domain}`),
+    )
+  );
+};
+
+const normalizePublicSocialLink = (value: string): PublicSocialLink | null => {
+  const normalized = normalizeUrl(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  try {
+    const url = new URL(normalized);
+
+    if (!isSocialHost(url.hostname)) {
+      return null;
+    }
+
+    url.hash = '';
+    for (const parameter of ['utm_source', 'utm_medium', 'utm_campaign', 'fbclid', 'gclid']) {
+      url.searchParams.delete(parameter);
+    }
+
+    return {
+      platform: getSocialPlatform(url.hostname),
+      url: url.toString(),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const mergePublicSocialLinks = (
+  existing: PublicSocialLink[] = [],
+  incoming: PublicSocialLink[] = [],
+) => {
+  const links = new Map<string, PublicSocialLink>();
+
+  [...existing, ...incoming].forEach((link) => {
+    const normalized = normalizePublicSocialLink(link.url);
+
+    if (normalized && !links.has(normalized.url)) {
+      links.set(normalized.url, normalized);
+    }
+  });
+
+  return [...links.values()].slice(0, 20);
 };
 
 const isLikelyAssetUrl = (url: URL) => {
@@ -940,6 +1013,12 @@ export const enrichLeadFromWebsite = async (
   const crawledEmail = selectBestEmail([...emails], domainHint);
   const crawledPhone = selectBestPhone([...phones], lead.mobile);
   const crawledAddress = selectBestAddress([...addresses], lead.address);
+  const publicSocialLinks = mergePublicSocialLinks(
+    lead.publicSocialLinks,
+    [...socialUrls]
+      .map(normalizePublicSocialLink)
+      .filter((link): link is PublicSocialLink => Boolean(link)),
+  );
 
   const email = shouldKeepExistingValue(lead.email) ? lead.email ?? '' : crawledEmail;
   const phone = shouldKeepExistingValue(lead.mobile) ? lead.mobile ?? '' : crawledPhone;
@@ -948,7 +1027,8 @@ export const enrichLeadFromWebsite = async (
   const improved = Boolean(
     (!lead.email && email) ||
       (!lead.mobile && phone) ||
-      (!lead.address && address),
+      (!lead.address && address) ||
+      publicSocialLinks.length > (lead.publicSocialLinks?.length ?? 0),
   );
 
   const totalExtracted =
@@ -962,6 +1042,7 @@ export const enrichLeadFromWebsite = async (
       lead: {
         ...lead,
         website,
+        publicSocialLinks,
         crawlAttempts: visited.size,
         rejectionReason: lead.rejectionReason ?? 'blocked_website',
       },
@@ -980,6 +1061,7 @@ export const enrichLeadFromWebsite = async (
       mobile: phone,
       address,
       website,
+      publicSocialLinks,
       hasEmail: Boolean(email),
       hasPhone: Boolean(phone),
       hasWebsite: Boolean(website),

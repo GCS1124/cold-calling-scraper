@@ -1,3 +1,17 @@
+export type PublicSocialLink = {
+  platform:
+    | 'Facebook'
+    | 'Instagram'
+    | 'LinkedIn'
+    | 'X'
+    | 'TikTok'
+    | 'YouTube'
+    | 'Google Business'
+    | 'Yelp'
+    | 'Other';
+  url: string;
+};
+
 export type Lead = {
   id: string;
   name: string;
@@ -7,6 +21,8 @@ export type Lead = {
   website?: string;
   /** Public business website used to verify an email or phone number. */
   contactSourceUrl?: string;
+  /** Social links published by the lead's public business website. */
+  publicSocialLinks?: PublicSocialLink[];
   /** Bounded public search-result evidence used for manual verification. */
   publicEvidence?: {
     profileTitle?: string;

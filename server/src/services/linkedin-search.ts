@@ -88,6 +88,7 @@ export type LinkedInDiscoveryResult = {
     providersPaused: number;
     acceptedCandidates: number;
     queryFamilies: string[];
+    queryFamilyCounts: Record<string, number>;
   };
 };
 
@@ -1577,7 +1578,11 @@ const getSecondPageQueryLimit = (requestedCount: number, availableQueryCount: nu
     Math.min(12, Math.max(5, Math.ceil(requestedCount / 50) + 4)),
   );
 
-const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocation) => {
+const buildQueryVariants = (
+  request: SearchRequest,
+  location: NormalizedUsLocation,
+  queryHints: string[] = [],
+) => {
   const profile = resolveCategoryProfile(request.companyType);
   const isBroadLocation = location.mode === 'timezone' || location.mode === 'nationwide';
   const broadLocationLabel = normalizeMatchText(location.label);
@@ -1603,6 +1608,23 @@ const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocati
   const secondaryCompany = selectSecondaryCompanyTerm(companyTerms, primaryCompany);
   const primaryLocation = locationTerms[0] ?? normalizeQueryTerm(location.label);
   const prioritizedRoleTerms = prioritizeRoleTerms(genericRoleTerms, categoryRoleTerms);
+  const assistedQueries = unique(
+    queryHints
+      .map((hint) =>
+        normalizeText(hint)
+          .replace(/https?:\/\/\S+/gi, ' ')
+          .replace(/\bsite:\S+/gi, ' ')
+          .slice(0, 180),
+      )
+      .filter(Boolean),
+  ).flatMap((hint) =>
+    publicLinkedInProfilePaths.map((profilePath) =>
+      buildLinkedInQueryFromPhrase(
+        [hint, quoteQueryTerm(primaryLocation)].filter(Boolean).join(' '),
+        profilePath,
+      ),
+    ),
+  );
   const categoryCluster = buildBooleanQuery(companyTerms, 5);
   const roleCluster = buildBooleanQuery(prioritizedRoleTerms, 6);
   const highSignalClusters = publicLinkedInProfilePaths.flatMap((profilePath) => [
@@ -1655,6 +1677,7 @@ const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocati
 
   const queryCandidates = unique([
     ...highSignalClusters,
+    ...assistedQueries,
     buildLinkedInQueryFromPhrase(`${request.companyType} in ${primaryLocation}`),
     ...aliasQueries,
     ...roleQueries.slice(0, 4),
@@ -2304,6 +2327,7 @@ const runLinkedInQuerySet = async ({
 }) => {
   let queriesAttempted = 0;
   const queryFamilies = new Set<string>();
+  const queryFamilyCounts = new Map<string, number>();
 
   const addQueryResults = (queryResults: CollectedSearchResult[], query: string) => {
     const queryKey = query.toLowerCase();
@@ -2441,7 +2465,11 @@ const runLinkedInQuerySet = async ({
     // collectSearchResults re-evaluates healthy sources for every query, while
     // the provider circuit breaker still pauses a source after its threshold.
     const batch = queries.slice(batchStart, batchStart + queryBatchSize);
-    batch.forEach((query) => queryFamilies.add(getLinkedInQueryFamily(query)));
+    batch.forEach((query) => {
+      const family = getLinkedInQueryFamily(query);
+      queryFamilies.add(family);
+      queryFamilyCounts.set(family, (queryFamilyCounts.get(family) ?? 0) + 1);
+    });
     const resultSets = await Promise.all(
       batch.map((query, batchIndex) =>
         collectSearchResults(
@@ -2468,6 +2496,7 @@ const runLinkedInQuerySet = async ({
   return {
     queriesAttempted,
     queryFamilies: [...queryFamilies],
+    queryFamilyCounts: Object.fromEntries(queryFamilyCounts),
   };
 };
 
@@ -2475,14 +2504,16 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
   request,
   location,
   deadlineMs,
+  queryHints = [],
 }: {
   request: SearchRequest;
   location: NormalizedUsLocation;
   deadlineMs?: number;
+  queryHints?: string[];
 }): Promise<LinkedInDiscoveryResult> => {
   const start = Date.now();
   const deadline = deadlineMs ?? start + 28_000;
-  const queries = buildQueryVariants(request, location);
+  const queries = buildQueryVariants(request, location, queryHints);
   const primaryQueryKeys = new Set(queries.map((query) => query.toLowerCase()));
   const fallbackQueries = buildFallbackQueryVariants(request, location).filter(
     (query) => !primaryQueryKeys.has(query.toLowerCase()),
@@ -2514,6 +2545,12 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
   let fallbackQueriesAttempted = 0;
   let secondPageQueriesAttempted = 0;
   const queryFamilies = new Set(primaryRun.queryFamilies);
+  const queryFamilyCounts = new Map(Object.entries(primaryRun.queryFamilyCounts));
+  const mergeQueryFamilyCounts = (counts: Record<string, number>) => {
+    Object.entries(counts).forEach(([family, count]) => {
+      queryFamilyCounts.set(family, (queryFamilyCounts.get(family) ?? 0) + count);
+    });
+  };
 
   if (candidates.size < maxResults && Date.now() < deadline) {
     const fallbackRun = await runLinkedInQuerySet({
@@ -2529,6 +2566,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
     });
     fallbackQueriesAttempted = fallbackRun.queriesAttempted;
     fallbackRun.queryFamilies.forEach((family) => queryFamilies.add(family));
+    mergeQueryFamilyCounts(fallbackRun.queryFamilyCounts);
   }
 
   // Public search engines expose more than one result page. Only request a
@@ -2559,6 +2597,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
     });
     secondPageQueriesAttempted = secondPageRun.queriesAttempted;
     secondPageRun.queryFamilies.forEach((family) => queryFamilies.add(family));
+    mergeQueryFamilyCounts(secondPageRun.queryFamilyCounts);
   }
 
   buildProviderHealthWarnings(providerHealth).forEach((warning) =>
@@ -2593,6 +2632,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
       providersPaused: [...providerHealth.values()].filter((health) => health.disabled).length,
       acceptedCandidates: candidates.size,
       queryFamilies: [...queryFamilies],
+      queryFamilyCounts: Object.fromEntries(queryFamilyCounts),
     },
   };
 };

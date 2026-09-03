@@ -55,6 +55,8 @@ export type SearchProgress = {
   publicProvidersChecked?: number;
   /** Public LinkedIn discovery lenses that completed at least one query batch. */
   publicQueryFamilies?: string[];
+  /** Number of public LinkedIn query paths attempted per discovery lens. */
+  publicQueryFamilyCounts?: Record<string, number>;
   /** Status of each provider involved in AI mode discovery. */
   providerCoverage?: ProviderCoverage[];
   /** Whether an optional model-assisted query layer was used. Free mode keeps this disabled. */

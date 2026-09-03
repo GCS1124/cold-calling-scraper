@@ -101,7 +101,7 @@ export function SearchForm({
           {isLinkedInMode
             ? `${sourceModeLabelsByCode.linkedin} searches public profiles only. Phone numbers and emails are collected only from public business websites.`
             : isAiMode
-              ? 'AI mode is free-only: no paid databases, private profiles, login sessions, or contact-reveal credits are used.'
+              ? 'AI mode searches public sources only: no paid databases, including commercial lead databases, private profiles, login sessions, or contact-reveal credits are used. Optional Gemini wording assistance is off by default.'
               : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
         </p>
 
@@ -145,7 +145,7 @@ export function SearchForm({
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                 <p className="text-sm font-bold">Public-site enrichment</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Openly listed business contact details
+                  Up to 14 public business pages
                 </p>
               </div>
             </div>

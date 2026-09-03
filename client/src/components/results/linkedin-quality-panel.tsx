@@ -12,6 +12,7 @@ type LinkedInQualityPanelProps = {
   publicQueriesAttempted?: number;
   publicProvidersChecked?: number;
   publicQueryFamilies?: string[];
+  publicQueryFamilyCounts?: Record<string, number>;
 };
 
 type SignalMeterProps = {
@@ -92,6 +93,7 @@ export function LinkedInQualityPanel({
   publicQueriesAttempted,
   publicProvidersChecked,
   publicQueryFamilies = [],
+  publicQueryFamilyCounts = {},
 }: LinkedInQualityPanelProps) {
   const total = leads.length;
   const averageConfidence = total
@@ -232,11 +234,16 @@ export function LinkedInQualityPanel({
           <div className="mt-3 flex flex-wrap gap-2">
             {publicQueryFamilies.map((family) => (
               <span
-                className="rounded-full border border-blue-100 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
+                className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
                 key={family}
                 title={queryFamilyDescriptions[family] ?? 'Public LinkedIn search pattern.'}
               >
-                {queryFamilyLabels[family] ?? family}
+                <span>{queryFamilyLabels[family] ?? family}</span>
+                {typeof publicQueryFamilyCounts[family] === 'number' ? (
+                  <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-black text-blue-700">
+                    {publicQueryFamilyCounts[family]} {publicQueryFamilyCounts[family] === 1 ? 'query' : 'queries'}
+                  </span>
+                ) : null}
               </span>
             ))}
           </div>

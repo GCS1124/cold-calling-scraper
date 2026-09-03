@@ -17,6 +17,10 @@ import {
 import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
 import { normalizeUsLocation } from './us-location';
 import { freeAiModePolicy, salesProviderAudits } from '../providers/sales-intelligence';
+import {
+  expandQueryWithGemini,
+  isGeminiQueryAssistanceEnabled,
+} from '../providers/gemini';
 import { enforcePhoneRequirement } from './phone-requirement';
 
 export type AiDiscoveryResult = {
@@ -31,10 +35,12 @@ export type AiDiscoveryResult = {
 type AiDiscoveryDeps = {
   discoverLinkedin?: typeof discoverUsLeadsFromLinkedinSearch;
   enrichPublicContacts?: typeof enrichLinkedinLeadsWithPublicContacts;
+  expandQuery?: typeof expandQueryWithGemini;
 };
 
 const discoveryWindowMs = 24_000;
 const contactEnrichmentWindowMs = 12_000;
+const queryAssistanceWindowMs = 8_000;
 
 const withTimeout = async <T>(promise: Promise<T>, deadlineMs: number, message: string) => {
   const remainingMs = Math.max(1_000, deadlineMs - Date.now());
@@ -87,7 +93,16 @@ const buildCoverage = (): ProviderCoverage[] => [
     providerName: 'Public Website Enrichment',
     status: 'configured' as const,
     leadCount: 0,
-    message: 'Only phone numbers and emails published on public business websites are used.',
+    message: 'A bounded crawl checks public business pages; only their published phone numbers and emails are used.',
+  },
+  {
+    providerId: 'gemini-query-assistance',
+    providerName: 'Gemini query assistance',
+    status: isGeminiQueryAssistanceEnabled() ? 'configured' : 'not_configured',
+    leadCount: 0,
+    message: isGeminiQueryAssistanceEnabled()
+      ? 'Optional user-configured query wording only; Gemini is not a lead or contact source.'
+      : 'Disabled by default; requires a user-provided key and explicit opt-in.',
   },
 ];
 
@@ -106,6 +121,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
   const discoverLinkedin = deps.discoverLinkedin ?? discoverUsLeadsFromLinkedinSearch;
   const enrichPublicContacts =
     deps.enrichPublicContacts ?? enrichLinkedinLeadsWithPublicContacts;
+  const expandQuery = deps.expandQuery ?? expandQueryWithGemini;
 
   return async ({
     request,
@@ -124,6 +140,45 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       },
     ];
     const coverage = buildCoverage();
+    let aiAssistance: AiDiscoveryResult['aiAssistance'] = 'disabled';
+    let queryHints: string[] = [];
+
+    if (isGeminiQueryAssistanceEnabled()) {
+      const rawQuery = `${request.companyType} in ${location.label}`;
+
+      try {
+        const assistedQuery = await withTimeout(
+          expandQuery(rawQuery, request),
+          Math.min(deadlineMs, Date.now() + queryAssistanceWindowMs),
+          'Gemini query assistance timed out; local public query expansion continued.',
+        );
+        const normalizedAssistedQuery = assistedQuery.trim().slice(0, 180);
+
+        if (normalizedAssistedQuery && normalizedAssistedQuery.toLowerCase() !== rawQuery.toLowerCase()) {
+          queryHints = [normalizedAssistedQuery];
+        }
+
+        aiAssistance = 'enabled';
+        updateCoverage(coverage, 'gemini-query-assistance', {
+          status: 'returned',
+          message: 'Gemini expanded search wording only; public providers supplied the results.',
+        });
+      } catch (error) {
+        aiAssistance = 'failed';
+        addWarning(warnings, {
+          providerId: 'gemini-query-assistance',
+          providerName: 'Gemini query assistance',
+          message:
+            error instanceof Error
+              ? `${error.message} Local public query expansion continued.`
+              : 'Gemini query assistance failed. Local public query expansion continued.',
+        });
+        updateCoverage(coverage, 'gemini-query-assistance', {
+          status: 'failed',
+          message: error instanceof Error ? error.message : 'Gemini query assistance failed.',
+        });
+      }
+    }
     let discoveryResult: LinkedInDiscoveryResult = {
       leads: [],
       warnings: [],
@@ -135,6 +190,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
         discoverLinkedin({
           request,
           location,
+          queryHints,
           deadlineMs: Math.min(deadlineMs, Date.now() + discoveryWindowMs),
         }),
         deadlineMs,
@@ -219,7 +275,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       leads: leads.slice(0, request.count),
       warnings,
       coverage,
-      aiAssistance: 'disabled',
+      aiAssistance,
       publicCoverage: discoveryResult.coverage,
       enrichedCount,
     };
@@ -261,6 +317,7 @@ const buildResponse = ({
         publicQueriesAttempted: result.publicCoverage?.queriesAttempted,
         publicProvidersChecked: result.publicCoverage?.providersChecked,
         publicQueryFamilies: result.publicCoverage?.queryFamilies,
+        publicQueryFamilyCounts: result.publicCoverage?.queryFamilyCounts,
         providerCoverage: result.coverage,
         aiAssistance: result.aiAssistance,
         totalCandidates: visibleLeads.length,

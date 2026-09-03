@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Lead } from '../../types/lead';
 import { createAiLeadDiscovery } from '../ai-lead-discovery';
@@ -44,6 +44,22 @@ const makeLead = (overrides: Partial<Lead> = {}): Lead => ({
   ...overrides,
 });
 
+const originalGeminiApiKey = process.env.GEMINI_API_KEY;
+const originalGeminiFlag = process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
+
+afterEach(() => {
+  if (originalGeminiApiKey === undefined) {
+    delete process.env.GEMINI_API_KEY;
+  } else {
+    process.env.GEMINI_API_KEY = originalGeminiApiKey;
+  }
+  if (originalGeminiFlag === undefined) {
+    delete process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
+  } else {
+    process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = originalGeminiFlag;
+  }
+});
+
 describe('free AI lead discovery', () => {
   it('uses public LinkedIn and website sources without commercial credentials', async () => {
     const discoverLinkedin = vi.fn().mockResolvedValue({
@@ -56,6 +72,7 @@ describe('free AI lead discovery', () => {
         providersPaused: 0,
         acceptedCandidates: 1,
         queryFamilies: ['role-led'],
+        queryFamilyCounts: { 'role-led': 12 },
       },
     });
     const enrichPublicContacts = vi.fn().mockResolvedValue({
@@ -118,6 +135,50 @@ describe('free AI lead discovery', () => {
     expect(result.warnings.some((warning) => warning.message.includes('public site timeout'))).toBe(
       true,
     );
+  });
+
+  it('uses Gemini only as explicit query assistance and keeps public providers as the lead source', async () => {
+    process.env.GEMINI_API_KEY = 'user-supplied-test-key';
+    process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = 'true';
+
+    const discoverLinkedin = vi.fn().mockResolvedValue({
+      leads: [],
+      warnings: [],
+      blocked: false,
+      coverage: {
+        queriesAttempted: 12,
+        providersChecked: 3,
+        providersPaused: 0,
+        acceptedCandidates: 0,
+        queryFamilies: ['role-led'],
+        queryFamilyCounts: { 'role-led': 12 },
+      },
+    });
+    const expandQuery = vi.fn().mockResolvedValue('HVAC service business owner Austin');
+
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: discoverLinkedin as never,
+      expandQuery: expandQuery as never,
+    })({
+      request: { companyType: 'HVAC contractor', city: 'Austin, TX', count: 50 },
+      location,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(expandQuery).toHaveBeenCalledWith(
+      'HVAC contractor in Austin, TX',
+      expect.objectContaining({ companyType: 'HVAC contractor' }),
+    );
+    expect(discoverLinkedin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryHints: ['HVAC service business owner Austin'],
+      }),
+    );
+    expect(result.aiAssistance).toBe('enabled');
+    expect(result.coverage.find((entry) => entry.providerId === 'gemini-query-assistance')).toMatchObject({
+      status: 'returned',
+      leadCount: 0,
+    });
   });
 
   it('does not add unverified profiles when public search is blocked', async () => {
