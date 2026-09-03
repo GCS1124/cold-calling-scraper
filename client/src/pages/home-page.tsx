@@ -20,6 +20,7 @@ import { toast } from 'sonner';
 import { ExportModal } from '../components/export/export-modal';
 import { SessionAction } from '../components/auth/session-action';
 import { FiltersPanel } from '../components/results/filters-panel';
+import { LinkedInQualityPanel } from '../components/results/linkedin-quality-panel';
 import { ResultsSummary } from '../components/results/results-summary';
 import { ResultsTable } from '../components/results/results-table';
 import { SearchForm } from '../components/search/search-form';
@@ -168,19 +169,6 @@ export function HomePage({ searchApi }: HomePageProps) {
   const providerNoticesAreInformational =
     displayedProviderWarnings.length > 0 &&
     displayedProviderWarnings.every((warning) => warning.severity === 'info');
-  const linkedinQuality = useMemo(() => {
-    const linkedinLeads = (result?.leads ?? []).filter((lead) =>
-      lead.source.toLowerCase().includes('linkedin'),
-    );
-
-    return {
-      highFit: linkedinLeads.filter((lead) => lead.confidence >= 85).length,
-      corroborated: linkedinLeads.filter(
-        (lead) => (lead.matchSignals?.publicSources ?? 0) > 1,
-      ).length,
-      roleSignals: linkedinLeads.filter((lead) => lead.matchSignals?.roleMatched).length,
-    };
-  }, [result?.leads]);
   const linkedinDiscoveryBlocked = Boolean(
     result &&
       activeSourceMode === 'linkedin' &&
@@ -637,7 +625,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                 </div>
 
                 {activeSourceMode === 'linkedin' ? (
-                  <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
+                  <div>
                     <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/75 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
@@ -668,48 +656,12 @@ export function HomePage({ searchApi }: HomePageProps) {
                         </p>
                       </div>
                     ) : null}
-                    <div className="rounded-2xl border border-slate-200 bg-white/75 p-4 md:col-span-2">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
-                            Match intelligence
-                          </p>
-                          <p className="mt-1 text-sm leading-5 text-slate-600">
-                            Transparent ranking from public category, role, location, and source
-                            signals. This is not private LinkedIn or Premium data.
-                          </p>
-                        </div>
-                        <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                          Public signals
-                        </span>
-                      </div>
-                      <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                        <div className="rounded-xl bg-slate-50 px-3 py-2">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                            High-fit score
-                          </p>
-                          <p className="mt-1 text-lg font-black text-slate-950">
-                            {linkedinQuality.highFit}
-                          </p>
-                        </div>
-                        <div className="rounded-xl bg-slate-50 px-3 py-2">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                            Cross-source
-                          </p>
-                          <p className="mt-1 text-lg font-black text-slate-950">
-                            {linkedinQuality.corroborated}
-                          </p>
-                        </div>
-                        <div className="rounded-xl bg-slate-50 px-3 py-2">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                            Role signals
-                          </p>
-                          <p className="mt-1 text-lg font-black text-slate-950">
-                            {linkedinQuality.roleSignals}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
+                    <LinkedInQualityPanel
+                      leads={result.leads}
+                      publicContactsFound={publicContactsFound}
+                      publicProvidersChecked={publicProvidersChecked}
+                      publicQueriesAttempted={publicQueriesAttempted}
+                    />
                   </div>
                 ) : null}
 
