@@ -55,6 +55,7 @@ describe('free AI lead discovery', () => {
         providersChecked: 3,
         providersPaused: 0,
         acceptedCandidates: 1,
+        queryFamilies: ['role-led'],
       },
     });
     const enrichPublicContacts = vi.fn().mockResolvedValue({

@@ -1158,6 +1158,7 @@ describe('createVercelSearchServiceWithDeps', () => {
         providersChecked: 3,
         providersPaused: 0,
         acceptedCandidates: 1,
+        queryFamilies: ['role-led'],
       },
     });
     const service = createVercelSearchServiceWithDeps({

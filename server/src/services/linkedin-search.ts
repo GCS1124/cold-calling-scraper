@@ -87,6 +87,7 @@ export type LinkedInDiscoveryResult = {
     providersChecked: number;
     providersPaused: number;
     acceptedCandidates: number;
+    queryFamilies: string[];
   };
 };
 
@@ -2302,6 +2303,7 @@ const runLinkedInQuerySet = async ({
   page?: number;
 }) => {
   let queriesAttempted = 0;
+  const queryFamilies = new Set<string>();
 
   const addQueryResults = (queryResults: CollectedSearchResult[], query: string) => {
     const queryKey = query.toLowerCase();
@@ -2439,6 +2441,7 @@ const runLinkedInQuerySet = async ({
     // collectSearchResults re-evaluates healthy sources for every query, while
     // the provider circuit breaker still pauses a source after its threshold.
     const batch = queries.slice(batchStart, batchStart + queryBatchSize);
+    batch.forEach((query) => queryFamilies.add(getLinkedInQueryFamily(query)));
     const resultSets = await Promise.all(
       batch.map((query, batchIndex) =>
         collectSearchResults(
@@ -2462,7 +2465,10 @@ const runLinkedInQuerySet = async ({
     batchStart += batch.length;
   }
 
-  return queriesAttempted;
+  return {
+    queriesAttempted,
+    queryFamilies: [...queryFamilies],
+  };
 };
 
 export const discoverUsLeadsFromLinkedinSearch = async ({
@@ -2494,7 +2500,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
   const providerHealth = createProviderHealth();
   const attemptedSearches = new Set<string>();
 
-  const primaryQueriesAttempted = await runLinkedInQuerySet({
+  const primaryRun = await runLinkedInQuerySet({
     queries,
     candidates,
     maxResults,
@@ -2507,9 +2513,10 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
 
   let fallbackQueriesAttempted = 0;
   let secondPageQueriesAttempted = 0;
+  const queryFamilies = new Set(primaryRun.queryFamilies);
 
   if (candidates.size < maxResults && Date.now() < deadline) {
-    fallbackQueriesAttempted = await runLinkedInQuerySet({
+    const fallbackRun = await runLinkedInQuerySet({
       queries: fallbackQueries,
       candidates,
       maxResults,
@@ -2518,8 +2525,10 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
       location,
       providerHealth,
       attemptedSearches,
-      queryOffset: primaryQueriesAttempted,
+      queryOffset: primaryRun.queriesAttempted,
     });
+    fallbackQueriesAttempted = fallbackRun.queriesAttempted;
+    fallbackRun.queryFamilies.forEach((family) => queryFamilies.add(family));
   }
 
   // Public search engines expose more than one result page. Only request a
@@ -2536,7 +2545,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
     Date.now() < deadline &&
     [...providerHealth.values()].some((health) => !health.disabled)
   ) {
-    secondPageQueriesAttempted = await runLinkedInQuerySet({
+    const secondPageRun = await runLinkedInQuerySet({
       queries: paginationQueries.slice(0, secondPageQueryLimit),
       candidates,
       maxResults,
@@ -2545,9 +2554,11 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
       location,
       providerHealth,
       attemptedSearches,
-      queryOffset: primaryQueriesAttempted + fallbackQueriesAttempted,
+      queryOffset: primaryRun.queriesAttempted + fallbackQueriesAttempted,
       page: 1,
     });
+    secondPageQueriesAttempted = secondPageRun.queriesAttempted;
+    secondPageRun.queryFamilies.forEach((family) => queryFamilies.add(family));
   }
 
   buildProviderHealthWarnings(providerHealth).forEach((warning) =>
@@ -2576,11 +2587,12 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
     blocked,
     coverage: {
       queriesAttempted:
-        primaryQueriesAttempted + fallbackQueriesAttempted + secondPageQueriesAttempted,
+        primaryRun.queriesAttempted + fallbackQueriesAttempted + secondPageQueriesAttempted,
       providersChecked: [...providerHealth.values()].filter((health) => health.attempts > 0)
         .length,
       providersPaused: [...providerHealth.values()].filter((health) => health.disabled).length,
       acceptedCandidates: candidates.size,
+      queryFamilies: [...queryFamilies],
     },
   };
 };

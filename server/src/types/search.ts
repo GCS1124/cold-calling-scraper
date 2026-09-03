@@ -53,6 +53,8 @@ export type SearchProgress = {
   publicQueriesAttempted?: number;
   /** Number of free public search sources contacted during discovery. */
   publicProvidersChecked?: number;
+  /** Public LinkedIn discovery lenses that completed at least one query batch. */
+  publicQueryFamilies?: string[];
   /** Status of each provider involved in AI mode discovery. */
   providerCoverage?: ProviderCoverage[];
   /** Whether an optional model-assisted query layer was used. Free mode keeps this disabled. */

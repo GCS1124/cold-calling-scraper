@@ -315,6 +315,7 @@ const runLinkedinDiscovery = async (
   if (linkedinResult.coverage) {
     job.progress.publicQueriesAttempted = linkedinResult.coverage.queriesAttempted;
     job.progress.publicProvidersChecked = linkedinResult.coverage.providersChecked;
+    job.progress.publicQueryFamilies = linkedinResult.coverage.queryFamilies;
   }
 
   if (!linkedinResult.leads.length) {

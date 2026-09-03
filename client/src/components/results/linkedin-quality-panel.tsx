@@ -11,6 +11,7 @@ type LinkedInQualityPanelProps = {
   publicContactsFound: number;
   publicQueriesAttempted?: number;
   publicProvidersChecked?: number;
+  publicQueryFamilies?: string[];
 };
 
 type SignalMeterProps = {
@@ -71,11 +72,26 @@ function ratioPercent(numerator: number, denominator: number) {
   return Math.min(100, Math.round((numerator / denominator) * 100));
 }
 
+const queryFamilyLabels: Record<string, string> = {
+  'category-location': 'Category + location',
+  'legacy-profile': 'Legacy profiles',
+  'multi-term-cluster': 'Multi-term clusters',
+  'role-led': 'Role-led paths',
+};
+
+const queryFamilyDescriptions: Record<string, string> = {
+  'category-location': 'Direct category and regional profile searches.',
+  'legacy-profile': 'Public legacy /pub profile searches.',
+  'multi-term-cluster': 'Grouped category and role term searches.',
+  'role-led': 'Decision-maker role searches across the category.',
+};
+
 export function LinkedInQualityPanel({
   leads,
   publicContactsFound,
   publicQueriesAttempted,
   publicProvidersChecked,
+  publicQueryFamilies = [],
 }: LinkedInQualityPanelProps) {
   const total = leads.length;
   const averageConfidence = total
@@ -197,6 +213,35 @@ export function LinkedInQualityPanel({
           <span className="rounded-full bg-white/10 px-3 py-1.5 text-slate-300">C · {tierCounts.C}</span>
         </div>
       </div>
+
+      {publicQueryFamilies.length ? (
+        <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-700">
+                Discovery lenses
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-600">
+                Public query families that completed at least one search batch.
+              </p>
+            </div>
+            <span className="text-xs font-black text-blue-800">
+              {publicQueryFamilies.length} active
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {publicQueryFamilies.map((family) => (
+              <span
+                className="rounded-full border border-blue-100 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
+                key={family}
+                title={queryFamilyDescriptions[family] ?? 'Public LinkedIn search pattern.'}
+              >
+                {queryFamilyLabels[family] ?? family}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

@@ -973,6 +973,7 @@ describe('App', () => {
           publicContactsFound: 1,
           publicQueriesAttempted: 12,
           publicProvidersChecked: 3,
+          publicQueryFamilies: ['multi-term-cluster', 'role-led', 'legacy-profile'],
           totalCandidates: 2,
           foundCount: 2,
           estimatedRemaining: 49,
@@ -1002,6 +1003,10 @@ describe('App', () => {
     const content = normalizedText(container);
     expect(content).toContain('Public contact coverage');
     expect(content).toContain('Public search coverage');
+    expect(content).toContain('Discovery lenses');
+    expect(content).toContain('Multi-term clusters');
+    expect(content).toContain('Role-led paths');
+    expect(content).toContain('Legacy profiles');
     expect(content).toContain('12 query paths');
     expect(content).toContain('3 public search sources');
     expect(content).toContain('Public match');

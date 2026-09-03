@@ -114,6 +114,7 @@ export type SearchResponse = {
       publicContactsFound?: number;
       publicQueriesAttempted?: number;
       publicProvidersChecked?: number;
+      publicQueryFamilies?: string[];
       providerCoverage?: Array<{
         providerId: string;
         providerName: string;

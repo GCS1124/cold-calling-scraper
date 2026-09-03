@@ -220,6 +220,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     result?.meta.progress.publicContactsFound ?? summary.publicContacts;
   const publicQueriesAttempted = result?.meta.progress.publicQueriesAttempted;
   const publicProvidersChecked = result?.meta.progress.publicProvidersChecked;
+  const publicQueryFamilies = result?.meta.progress.publicQueryFamilies ?? [];
   const aiProviderCoverage = result?.meta.progress.providerCoverage ?? [];
   const displayedProviderWarnings =
     activeSourceMode === 'ai'
@@ -728,6 +729,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                       leads={result.leads}
                       publicContactsFound={publicContactsFound}
                       publicProvidersChecked={publicProvidersChecked}
+                      publicQueryFamilies={publicQueryFamilies}
                       publicQueriesAttempted={publicQueriesAttempted}
                     />
                   </div>

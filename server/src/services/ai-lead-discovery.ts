@@ -260,6 +260,7 @@ const buildResponse = ({
         publicContactsFound: visibleLeads.filter((lead) => lead.hasEmail || lead.hasPhone).length,
         publicQueriesAttempted: result.publicCoverage?.queriesAttempted,
         publicProvidersChecked: result.publicCoverage?.providersChecked,
+        publicQueryFamilies: result.publicCoverage?.queryFamilies,
         providerCoverage: result.coverage,
         aiAssistance: result.aiAssistance,
         totalCandidates: visibleLeads.length,

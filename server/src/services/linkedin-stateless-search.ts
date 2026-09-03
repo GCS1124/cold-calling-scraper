@@ -74,6 +74,7 @@ const buildResponse = ({
         ).length,
         publicQueriesAttempted: coverage?.queriesAttempted,
         publicProvidersChecked: coverage?.providersChecked,
+        publicQueryFamilies: coverage?.queryFamilies,
         totalCandidates: visibleLeads.length,
         requestedCount: request.count,
         foundCount: visibleLeads.length,
