@@ -4,6 +4,7 @@ import { useState } from 'react';
 import {
   defaultExportColumns,
   downloadLeads,
+  exportColumnLabels,
   exportColumns,
   type ExportColumn,
 } from '../../utils/export';
@@ -82,7 +83,7 @@ export function ExportModal({ leads, open, onClose }: ExportModalProps) {
                   }
                   type="checkbox"
                 />
-                {column}
+                {exportColumnLabels[column]}
               </label>
             );
           })}

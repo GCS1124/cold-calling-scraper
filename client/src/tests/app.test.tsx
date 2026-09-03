@@ -556,6 +556,12 @@ describe('App', () => {
       container.querySelector('a[aria-label="Open LinkedIn profile for Public LinkedIn Orbit Data Works"]'),
     ).toBeNull();
 
+    await clickElement(getButton(container, /download excel/i));
+    await waitForText(container, /Listing \/ profile URL/i, 1000);
+    expect(normalizedText(container)).toContain('Business website');
+    expect(normalizedText(container)).toContain('Contact source URL');
+    expect(normalizedText(container)).toContain('Match confidence');
+
     await unmount();
   });
 

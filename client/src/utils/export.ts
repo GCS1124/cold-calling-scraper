@@ -7,27 +7,42 @@ export const exportColumns = [
   'mobile',
   'email',
   'website',
+  'listingUrl',
+  'contactSourceUrl',
+  'confidence',
   'address',
   'source',
 ] as const;
+
+export type ExportColumn = (typeof exportColumns)[number];
+
+export const exportColumnLabels: Record<ExportColumn, string> = {
+  name: 'Name',
+  mobile: 'Phone',
+  email: 'Email',
+  website: 'Business website',
+  listingUrl: 'Listing / profile URL',
+  contactSourceUrl: 'Contact source URL',
+  confidence: 'Match confidence',
+  address: 'Address',
+  source: 'Source',
+};
 
 export const defaultExportColumns = [
   'name',
   'mobile',
   'email',
   'website',
+  'listingUrl',
+  'contactSourceUrl',
+  'confidence',
   'address',
-] as const;
+] satisfies readonly ExportColumn[];
 
-export type ExportColumn = (typeof exportColumns)[number];
-
-const toExportRows = (leads: Lead[], columns: ExportColumn[]) =>
+export const buildExportRows = (leads: Lead[], columns: readonly ExportColumn[]) =>
   leads.map((lead) =>
     columns.reduce<Record<string, string | number>>((row, column) => {
-      row[column] =
-        column === 'website'
-          ? lead.website || lead.listingUrl || ''
-          : lead[column] ?? '';
+      row[column] = lead[column] ?? '';
       return row;
     }, {}),
   );
@@ -36,7 +51,7 @@ export const downloadLeads = (
   leads: Lead[],
   options: { fileName: string; format: 'csv' | 'xlsx'; columns: ExportColumn[] },
 ) => {
-  const rows = toExportRows(leads, options.columns);
+  const rows = buildExportRows(leads, options.columns);
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.json_to_sheet(rows);
 

@@ -432,7 +432,10 @@ export function HomePage({ searchApi }: HomePageProps) {
       lead.name,
       lead.mobile,
       lead.email,
-      lead.website || lead.listingUrl || '',
+      lead.website,
+      lead.listingUrl,
+      lead.contactSourceUrl,
+      lead.confidence,
       lead.address,
       lead.source,
     ]
