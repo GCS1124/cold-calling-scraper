@@ -898,6 +898,49 @@ Markdown Content:
     expect(pagedCalls.length).toBeGreaterThan(0);
   });
 
+  it('widens second-page coverage for larger requests without exceeding the hard cap', async () => {
+    const pageQueries = new Set<string>();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      const pageOffset = Number(
+        url.searchParams.get('offset') ??
+          url.searchParams.get('s') ??
+          Math.max(0, Number(url.searchParams.get('first') ?? 1) - 1),
+      );
+
+      if (pageOffset >= 10) {
+        pageQueries.add(url.searchParams.get('q') ?? url.searchParams.get('p') ?? '');
+      }
+
+      if (url.hostname === 'html.duckduckgo.com') {
+        return makeResponse(emptyDuckDuckGoBody);
+      }
+
+      return makeResponse('Title: no public profile matches');
+    });
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Emergency locksmith', city: 'Austin', count: 50 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+    const smallRequestPageQueryCount = pageQueries.size;
+
+    pageQueries.clear();
+
+    await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Emergency locksmith', city: 'Austin', count: 350 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(smallRequestPageQueryCount).toBe(5);
+    expect(pageQueries.size).toBeGreaterThan(smallRequestPageQueryCount);
+    expect(pageQueries.size).toBeLessThanOrEqual(12);
+  });
+
   it('keeps an external business website exposed by a public LinkedIn snippet', async () => {
     const { fetchMock } = makeQueryCaptureFetch(
       [
@@ -1301,6 +1344,68 @@ Markdown Content:
     expect(result.leads[0]?.city).toBe('Miami');
     expect(result.leads[0]?.stateCode).toBe('FL');
     expect(result.leads[0]?.address).toBe('Miami, FL');
+  });
+
+  it('does not treat ambiguous organization fragments as public location proof', async () => {
+    const { fetchMock } = makeQueryCaptureFetch(
+      [
+        'Title: LinkedIn search results',
+        '',
+        'Markdown Content:',
+        '1. [Brandon Huang - Owner at New York Dental Studio | LinkedIn](https://www.linkedin.com/in/brandon-huang-dental/)',
+        'Owner and dentist. The Prestigious, OH.',
+      ].join('\n'),
+    );
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Dentist', city: 'Eastern Time', count: 50 },
+      location: {
+        ...sampleLocation,
+        mode: 'timezone',
+        label: 'Eastern Time',
+        city: '',
+        stateCode: '',
+        timeZoneCode: 'ET',
+      },
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(1);
+    expect(result.leads[0]?.address).toBe('');
+    expect(result.leads[0]?.matchSignals?.locationMatched).toBe(false);
+  });
+
+  it('prefers a requested city suffix when a snippet prepends organization text', async () => {
+    const { fetchMock } = makeQueryCaptureFetch(
+      [
+        'Title: LinkedIn search results',
+        '',
+        'Markdown Content:',
+        '1. [Timothy Custer - Dental Director at Dental Network of America | LinkedIn](https://www.linkedin.com/in/timothy-custer-dental/)',
+        'Dental Director in Of America New York, NY.',
+      ].join('\n'),
+    );
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Dentist', city: 'Eastern Time', count: 50 },
+      location: {
+        ...sampleLocation,
+        mode: 'timezone',
+        label: 'Eastern Time',
+        city: '',
+        stateCode: '',
+        timeZoneCode: 'ET',
+      },
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(1);
+    expect(result.leads[0]?.address).toBe('New York, NY');
+    expect(result.leads[0]?.matchSignals?.locationMatched).toBe(true);
   });
 
   it('rejects public profiles with an explicit state outside the selected timezone', async () => {

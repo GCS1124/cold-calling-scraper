@@ -1086,20 +1086,78 @@ const publicLocationNoiseWords = new Set([
   'phd',
   'cpa',
   'rn',
+  'america',
+  'states',
+  'united',
+]);
+
+const publicLocationPrefixNoiseWords = new Set([
+  'and',
+  'at',
+  'based',
+  'for',
+  'from',
+  'in',
+  'located',
+  'of',
+  'serving',
+  'the',
 ]);
 
 const foreignLocationPattern =
   /\b(?:india|canada|mexico|brazil|australia|new zealand|singapore|pakistan|bangladesh|philippines|germany|france|spain|italy|china|japan|south africa|united kingdom|uae|united arab emirates)\b/i;
 
-const extractPublicProfileLocation = (candidate: Pick<LinkedInCandidate, 'title' | 'headline' | 'snippet'>) => {
-  const searchable = normalizeText(`${candidate.title} ${candidate.headline ?? ''} ${candidate.snippet}`);
-  const match =
-    publicLocationPattern.exec(searchable) ??
-    publicUnpunctuatedLocationNamePattern.exec(searchable) ??
-    publicUnpunctuatedLocationCodePattern.exec(searchable) ??
-    publicCityStatePattern.exec(searchable);
-  const city = normalizePublicCity(match?.[1] ?? '');
+const extractPublicProfileLocation = (
+  candidate: Pick<LinkedInCandidate, 'title' | 'headline' | 'snippet'>,
+  requestedLocation: NormalizedUsLocation,
+) => {
+  const identityText = normalizeText(`${candidate.title} ${candidate.headline ?? ''}`);
+  const snippetText = normalizeText(candidate.snippet);
+  const identityMatch =
+    publicLocationPattern.exec(identityText) ??
+    publicUnpunctuatedLocationNamePattern.exec(identityText) ??
+    publicUnpunctuatedLocationCodePattern.exec(identityText) ??
+    publicCityStatePattern.exec(identityText);
+  const contextualSnippetMatch =
+    publicLocationPattern.exec(snippetText) ??
+    publicUnpunctuatedLocationNamePattern.exec(snippetText) ??
+    publicUnpunctuatedLocationCodePattern.exec(snippetText);
+  const match = identityMatch ?? contextualSnippetMatch;
+  const rawCity = normalizeText(match?.[1] ?? '');
   const stateCode = publicStateCodeByValue.get((match?.[2] ?? '').toLowerCase()) ?? '';
+  const cityWords = rawCity.split(/\s+/).filter(Boolean);
+  const discoveryCityHints = new Set(
+    buildDiscoverySeeds(requestedLocation)
+      .filter((seed) => seed.includes(','))
+      .map((seed) => normalizeMatchText(seed.split(',')[0] ?? ''))
+      .filter((seed) => seed.length >= 2),
+  );
+  if (requestedLocation.city) {
+    discoveryCityHints.add(normalizeMatchText(requestedLocation.city));
+  }
+  const startsWithAmbiguousPrefix = publicLocationPrefixNoiseWords.has(
+    normalizeMatchText(cityWords[0] ?? ''),
+  );
+  const cityCandidates = cityWords.flatMap((_, startIndex) => {
+    const value = cityWords.slice(startIndex).join(' ');
+    const normalized = normalizeMatchText(value);
+
+    if (
+      !normalized ||
+      publicLocationNoiseWords.has(normalized) ||
+      publicLocationPrefixNoiseWords.has(normalized)
+    ) {
+      return [];
+    }
+
+    return [{ value, normalized }];
+  });
+  const hintedCity = cityCandidates.find((candidateCity) =>
+    discoveryCityHints.has(candidateCity.normalized),
+  );
+  const selectedCity = hintedCity?.value ??
+    (!startsWithAmbiguousPrefix ? cityCandidates[0]?.value : undefined);
+  const city = normalizePublicCity(selectedCity ?? '');
 
   if (
     !city ||
@@ -1331,6 +1389,12 @@ const scoreCandidateRelevance = (
 const calculateEvidenceBoost = (queryMatches: number, providerMatches: number) =>
   Math.min(8, Math.max(0, queryMatches - 1) * 2) +
   Math.min(6, Math.max(0, providerMatches - 1) * 3);
+
+const getSecondPageQueryLimit = (requestedCount: number, availableQueryCount: number) =>
+  Math.min(
+    availableQueryCount,
+    Math.min(12, Math.max(5, Math.ceil(requestedCount / 50) + 4)),
+  );
 
 const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocation) => {
   const profile = resolveCategoryProfile(request.companyType);
@@ -2059,7 +2123,7 @@ const runLinkedInQuerySet = async ({
           title: result.title,
           headline,
           snippet: normalizeText(result.snippet),
-        }),
+        }, location),
       };
       const relevanceScore = scoreCandidateRelevance(
         candidateWithoutScore,
@@ -2220,22 +2284,28 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
   }
 
   // Public search engines expose more than one result page. Only request a
-  // small second page after query variants are exhausted, which improves
-  // recall without multiplying every search request or hiding rate limits.
+  // bounded second page after query variants are exhausted. Larger requests
+  // get a wider window, while the hard cap, deadline, and provider circuit
+  // breakers keep public-search traffic predictable.
+  const paginationQueries = unique([...queries, ...fallbackQueries]);
+  const secondPageQueryLimit = getSecondPageQueryLimit(
+    request.count,
+    paginationQueries.length,
+  );
   if (
     candidates.size < maxResults &&
     Date.now() < deadline &&
     [...providerHealth.values()].some((health) => !health.disabled)
   ) {
     secondPageQueriesAttempted = await runLinkedInQuerySet({
-      queries: queries.slice(0, 5),
+      queries: paginationQueries.slice(0, secondPageQueryLimit),
       candidates,
       maxResults,
       deadline,
       request,
       location,
       providerHealth,
-      queryOffset: primaryQueriesAttempted + fallbackQueries.length,
+      queryOffset: primaryQueriesAttempted + fallbackQueriesAttempted,
       page: 1,
     });
   }
