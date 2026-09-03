@@ -17,6 +17,7 @@ import {
 import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
 import { normalizeUsLocation } from './us-location';
 import { freeAiModePolicy, salesProviderAudits } from '../providers/sales-intelligence';
+import { enforcePhoneRequirement } from './phone-requirement';
 
 export type AiDiscoveryResult = {
   leads: Lead[];
@@ -238,7 +239,13 @@ const buildResponse = ({
   locationLabel: string;
   result: AiDiscoveryResult;
 }): SearchResponse => {
-  const visibleLeads = deduplicateLeads(result.leads).slice(0, request.count);
+  const deduplicatedLeads = deduplicateLeads(result.leads);
+  const phoneRequirement = enforcePhoneRequirement(deduplicatedLeads, request);
+  const responseWarnings = [...result.warnings];
+  if (phoneRequirement.warning) {
+    addWarning(responseWarnings, phoneRequirement.warning);
+  }
+  const visibleLeads = phoneRequirement.leads.slice(0, request.count);
 
   return {
     searchId,
@@ -269,7 +276,7 @@ const buildResponse = ({
         withPhone: visibleLeads.filter((lead) => lead.hasPhone).length,
         withWebsite: visibleLeads.filter((lead) => lead.hasWebsite).length,
       },
-      providerWarnings: result.warnings,
+      providerWarnings: responseWarnings,
     },
   };
 };

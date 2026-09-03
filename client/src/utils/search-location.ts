@@ -57,6 +57,7 @@ export const buildSearchRequestFromDraft = (draft: SearchDraft): SearchRequest =
         timeZone: draft.timeZone as TimeZoneCode,
       },
       count: draft.count,
+      phoneRequired: true,
     };
   }
 
@@ -77,5 +78,6 @@ export const buildSearchRequestFromDraft = (draft: SearchDraft): SearchRequest =
       stateCode: draft.stateCode as UsStateCode,
     },
     count: draft.count,
+    phoneRequired: true,
   };
 };

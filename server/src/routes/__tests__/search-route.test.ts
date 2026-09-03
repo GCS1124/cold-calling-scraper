@@ -156,6 +156,7 @@ describe('/api/search handlers', () => {
         companyType: 'Dental Clinics',
         city: 'Austin, TX',
         count: 50,
+        phoneRequired: true,
       }),
     );
     expect(state.body).toMatchObject({
@@ -163,6 +164,37 @@ describe('/api/search handlers', () => {
       meta: {
         locationLabel: 'Austin, TX',
       },
+    });
+  });
+
+  it('rejects attempts to disable the required public phone field', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn(),
+    };
+    const { response, state } = createResponse();
+
+    await handleStartSearch(
+      search,
+      {
+        body: {
+          companyType: 'Dental Clinics',
+          location: {
+            mode: 'cityState',
+            city: 'Austin',
+            stateCode: 'TX',
+          },
+          count: 50,
+          phoneRequired: false,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(400);
+    expect(search.startSearch).not.toHaveBeenCalled();
+    expect(state.body).toMatchObject({
+      error: 'Invalid search request',
     });
   });
 

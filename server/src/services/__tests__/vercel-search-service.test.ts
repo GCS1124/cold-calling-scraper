@@ -195,6 +195,56 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.meta.progress.foundCount).toBe(50);
   });
 
+  it('filters persisted results to validated public-phone leads', async () => {
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      googlePlaces: {
+        id: 'google-places',
+        name: 'Google Places',
+        fetchLeads: vi.fn().mockResolvedValue([
+          makeLead({
+            id: 'phone-ready',
+            name: 'Phone Ready Dental',
+            mobile: '+1 512 555 0102',
+            website: 'https://phone-ready-dental.example',
+            hasPhone: true,
+            verifiedPhone: true,
+          }),
+          makeLead({
+            id: 'phone-missing',
+            name: 'Phone Missing Dental',
+            mobile: '',
+            website: 'https://phone-missing-dental.example',
+            hasPhone: false,
+            verifiedPhone: false,
+          }),
+        ]),
+      } as never,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-vercel-phone-required',
+      now: () => 1000,
+    });
+
+    const response = await service.startSearch({
+      companyType: 'Dental Clinics',
+      city: 'Austin, TX',
+      count: 50,
+      phoneRequired: true,
+    });
+    const snapshot = await pollJob(service, response.searchId, 20);
+
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.leads).toHaveLength(1);
+    expect(snapshot?.leads[0]?.name).toBe('Phone Ready Dental');
+    expect(snapshot?.meta.providerWarnings).toContainEqual(
+      expect.objectContaining({
+        providerId: 'phone-required',
+        message: expect.stringContaining('Excluded 1 lead'),
+      }),
+    );
+  });
+
   it('returns phone and website data directly from the Google-first path', async () => {
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),

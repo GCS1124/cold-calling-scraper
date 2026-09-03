@@ -144,6 +144,55 @@ describe('createSearchService', () => {
     expect(completed?.leads[0]?.name).toBe('Lattice Dental');
   });
 
+  it('filters the durable result to validated public-phone leads', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+    const leadWithoutPhone: Lead = {
+      ...sampleLead,
+      id: 'lead-without-phone',
+      name: 'Phone Missing Dental',
+      mobile: '',
+      website: 'https://phone-missing-dental.example',
+      address: '456 Congress Ave, Austin, TX 78701',
+      hasPhone: false,
+      verifiedPhone: false,
+    };
+
+    const service = createSearchService({
+      idFactory: () => 'search-phone-required',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverGoogleLeads: vi.fn().mockResolvedValue([]),
+      discoverOsmLeads: vi.fn().mockResolvedValue([leadWithoutPhone, sampleLead]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'Dental Clinics',
+      city: 'Austin',
+      count: 50,
+      phoneRequired: true,
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-phone-required');
+
+    expect(completed?.leads).toHaveLength(1);
+    expect(completed?.leads[0]?.name).toBe('Lattice Dental');
+    expect(completed?.leads.every((lead) => lead.hasPhone && lead.verifiedPhone)).toBe(true);
+    expect(completed?.meta.providerWarnings).toContainEqual(
+      expect.objectContaining({
+        providerId: 'phone-required',
+        message: expect.stringContaining('Excluded 1 lead'),
+      }),
+    );
+  });
+
   it('caps the completed result at the requested count after ranking the candidate pool', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
     const candidates = Array.from({ length: 75 }, (_, index) => ({

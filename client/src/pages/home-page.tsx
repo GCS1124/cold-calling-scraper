@@ -77,7 +77,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   const [pollRevision, setPollRevision] = useState(0);
   const [filters, setFilters] = useState({
     hasEmail: false,
-    hasPhone: false,
+    hasPhone: true,
     hasWebsite: false,
     highFitOnly: false,
     crossSourceOnly: false,
@@ -99,7 +99,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     setShowExport(false);
     setFilters({
       hasEmail: false,
-      hasPhone: false,
+      hasPhone: true,
       hasWebsite: false,
       highFitOnly: false,
       crossSourceOnly: false,
@@ -120,7 +120,8 @@ export function HomePage({ searchApi }: HomePageProps) {
     return (result?.leads ?? [])
       .filter((lead) => {
         if (filters.hasEmail && !lead.hasEmail) return false;
-        if (filters.hasPhone && !lead.hasPhone) return false;
+        // Phone qualification is a product requirement, not an optional view filter.
+        if (!lead.hasPhone) return false;
         if (filters.hasWebsite && !lead.hasWebsite) return false;
         if (
           activeSourceMode === 'linkedin' &&
@@ -170,7 +171,6 @@ export function HomePage({ searchApi }: HomePageProps) {
     filters.contactReadyOnly,
     filters.evidenceBackedOnly,
     filters.hasEmail,
-    filters.hasPhone,
     filters.hasWebsite,
     filters.highFitOnly,
     linkedinSortMode,
@@ -227,6 +227,9 @@ export function HomePage({ searchApi }: HomePageProps) {
           (warning) => warning.providerId !== 'ai-mode-policy',
         )
       : result?.meta.providerWarnings ?? [];
+  const phoneRequirementWarning = Boolean(
+    result?.meta.providerWarnings.some((warning) => warning.providerId === 'phone-required'),
+  );
   const providerNoticesAreInformational =
     displayedProviderWarnings.length > 0 &&
     displayedProviderWarnings.every((warning) => warning.severity === 'info');
@@ -295,8 +298,10 @@ export function HomePage({ searchApi }: HomePageProps) {
                   ? 'The search could not be completed. Adjust the query and try again.'
                     : linkedinDiscoveryBlocked
                       ? 'Free public-search providers temporarily blocked this request. No unverified or fabricated leads were added.'
-                      : activeSourceMode === 'linkedin'
-                        ? 'Profiles were ranked using public category, role, location, and cross-source signals. Contact fields are populated only from public websites.'
+                        : phoneRequirementWarning
+                          ? 'Only leads with a validated publicly listed phone/mobile number were retained. Private or Premium contact data is not accessed.'
+                        : activeSourceMode === 'linkedin'
+                          ? 'Profiles were ranked using public category, role, location, and cross-source signals. Contact fields are populated only from public websites.'
                         : activeSourceMode === 'ai'
                           ? 'Free public AI matching finished. Results were deduplicated, and contact details were kept only when publicly listed.'
                           : resultsExhausted
@@ -307,7 +312,9 @@ export function HomePage({ searchApi }: HomePageProps) {
   const emptyStateMessage =
     result && result.leads.length === 0
       ? result.meta.status === 'complete'
-        ? linkedinDiscoveryBlocked
+        ? phoneRequirementWarning
+          ? 'No leads with a validated publicly listed phone/mobile number were found. Broaden the category or location and try again.'
+          : linkedinDiscoveryBlocked
           ? 'LinkedIn discovery was blocked by the free public-search providers. Try again later or switch location.'
           : activeSourceMode === 'ai'
             ? 'Free AI mode found no verified public leads. Try a broader category or location; paid sources are not used.'

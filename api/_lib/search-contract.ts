@@ -33,6 +33,8 @@ export const searchRequestSchema = z.object({
   sourceMode: z.enum(publicSearchSourceModes).optional(),
   location: searchLocationSchema,
   count: z.number().int().min(50).max(500),
+  // Older clients may omit this, but disabling it is never accepted.
+  phoneRequired: z.literal(true).default(true),
   filters: z
     .object({
       hasEmail: z.boolean().optional(),
@@ -77,5 +79,6 @@ export const flattenSearchRequest = (request: PublicSearchRequest) => ({
   sourceMode: request.sourceMode ?? 'gmb',
   city: serializeLocationValue(request.location),
   count: Math.max(request.count, 50),
+  phoneRequired: request.phoneRequired,
   filters: request.filters,
 });

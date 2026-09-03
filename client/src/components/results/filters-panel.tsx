@@ -39,11 +39,16 @@ export function FiltersPanel({ filters, onChange, sourceMode }: FiltersPanelProp
         </label>
         <label className="flex items-center gap-3">
           <input
-            checked={filters.hasPhone}
-            onChange={(event) => onChange({ ...filters, hasPhone: event.target.checked })}
+            checked
+            disabled
             type="checkbox"
           />
-          Phone
+          <span>
+            <span className="block font-semibold text-slate-900">Mobile number required</span>
+            <span className="block text-xs leading-5 text-slate-500">
+              Validated public phone/mobile only
+            </span>
+          </span>
         </label>
         <label className="flex items-center gap-3">
           <input

@@ -495,12 +495,16 @@ describe('App', () => {
         timeZone: 'EST',
       },
       count: 50,
+      phoneRequired: true,
     });
 
     await waitForText(container, /discovery complete/i, 6000);
     expect(normalizedText(container)).toContain('2 visible leads');
     expect(normalizedText(container)).toContain('Eastern Time');
     expect(normalizedText(container)).toContain('Discovery complete');
+    expect(normalizedText(container)).toContain('Mobile number required');
+    expect(getCheckboxByLabel(container, /mobile number required/i).checked).toBe(true);
+    expect(getCheckboxByLabel(container, /mobile number required/i).disabled).toBe(true);
     await waitForText(container, /Publicly validated/i, 1000);
 
     await unmount();
@@ -623,6 +627,7 @@ describe('App', () => {
         stateCode: 'TX',
       },
       count: 50,
+      phoneRequired: true,
     });
 
     await waitForText(container, /discovery complete/i, 6000);
@@ -727,6 +732,7 @@ describe('App', () => {
         timeZone: 'EST',
       },
       count: 50,
+      phoneRequired: true,
     });
 
     await waitForText(container, /discovery complete/i, 6000);
@@ -758,6 +764,7 @@ describe('App', () => {
         timeZone: 'EST',
       },
       count: 50,
+      phoneRequired: true,
     });
 
     await waitForText(container, /free ai mode coverage/i, 6000);
@@ -846,6 +853,7 @@ describe('App', () => {
         timeZone: 'EST',
       },
       count: 50,
+      phoneRequired: true,
     });
 
     await unmount();
@@ -902,9 +910,7 @@ describe('App', () => {
         {
           ...completedResponse.leads[0],
           name: 'Public LinkedIn Dentist',
-          mobile: '',
           email: '',
-          website: '',
           contactSourceUrl: 'https://austindentalspa.example/contact',
           publicEvidence: {
             profileTitle: 'Public LinkedIn Dentist - Founder at Austin Dental Spa',
@@ -936,6 +942,21 @@ describe('App', () => {
             locationMatched: true,
           },
           hasEmail: false,
+          hasPhone: true,
+          hasWebsite: true,
+          verifiedPhone: true,
+          verifiedEmail: false,
+        },
+        {
+          ...completedResponse.leads[1],
+          id: 'public-linkedin-no-phone',
+          name: 'Public LinkedIn No Phone',
+          mobile: '',
+          email: '',
+          website: '',
+          source: 'LinkedIn',
+          listingUrl: 'https://linkedin.com/in/public-linkedin-no-phone',
+          hasEmail: false,
           hasPhone: false,
           hasWebsite: false,
           verifiedPhone: false,
@@ -947,20 +968,20 @@ describe('App', () => {
         ...completedResponse.meta,
         progress: {
           ...completedResponse.meta.progress,
-          discovered: 1,
-          enriched: 1,
-          publicContactsFound: 0,
+          discovered: 2,
+          enriched: 2,
+          publicContactsFound: 1,
           publicQueriesAttempted: 12,
           publicProvidersChecked: 3,
-          totalCandidates: 1,
-          foundCount: 1,
+          totalCandidates: 2,
+          foundCount: 2,
           estimatedRemaining: 49,
         },
         totals: {
-          total: 1,
+          total: 2,
           withEmail: 0,
-          withPhone: 0,
-          withWebsite: 0,
+          withPhone: 1,
+          withWebsite: 1,
         },
       },
     };
@@ -990,8 +1011,9 @@ describe('App', () => {
     expect(content).toContain('Match intelligence');
     expect(content).toContain('Cross-source');
     expect(content).toContain('Role signals');
-    expect(content).toMatch(/0\s*\/\s*1/);
-    expect(content).toMatch(/Missing Email\s*1/);
+    expect(content).toContain('1 visible leads');
+    expect(content).toMatch(/1\s*\/\s*2/);
+    expect(content).toMatch(/Missing Email\s*2/);
     expect(content).toMatch(/Missing Phone\s*1/);
 
     const inspectButton = container.querySelector(

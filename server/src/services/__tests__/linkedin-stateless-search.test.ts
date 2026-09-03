@@ -125,6 +125,60 @@ describe('runStatelessLinkedinSearch', () => {
     );
   });
 
+  it('returns only validated public-phone leads when the phone requirement is enabled', async () => {
+    const leadWithoutPhone = makeLead({
+      id: 'linkedin-without-phone',
+      name: 'No Phone Practice',
+      listingUrl: 'https://linkedin.com/in/no-phone-practice',
+    });
+    const leadWithPhone = makeLead({
+      id: 'linkedin-with-phone',
+      name: 'Phone Ready Practice',
+      listingUrl: 'https://linkedin.com/in/phone-ready-practice',
+    });
+    mocks.discover.mockResolvedValue({
+      leads: [leadWithoutPhone, leadWithPhone],
+      warnings: [],
+      blocked: false,
+    });
+    mocks.enrich.mockResolvedValue({
+      leads: [
+        makeLead({
+          ...leadWithoutPhone,
+          mobile: '',
+          hasPhone: false,
+          verifiedPhone: false,
+        }),
+        makeLead({
+          ...leadWithPhone,
+          mobile: '+1 512 555 0110',
+          website: 'https://phone-ready.example',
+          hasPhone: true,
+          hasWebsite: true,
+          verifiedPhone: true,
+          source: 'LinkedIn, Public Profile, Public Web, Website Crawl',
+        }),
+      ],
+      warnings: [],
+      enrichedCount: 2,
+    });
+
+    const response = await runStatelessLinkedinSearch({
+      ...request,
+      phoneRequired: true,
+    });
+
+    expect(response.leads).toHaveLength(1);
+    expect(response.leads[0]?.name).toBe('Phone Ready Practice');
+    expect(response.meta.totals.withPhone).toBe(1);
+    expect(response.meta.providerWarnings).toContainEqual(
+      expect.objectContaining({
+        providerId: 'phone-required',
+        message: expect.stringContaining('Excluded 1 lead'),
+      }),
+    );
+  });
+
   it('returns a truthful complete response when location normalization fails', async () => {
     mocks.normalize.mockRejectedValue(new Error('No US location match found'));
 

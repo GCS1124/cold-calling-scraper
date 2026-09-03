@@ -73,6 +73,8 @@ export type SearchRequest = {
   companyType: string;
   location: SearchLocation;
   count: number;
+  /** The app only accepts leads with a validated public phone/mobile number. */
+  phoneRequired?: true;
   sourceMode?: SearchSourceMode;
   filters?: {
     hasEmail?: boolean;

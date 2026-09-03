@@ -32,6 +32,7 @@ import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
+import { enforcePhoneRequirement } from './phone-requirement';
 import { buildDiscoverySeeds } from './discovery-seeds';
 import {
   leadSourceModeLabels,
@@ -246,7 +247,11 @@ const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
   rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
 
 const finalizeLeads = (job: SearchJob) => {
-  job.leads = rankDiscoveryCandidates(job.leads).slice(0, job.request.count);
+  const phoneRequirement = enforcePhoneRequirement(job.leads, job.request);
+  if (phoneRequirement.warning) {
+    appendUniqueWarnings(job, [phoneRequirement.warning]);
+  }
+  job.leads = rankDiscoveryCandidates(phoneRequirement.leads).slice(0, job.request.count);
   refreshProgress(job);
 };
 

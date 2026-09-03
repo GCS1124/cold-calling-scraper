@@ -105,6 +105,14 @@ export function SearchForm({
               : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
         </p>
 
+        <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-xs font-normal leading-5 text-slate-600">
+          <p className="font-bold text-blue-900">Mobile number required</p>
+          <p className="mt-1">
+            Only leads with a validated phone/mobile number publicly listed by the business are
+            included. Private or Premium contact data is never accessed.
+          </p>
+        </div>
+
         {isLinkedInMode ? (
           <div className="overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-4 text-white shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

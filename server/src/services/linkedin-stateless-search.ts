@@ -9,6 +9,7 @@ import {
   type LinkedInDiscoveryResult,
 } from './linkedin-search';
 import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
+import { enforcePhoneRequirement } from './phone-requirement';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 
 // Keep the no-database path within the Vercel function budget. It returns a
@@ -50,7 +51,13 @@ const buildResponse = ({
   warnings: ProviderWarning[];
   coverage?: LinkedInDiscoveryResult['coverage'];
 }): SearchResponse => {
-  const visibleLeads = deduplicateLeads(leads).slice(0, request.count);
+  const deduplicatedLeads = deduplicateLeads(leads);
+  const phoneRequirement = enforcePhoneRequirement(deduplicatedLeads, request);
+  const responseWarnings = [...warnings];
+  if (phoneRequirement.warning) {
+    addWarnings(responseWarnings, [phoneRequirement.warning]);
+  }
+  const visibleLeads = phoneRequirement.leads.slice(0, request.count);
 
   return {
     searchId,
@@ -81,7 +88,7 @@ const buildResponse = ({
         withPhone: visibleLeads.filter((lead) => lead.hasPhone).length,
         withWebsite: visibleLeads.filter((lead) => lead.hasWebsite).length,
       },
-      providerWarnings: warnings,
+      providerWarnings: responseWarnings,
     },
   };
 };

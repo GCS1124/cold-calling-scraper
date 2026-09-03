@@ -111,6 +111,7 @@ describe('/api/search', () => {
       sourceMode: 'linkedin',
       city: 'EST',
       count: 50,
+      phoneRequired: true,
       filters: undefined,
     });
     expect(vercelSearchService.advanceSearch).toHaveBeenCalledWith('search-1');
@@ -201,6 +202,7 @@ describe('/api/search', () => {
       sourceMode: 'linkedin',
       city: 'EST',
       count: 50,
+      phoneRequired: true,
       filters: undefined,
     });
     expect(waitUntil).not.toHaveBeenCalled();

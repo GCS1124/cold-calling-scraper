@@ -32,5 +32,6 @@ export const flattenSearchRequest = (request: PublicSearchRequest): SearchReques
   sourceMode: request.sourceMode ?? 'gmb',
   city: serializeLocationValue(request.location),
   count: Math.max(request.count, 50),
+  phoneRequired: request.phoneRequired,
   filters: request.filters,
 });

@@ -21,6 +21,7 @@ import {
 } from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
+import { enforcePhoneRequirement } from './phone-requirement';
 import {
   createSearchJobStore,
   CURRENT_SCHEMA_VERSION,
@@ -186,7 +187,11 @@ const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
   rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
 
 const finalizeLeads = (job: SearchJobRecord) => {
-  job.leads = rankDiscoveryCandidates(job.leads).slice(0, job.request.count);
+  const phoneRequirement = enforcePhoneRequirement(job.leads, job.request);
+  if (phoneRequirement.warning) {
+    appendWarningOnce(job, phoneRequirement.warning);
+  }
+  job.leads = rankDiscoveryCandidates(phoneRequirement.leads).slice(0, job.request.count);
   refreshProgress(job);
 };
 

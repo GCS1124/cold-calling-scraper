@@ -9,6 +9,7 @@ export const searchRequestSchema = z.object({
   sourceMode: z.enum(searchSourceModes).optional(),
   city: z.string().trim().min(2).max(80),
   count: z.number().int().min(50).max(500),
+  phoneRequired: z.literal(true).optional(),
   filters: z
     .object({
       hasEmail: z.boolean().optional(),
