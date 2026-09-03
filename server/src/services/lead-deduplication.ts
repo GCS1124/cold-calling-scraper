@@ -120,6 +120,14 @@ const mergeMatchSignals = (group: Lead[]) => {
         .filter(Boolean),
     ),
   ];
+  const queryFamilies = [
+    ...new Set(
+      signals
+        .flatMap((signal) => signal.queryFamilies ?? [])
+        .map((family) => family.trim())
+        .filter(Boolean),
+    ),
+  ];
   const locationEvidence = signals
     .map((signal) => signal.locationEvidence?.trim())
     .find(Boolean);
@@ -133,6 +141,7 @@ const mergeMatchSignals = (group: Lead[]) => {
     ...(publicProviderNames.length > 0 ? { publicProviderNames } : {}),
     ...(categoryMatchedTerms.length > 0 ? { categoryMatchedTerms } : {}),
     ...(roleMatchedTerms.length > 0 ? { roleMatchedTerms } : {}),
+    ...(queryFamilies.length > 0 ? { queryFamilies } : {}),
     ...(locationEvidence ? { locationEvidence } : {}),
     categoryMatched: signals.some((signal) => signal.categoryMatched),
     roleMatched: signals.some((signal) => signal.roleMatched),

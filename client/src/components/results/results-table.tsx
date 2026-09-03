@@ -3,7 +3,10 @@ import { ChevronDown } from 'lucide-react';
 import { Fragment, useState } from 'react';
 
 import type { Lead } from '../../types/lead';
-import { isHighFitLinkedInLead } from '../../utils/linkedin-quality';
+import {
+  getLinkedInReadinessLabel,
+  isHighFitLinkedInLead,
+} from '../../utils/linkedin-quality';
 
 type ResultsTableProps = {
   leads: Lead[];
@@ -22,6 +25,13 @@ type ContactCellProps = {
 function isPublicLinkedInLead(lead: Lead) {
   return lead.source.toLowerCase().includes('linkedin');
 }
+
+const queryFamilyLabels: Record<string, string> = {
+  'category-location': 'Category + location',
+  'legacy-profile': 'Legacy profile',
+  'multi-term-cluster': 'Multi-term cluster',
+  'role-led': 'Role-led',
+};
 
 function ContactCell({ value, verified }: ContactCellProps) {
   if (!value) {
@@ -184,6 +194,9 @@ export function ResultsTable({
                                 {lead.matchSignals.publicSources}-source signal
                               </span>
                             ) : null}
+                            <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700">
+                              {getLinkedInReadinessLabel(lead)}
+                            </span>
                           </div>
                           {lead.matchSignals ? (
                             <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-slate-500">
@@ -431,6 +444,14 @@ export function ResultsTable({
                                   <span className="rounded-full bg-emerald-50 px-3 py-2 text-emerald-700">
                                     {lead.matchSignals.queryMatches} query paths · {lead.matchSignals.publicSources} public sources
                                   </span>
+                                  {lead.matchSignals.queryFamilies?.length ? (
+                                    <span className="rounded-full bg-slate-100 px-3 py-2 text-slate-700">
+                                      Lenses:{' '}
+                                      {lead.matchSignals.queryFamilies
+                                        .map((family) => queryFamilyLabels[family] ?? family)
+                                        .join(', ')}
+                                    </span>
+                                  ) : null}
                                   <span className="rounded-full bg-blue-50 px-3 py-2 text-blue-700">
                                     {lead.matchSignals.publicProviderNames?.join(' + ') || 'Public search sources'}
                                   </span>

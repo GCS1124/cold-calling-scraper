@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Lead } from '../types/lead';
-import { isHighFitLinkedInLead } from '../utils/linkedin-quality';
+import {
+  getLinkedInLeadReadiness,
+  getLinkedInRankingScore,
+  isContactReadyLinkedInLead,
+  isEvidenceBackedLinkedInLead,
+  isHighFitLinkedInLead,
+} from '../utils/linkedin-quality';
 
 const baseLead: Lead = {
   id: 'linkedin-quality-test',
@@ -63,5 +69,35 @@ describe('isHighFitLinkedInLead', () => {
 
   it('requires at least 85% confidence', () => {
     expect(isHighFitLinkedInLead({ ...baseLead, confidence: 84 })).toBe(false);
+  });
+});
+
+describe('LinkedIn result quality helpers', () => {
+  it('prioritizes publicly listed contact details without changing match confidence', () => {
+    const contactReady = {
+      ...baseLead,
+      hasEmail: true,
+      hasPhone: true,
+      email: 'hello@example.test',
+      mobile: '+1 512 555 0100',
+    };
+
+    expect(getLinkedInLeadReadiness(contactReady)).toBe('email-and-phone');
+    expect(isContactReadyLinkedInLead(contactReady)).toBe(true);
+    expect(
+      getLinkedInRankingScore(contactReady, 'contact-ready'),
+    ).toBeGreaterThan(getLinkedInRankingScore(baseLead, 'contact-ready'));
+  });
+
+  it('recognizes evidence-backed profiles and falls back to profile-only readiness', () => {
+    expect(getLinkedInLeadReadiness(baseLead)).toBe('profile-only');
+    expect(isContactReadyLinkedInLead(baseLead)).toBe(false);
+    expect(isEvidenceBackedLinkedInLead(baseLead)).toBe(false);
+    expect(
+      isEvidenceBackedLinkedInLead({
+        ...baseLead,
+        publicEvidence: { profileSnippet: 'Public result excerpt.' },
+      }),
+    ).toBe(true);
   });
 });

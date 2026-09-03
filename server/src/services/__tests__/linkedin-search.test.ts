@@ -176,6 +176,9 @@ Owner at Austin Dental Spa.
       publicProviderNames: expect.arrayContaining(['Brave Search', 'Bing']),
       categoryMatchedTerms: expect.arrayContaining([expect.stringMatching(/dentist|dental/i)]),
       roleMatchedTerms: expect.arrayContaining([expect.stringMatching(/owner/i)]),
+      queryFamilies: expect.arrayContaining([
+        expect.stringMatching(/multi-term-cluster|role-led|category-location|legacy-profile/),
+      ]),
       locationEvidence: 'Austin, TX',
       categoryMatched: true,
       roleMatched: true,
@@ -183,6 +186,27 @@ Owner at Austin Dental Spa.
     });
     expect(result.coverage?.queriesAttempted).toBeGreaterThan(0);
     expect(result.coverage?.providersChecked).toBe(4);
+  });
+
+  it('opens multi-term category and role query clusters before narrow fallback paths', async () => {
+    const { fetchMock, queries } = makeQueryCaptureFetch(emptyDuckDuckGoBody);
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'HVAC contractor', city: 'Austin', count: 50 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(
+      [...queries].some(
+        (query) =>
+          query.includes('site:linkedin.com/in/') &&
+          query.includes(' OR ') &&
+          /hvac|heating|cooling/i.test(query),
+      ),
+    ).toBe(true);
   });
 
   it('fans out the highest-signal public query paths for corroboration', async () => {
@@ -327,6 +351,39 @@ Both are public decision-makers at an Austin dental practice in Austin, Texas.
           (source.profileSnippet?.length ?? 0) <= 360,
       ),
     ).toBe(true);
+  });
+
+  it('does not promote a descriptive title phrase to a public location', async () => {
+    const falseLocationBody = `Title: LinkedIn search results
+
+Markdown Content:
+1. [Sonny Torres Oliva, D.D.S. - Owner/Dentist, Private Practice Specializing, IN | LinkedIn](https://www.linkedin.com/in/sonny-torres-oliva/)
+Dentist and practice owner serving patients through a private practice.
+`;
+    const { fetchMock } = makeQueryCaptureFetch(falseLocationBody);
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: {
+        companyType: 'Dentist',
+        city: 'Eastern Time',
+        count: 50,
+      },
+      location: {
+        ...sampleLocation,
+        mode: 'timezone',
+        label: 'Eastern Time',
+        city: '',
+        stateCode: '',
+        timeZoneCode: 'ET',
+      },
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(1);
+    expect(result.leads[0]?.address).toBe('');
+    expect(result.leads[0]?.stateCode).toBe('');
   });
 
   it('discovers legacy public LinkedIn /pub profiles', async () => {

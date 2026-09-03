@@ -1029,6 +1029,9 @@ describe('App', () => {
           ...completedResponse.leads[0],
           source: 'LinkedIn, Public Profile',
           confidence: 94,
+          publicEvidence: {
+            profileSnippet: 'Public Dentist profile and business context.',
+          },
           matchSignals: {
             queryMatches: 4,
             publicSources: 3,
@@ -1096,6 +1099,24 @@ describe('App', () => {
     expect(normalizedText(container)).not.toContain('Unverified Location Dentist');
 
     await clickElement(getCheckboxByLabel(container, /cross-source match/i));
+    expect(normalizedText(container)).toContain('1 visible leads');
+
+    const rankSelect = container.querySelector('select[aria-label="Rank LinkedIn results"]');
+    if (!rankSelect) {
+      throw new Error('Could not find LinkedIn ranking select');
+    }
+
+    expect(Array.from((rankSelect as HTMLSelectElement).options).map((option) => option.value)).toEqual([
+      'best-match',
+      'contact-ready',
+      'corroborated',
+    ]);
+    await selectValue(rankSelect as HTMLSelectElement, 'contact-ready');
+
+    await clickElement(getCheckboxByLabel(container, /contact-ready/i));
+    expect(normalizedText(container)).toContain('1 visible leads');
+
+    await clickElement(getCheckboxByLabel(container, /public evidence available/i));
     expect(normalizedText(container)).toContain('1 visible leads');
 
     await unmount();

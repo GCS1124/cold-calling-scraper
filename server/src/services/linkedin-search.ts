@@ -64,6 +64,7 @@ type LinkedInCandidate = {
   matchedCategoryTerms: string[];
   matchedRoleTerms: string[];
   matchedLocationTerms: string[];
+  matchedQueryFamilies: string[];
   location?: PublicProfileLocation;
 };
 
@@ -824,6 +825,41 @@ const quoteQueryTerm = (value: string) => {
   return normalized.includes(' ') ? `"${normalized}"` : normalized;
 };
 
+const buildBooleanQuery = (terms: string[], limit: number) => {
+  const quotedTerms = unique(terms)
+    .slice(0, limit)
+    .map(quoteQueryTerm)
+    .filter(Boolean);
+
+  if (quotedTerms.length <= 1) {
+    return quotedTerms[0] ?? '';
+  }
+
+  return `(${quotedTerms.join(' OR ')})`;
+};
+
+const getLinkedInQueryFamily = (query: string) => {
+  const normalized = query.toLowerCase();
+
+  if (normalized.includes('site:linkedin.com/pub/')) {
+    return 'legacy-profile';
+  }
+
+  if (normalized.includes(' or ')) {
+    return 'multi-term-cluster';
+  }
+
+  if (
+    /\b(founder|owner|ceo|president|director|manager|operator|partner|principal|administrator|head of|vice president|vp)\b/i.test(
+      normalized,
+    )
+  ) {
+    return 'role-led';
+  }
+
+  return 'category-location';
+};
+
 type LinkedInProfilePath = 'in' | 'pub';
 
 const publicLinkedInProfilePaths: LinkedInProfilePath[] = ['in', 'pub'];
@@ -1114,6 +1150,29 @@ const foreignLocationPattern =
 const foreignCityPattern =
   /\b(?:noida|gurgaon|gurugram|new delhi|bengaluru|bangalore|hyderabad|chennai|pune|kolkata|mumbai|karachi|lahore|dhaka|manila|toronto|vancouver|montreal|calgary|sydney|melbourne|auckland|dubai|abu dhabi)\b/i;
 
+const extractExplicitProfileStateCode = (
+  candidate: Pick<LinkedInCandidate, 'title' | 'headline' | 'snippet'>,
+) => {
+  const searchableValues = [
+    normalizeText(`${candidate.title} ${candidate.headline ?? ''}`),
+    normalizeText(candidate.snippet),
+  ];
+
+  for (const value of searchableValues) {
+    const match =
+      publicLocationPattern.exec(value) ??
+      publicUnpunctuatedLocationNamePattern.exec(value) ??
+      publicUnpunctuatedLocationCodePattern.exec(value);
+    const stateCode = publicStateCodeByValue.get((match?.[2] ?? '').toLowerCase());
+
+    if (stateCode) {
+      return stateCode;
+    }
+  }
+
+  return undefined;
+};
+
 const extractPublicProfileLocation = (
   candidate: Pick<LinkedInCandidate, 'title' | 'headline' | 'snippet'>,
   requestedLocation: NormalizedUsLocation,
@@ -1142,9 +1201,6 @@ const extractPublicProfileLocation = (
   if (requestedLocation.city) {
     discoveryCityHints.add(normalizeMatchText(requestedLocation.city));
   }
-  const startsWithAmbiguousPrefix = publicLocationPrefixNoiseWords.has(
-    normalizeMatchText(cityWords[0] ?? ''),
-  );
   const cityCandidates = cityWords.flatMap((_, startIndex) => {
     const value = cityWords.slice(startIndex).join(' ');
     const normalized = normalizeMatchText(value);
@@ -1160,10 +1216,18 @@ const extractPublicProfileLocation = (
     return [{ value, normalized }];
   });
   const hintedCity = cityCandidates.find((candidateCity) =>
-    discoveryCityHints.has(candidateCity.normalized),
+    [...discoveryCityHints].some(
+      (hint) =>
+        candidateCity.normalized === hint ||
+        candidateCity.normalized.startsWith(`${hint} `) ||
+        hint.startsWith(`${candidateCity.normalized} `),
+    ),
   );
-  const selectedCity = hintedCity?.value ??
-    (!startsWithAmbiguousPrefix ? cityCandidates[0]?.value : undefined);
+  // Search snippets frequently contain phrases such as "Private Practice
+  // Specializing, IN" that resemble a city/state pair. Only expose a public
+  // location when the city also matches a known query seed or the requested
+  // city; otherwise the profile remains usable without fabricated geography.
+  const selectedCity = hintedCity?.value;
   const city = normalizePublicCity(selectedCity ?? '');
 
   if (
@@ -1278,6 +1342,7 @@ const matchingEvidenceTerms = (searchable: string, terms: string[]) =>
 type CandidateMatchEvidence = {
   categoryMatchedTerms: string[];
   categoryIdentityMatchedTerms: string[];
+  categoryRoleMatchedTerms: string[];
   roleMatchedTerms: string[];
   locationMatchedTerms: string[];
   hasCategoryEvidence: boolean;
@@ -1316,6 +1381,10 @@ const getCandidateMatchEvidence = (
     identitySearchable,
     categoryTerms,
   );
+  const categoryRoleMatchedTerms = matchingEvidenceTerms(
+    identitySearchable,
+    categoryRoleTerms,
+  );
   const roleMatchedTerms = matchingEvidenceTerms(identitySearchable, roleTerms);
   const fallbackRoleTerm = identitySearchable.match(decisionMakerPattern)?.[0] ?? '';
 
@@ -1328,6 +1397,7 @@ const getCandidateMatchEvidence = (
   return {
     categoryMatchedTerms,
     categoryIdentityMatchedTerms,
+    categoryRoleMatchedTerms,
     roleMatchedTerms,
     locationMatchedTerms,
     hasCategoryEvidence: categoryMatchedTerms.length > 0,
@@ -1380,6 +1450,21 @@ const scoreCandidateRelevance = (
     }
   }
 
+  if (location.mode === 'timezone' && location.timeZoneCode) {
+    const explicitStateCode =
+      candidate.location?.stateCode ?? extractExplicitProfileStateCode(candidate);
+    const stateName = explicitStateCode
+      ? usStateNames[explicitStateCode as UsStateCode]
+      : undefined;
+    const allowedStates = (timezoneStateQueries[location.timeZoneCode] ?? []).map(
+      normalizeMatchText,
+    );
+
+    if (stateName && !allowedStates.includes(normalizeMatchText(stateName))) {
+      return 0;
+    }
+  }
+
   if (
     (location.mode === 'timezone' || location.mode === 'nationwide') &&
     (foreignLocationPattern.test(searchable) || foreignCityPattern.test(searchable))
@@ -1398,7 +1483,13 @@ const scoreCandidateRelevance = (
   if (
     profile.key !== 'keyword-fallback' &&
     !evidence.hasCategoryIdentityEvidence &&
-    !evidence.hasRoleEvidence
+    !evidence.categoryRoleMatchedTerms.length &&
+    !evidence.hasProfessionalTitleEvidence &&
+    !(
+      profile.key === 'ecommerce-brands' &&
+      evidence.hasRoleEvidence &&
+      /\b(?:at|of|for)\s+[a-z0-9]+(?:\s+[a-z0-9]+){0,5}\b/i.test(identitySearchable)
+    )
   ) {
     return 0;
   }
@@ -1491,6 +1582,18 @@ const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocati
   const secondaryCompany = selectSecondaryCompanyTerm(companyTerms, primaryCompany);
   const primaryLocation = locationTerms[0] ?? normalizeQueryTerm(location.label);
   const prioritizedRoleTerms = prioritizeRoleTerms(genericRoleTerms, categoryRoleTerms);
+  const categoryCluster = buildBooleanQuery(companyTerms, 5);
+  const roleCluster = buildBooleanQuery(prioritizedRoleTerms, 6);
+  const highSignalClusters = publicLinkedInProfilePaths.flatMap((profilePath) => [
+    buildLinkedInQueryFromPhrase(
+      [categoryCluster, roleCluster, quoteQueryTerm(primaryLocation)].filter(Boolean).join(' '),
+      profilePath,
+    ),
+    buildLinkedInQueryFromPhrase(
+      [categoryCluster, quoteQueryTerm(primaryLocation)].filter(Boolean).join(' '),
+      profilePath,
+    ),
+  ]);
 
   const roleQueries = [
     ...prioritizedRoleTerms.map((role, index) => {
@@ -1529,11 +1632,12 @@ const buildQueryVariants = (request: SearchRequest, location: NormalizedUsLocati
    buildLinkedInQuery(primaryCompany, primaryLocation, role, 'pub'),
  );
 
- const queryCandidates = unique([
-   buildLinkedInQueryFromPhrase(`${request.companyType} in ${primaryLocation}`),
+  const queryCandidates = unique([
+    ...highSignalClusters,
+    buildLinkedInQueryFromPhrase(`${request.companyType} in ${primaryLocation}`),
+    ...aliasQueries,
     ...roleQueries.slice(0, 4),
     legacyProfileQuery,
-    ...aliasQueries,
     ...legacyRoleQueries,
     ...roleQueries.slice(4, 10),
     ...discoveryQueries.slice(0, 5),
@@ -2120,6 +2224,7 @@ const buildLeadFromCandidate = (
       ),
       categoryMatchedTerms: candidate.matchedCategoryTerms,
       roleMatchedTerms: candidate.matchedRoleTerms,
+      queryFamilies: candidate.matchedQueryFamilies,
       locationEvidence: publicLocation?.label,
       categoryMatched: candidate.matchedCategoryTerms.length > 0,
       roleMatched: candidate.matchedRoleTerms.length > 0,
@@ -2218,6 +2323,7 @@ const runLinkedInQuerySet = async ({
         matchedCategoryTerms: evidence.categoryMatchedTerms,
         matchedRoleTerms: evidence.roleMatchedTerms,
         matchedLocationTerms: evidence.locationMatchedTerms,
+        matchedQueryFamilies: [getLinkedInQueryFamily(query)],
       };
       const relevanceScore = scoreCandidateRelevance(
         candidateWithEvidence,
@@ -2271,6 +2377,10 @@ const runLinkedInQuerySet = async ({
           matchedLocationTerms: unique([
             ...existing.matchedLocationTerms,
             ...candidateWithEvidence.matchedLocationTerms,
+          ]),
+          matchedQueryFamilies: unique([
+            ...existing.matchedQueryFamilies,
+            ...candidateWithEvidence.matchedQueryFamilies,
           ]),
           baseRelevanceScore,
           matchedQueries,

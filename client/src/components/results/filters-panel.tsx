@@ -6,6 +6,8 @@ type Filters = {
   hasWebsite: boolean;
   highFitOnly: boolean;
   crossSourceOnly: boolean;
+  contactReadyOnly: boolean;
+  evidenceBackedOnly: boolean;
 };
 
 type FiltersPanelProps = {
@@ -71,6 +73,22 @@ export function FiltersPanel({ filters, onChange, sourceMode }: FiltersPanelProp
                 type="checkbox"
               />
               Cross-source match
+            </label>
+            <label className="flex items-center gap-3">
+              <input
+                checked={filters.contactReadyOnly}
+                onChange={(event) => onChange({ ...filters, contactReadyOnly: event.target.checked })}
+                type="checkbox"
+              />
+              Contact-ready (email or phone)
+            </label>
+            <label className="flex items-center gap-3">
+              <input
+                checked={filters.evidenceBackedOnly}
+                onChange={(event) => onChange({ ...filters, evidenceBackedOnly: event.target.checked })}
+                type="checkbox"
+              />
+              Public evidence available
             </label>
           </>
         ) : null}

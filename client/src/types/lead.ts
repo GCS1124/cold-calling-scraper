@@ -32,6 +32,7 @@ export type Lead = {
     publicProviderNames?: string[];
     categoryMatchedTerms?: string[];
     roleMatchedTerms?: string[];
+    queryFamilies?: string[];
     locationEvidence?: string;
     categoryMatched?: boolean;
     roleMatched: boolean;

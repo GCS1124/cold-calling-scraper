@@ -32,7 +32,13 @@ import {
   createSearchDraft,
   formatLocationLabel,
 } from '../utils/search-location';
-import { isHighFitLinkedInLead } from '../utils/linkedin-quality';
+import {
+  getLinkedInRankingScore,
+  isContactReadyLinkedInLead,
+  isEvidenceBackedLinkedInLead,
+  isHighFitLinkedInLead,
+  type LinkedInSortMode,
+} from '../utils/linkedin-quality';
 import { sourceModeLabelsByCode } from '../data/search-options';
 import type { Lead, SearchDraft, SearchRequest, SearchResponse } from '../types/lead';
 
@@ -62,7 +68,10 @@ export function HomePage({ searchApi }: HomePageProps) {
     hasWebsite: false,
     highFitOnly: false,
     crossSourceOnly: false,
+    contactReadyOnly: false,
+    evidenceBackedOnly: false,
   });
+  const [linkedinSortMode, setLinkedinSortMode] = useState<LinkedInSortMode>('best-match');
 
   const auth = useAuth();
   const { rememberSearch } = useSearchHistory(auth.user?.id);
@@ -81,7 +90,10 @@ export function HomePage({ searchApi }: HomePageProps) {
       hasWebsite: false,
       highFitOnly: false,
       crossSourceOnly: false,
+      contactReadyOnly: false,
+      evidenceBackedOnly: false,
     });
+    setLinkedinSortMode('best-match');
 
     if (sourceMode !== search.sourceMode) {
       recordedSearchId.current = null;
@@ -111,16 +123,44 @@ export function HomePage({ searchApi }: HomePageProps) {
         ) {
           return false;
         }
+        if (
+          activeSourceMode === 'linkedin' &&
+          filters.contactReadyOnly &&
+          !isContactReadyLinkedInLead(lead)
+        ) {
+          return false;
+        }
+        if (
+          activeSourceMode === 'linkedin' &&
+          filters.evidenceBackedOnly &&
+          !isEvidenceBackedLinkedInLead(lead)
+        ) {
+          return false;
+        }
         return true;
       })
-      .sort((left, right) => right.confidence - left.confidence);
+      .sort((left, right) => {
+        if (activeSourceMode === 'linkedin') {
+          return (
+            getLinkedInRankingScore(right, linkedinSortMode) -
+              getLinkedInRankingScore(left, linkedinSortMode) ||
+            right.confidence - left.confidence ||
+            left.name.localeCompare(right.name)
+          );
+        }
+
+        return right.confidence - left.confidence;
+      });
   }, [
     activeSourceMode,
     filters.crossSourceOnly,
+    filters.contactReadyOnly,
+    filters.evidenceBackedOnly,
     filters.hasEmail,
     filters.hasPhone,
     filters.hasWebsite,
     filters.highFitOnly,
+    linkedinSortMode,
     result?.leads,
   ]);
 
@@ -941,11 +981,30 @@ export function HomePage({ searchApi }: HomePageProps) {
                     </div>
                   </div>
 
-                  <p className="rounded-2xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-600">
-                    {selectedIds.length
-                      ? `${selectedIds.length} selected`
-                      : 'No rows selected'}
-                  </p>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    {activeSourceMode === 'linkedin' ? (
+                      <label className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600">
+                        Rank by
+                        <select
+                          aria-label="Rank LinkedIn results"
+                          className="bg-transparent text-xs font-bold text-slate-950 outline-none"
+                          value={linkedinSortMode}
+                          onChange={(event) =>
+                            setLinkedinSortMode(event.target.value as LinkedInSortMode)
+                          }
+                        >
+                          <option value="best-match">Best match</option>
+                          <option value="contact-ready">Contact ready</option>
+                          <option value="corroborated">Most corroborated</option>
+                        </select>
+                      </label>
+                    ) : null}
+                    <p className="rounded-2xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-600">
+                      {selectedIds.length
+                        ? `${selectedIds.length} selected`
+                        : 'No rows selected'}
+                    </p>
+                  </div>
                 </div>
 
                 <ResultsTable
