@@ -2219,12 +2219,10 @@ const runLinkedInQuerySet = async ({
       break;
     }
 
-    // Parallelize only the healthy phase. Once a provider starts failing,
-    // serialize fallback queries so the circuit breaker can pause it before
-    // another request is scheduled.
-    const hasProviderFailures = [...providerHealth.values()].some((health) => health.failures > 0);
-    const batchSize = hasProviderFailures ? 1 : queryBatchSize;
-    const batch = queries.slice(batchStart, batchStart + batchSize);
+    // Keep bounded query parallelism even after an isolated provider failure.
+    // collectSearchResults re-evaluates healthy sources for every query, while
+    // the provider circuit breaker still pauses a source after its threshold.
+    const batch = queries.slice(batchStart, batchStart + queryBatchSize);
     const resultSets = await Promise.all(
       batch.map((query, batchIndex) =>
         collectSearchResults(

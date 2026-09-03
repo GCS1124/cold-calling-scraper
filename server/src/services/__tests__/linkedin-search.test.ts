@@ -214,6 +214,52 @@ Owner at Austin Dental Spa.
     expect(Math.max(...[...queryProviders.values()].map((providers) => providers.size))).toBe(4);
   });
 
+  it('keeps healthy public providers parallel after an isolated failure', async () => {
+    let activeRequests = 0;
+    let maxActiveAfterFailure = 0;
+    let braveFailures = 0;
+    let failureFinished = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const provider = url.includes('search.brave.com')
+        ? 'brave'
+        : url.includes('bing.com')
+          ? 'bing'
+          : url.includes('html.duckduckgo.com')
+            ? 'duckduckgo'
+            : 'yahoo';
+
+      activeRequests += 1;
+      if (failureFinished) {
+        maxActiveAfterFailure = Math.max(maxActiveAfterFailure, activeRequests);
+      }
+
+      if (provider === 'brave' && braveFailures === 0) {
+        braveFailures += 1;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        failureFinished = true;
+        activeRequests -= 1;
+        throw new Error('isolated public provider failure');
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      activeRequests -= 1;
+      return makeResponse('Title: no public profile matches');
+    });
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Dentist', city: 'Austin', count: 50 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(0);
+    expect(braveFailures).toBe(1);
+    expect(maxActiveAfterFailure).toBeGreaterThanOrEqual(4);
+  });
+
   it('extracts multiple public profiles from compact search-result lines', async () => {
     const compactBody = `Title: LinkedIn search results
 
