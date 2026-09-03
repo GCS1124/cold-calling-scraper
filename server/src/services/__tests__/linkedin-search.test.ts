@@ -62,7 +62,7 @@ const makeQueryCaptureFetch = (body: string, routes: QueryRoute[] = []) => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     const parsed = new URL(url);
-    const query = parsed.searchParams.get('q');
+    const query = parsed.searchParams.get('q') ?? parsed.searchParams.get('p');
 
     if (query) {
       queries.add(query);
@@ -71,7 +71,8 @@ const makeQueryCaptureFetch = (body: string, routes: QueryRoute[] = []) => {
     if (
       url.includes('search.brave.com') ||
       url.includes('bing.com') ||
-      url.includes('html.duckduckgo.com')
+      url.includes('html.duckduckgo.com') ||
+      url.includes('search.yahoo.com')
     ) {
       const routedBody = routes.find((route) => query && route.match(query));
       if (routedBody) {
@@ -80,6 +81,10 @@ const makeQueryCaptureFetch = (body: string, routes: QueryRoute[] = []) => {
 
       if (url.includes('html.duckduckgo.com')) {
         return makeResponse(emptyDuckDuckGoBody);
+      }
+
+      if (url.includes('search.yahoo.com')) {
+        return makeResponse(body);
       }
 
       return makeResponse(body);
@@ -121,6 +126,10 @@ Owner at Austin Dental Spa.
       }
 
       if (url.includes('html.duckduckgo.com')) {
+        return makeResponse(emptyDuckDuckGoBody);
+      }
+
+      if (url.includes('search.yahoo.com')) {
         return makeResponse(emptyDuckDuckGoBody);
       }
 
@@ -170,7 +179,7 @@ Owner at Austin Dental Spa.
       locationMatched: true,
     });
     expect(result.coverage?.queriesAttempted).toBeGreaterThan(0);
-    expect(result.coverage?.providersChecked).toBe(3);
+    expect(result.coverage?.providersChecked).toBe(4);
   });
 
   it('extracts multiple public profiles from compact search-result lines', async () => {
@@ -252,14 +261,16 @@ Both are public decision-makers at an Austin dental practice in Austin, Texas.
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       const parsed = new URL(url);
-      const query = decodeURIComponent(parsed.searchParams.get('q') ?? '');
+      const query = decodeURIComponent(
+        parsed.searchParams.get('q') ?? parsed.searchParams.get('p') ?? '',
+      );
 
       if (query) {
         queries.push(query);
       }
 
       if (
-        (url.includes('search.brave.com') || url.includes('bing.com')) &&
+        (url.includes('search.brave.com') || url.includes('bing.com') || url.includes('search.yahoo.com')) &&
         query.includes('site:linkedin.com/pub/')
       ) {
         return makeResponse(legacyProfileBody);
@@ -267,6 +278,10 @@ Both are public decision-makers at an Austin dental practice in Austin, Texas.
 
       if (url.includes('html.duckduckgo.com')) {
         return makeResponse(emptyDuckDuckGoBody);
+      }
+
+      if (url.includes('search.yahoo.com')) {
+        return makeResponse('Title: no public profile matches');
       }
 
       return makeResponse('Title: no public profile matches');
@@ -332,6 +347,10 @@ Dentist and practice owner in Austin, Texas.`;
         return makeResponse(emptyDuckDuckGoBody);
       }
 
+      if (url.includes('search.yahoo.com')) {
+        return makeResponse(emptyDuckDuckGoBody);
+      }
+
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -363,7 +382,7 @@ Dentist and practice owner in Austin, Texas.`;
 </body></html>`);
       }
 
-      if (url.includes('search.brave.com') || url.includes('html.duckduckgo.com')) {
+      if (url.includes('search.brave.com') || url.includes('html.duckduckgo.com') || url.includes('search.yahoo.com')) {
         return makeResponse(emptyDuckDuckGoBody);
       }
 
@@ -417,6 +436,10 @@ Too many requests. Please try again later.
           return makeResponse('<html><body>Bots use DuckDuckGo.</body></html>');
         }
 
+        if (url.includes('search.yahoo.com')) {
+          return makeResponse('Yahoo Search is temporarily unavailable.');
+        }
+
         throw new Error(`Unexpected fetch: ${url}`);
       }) as typeof fetch,
     );
@@ -443,6 +466,36 @@ Too many requests. Please try again later.
     ).toBe(true);
   });
 
+  it('parses Yahoo public-search redirects without treating Yahoo as LinkedIn data', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes('search.yahoo.com')) {
+        return makeResponse(`<!doctype html><html><body>
+<div class="algo-sr">
+  <a class="d-ib fz-20 lh-26" href="https://search.yahoo.com/r/RU=https%3A%2F%2Fwww.linkedin.com%2Fin%2Fjordan-carter-hvac%2F/RK=2">Jordan Carter - Owner at Austin Heating and Cooling | LinkedIn</a>
+  <p class="compText aAbs">HVAC contractor owner serving Austin, Texas.</p>
+</div>
+</body></html>`);
+      }
+
+      return makeResponse(emptyDuckDuckGoBody);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'HVAC contractor', city: 'Austin', count: 50 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(1);
+    expect(result.leads[0]?.name).toBe('Jordan Carter');
+    expect(result.leads[0]?.listingUrl).toBe('https://linkedin.com/in/jordan-carter-hvac');
+    expect(result.leads[0]?.matchSignals?.publicProviderNames).toContain('Yahoo Search');
+  });
+
   it('treats browser verification pages as blocked instead of valid empty results', async () => {
     vi.stubGlobal(
       'fetch',
@@ -459,6 +512,10 @@ Too many requests. Please try again later.
 
         if (url.includes('html.duckduckgo.com')) {
           return makeResponse('<html><body>cf-chl=challenge-platform</body></html>');
+        }
+
+        if (url.includes('search.yahoo.com')) {
+          return makeResponse('Yahoo Search is temporarily unavailable.');
         }
 
         throw new Error(`Unexpected fetch: ${url}`);
@@ -520,7 +577,7 @@ Too many requests. Please try again later.
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
 
-        if (url.includes('search.brave.com') || url.includes('bing.com')) {
+        if (url.includes('search.brave.com') || url.includes('bing.com') || url.includes('search.yahoo.com')) {
           return makeResponse(`Title: linkedin founder austin search results
 
 Markdown Content:
@@ -784,7 +841,9 @@ Markdown Content:
         url.searchParams.get('s') ??
         '0';
 
-      return `${url.hostname}:${page}:${url.searchParams.get('q')?.toLowerCase() ?? ''}`;
+      return `${url.hostname}:${page}:${(
+        url.searchParams.get('q') ?? url.searchParams.get('p') ?? ''
+      ).toLowerCase()}`;
     });
 
     expect(new Set(providerQueries).size).toBe(providerQueries.length);
@@ -890,6 +949,10 @@ Markdown Content:
       }
 
       if (url.includes('html.duckduckgo.com')) {
+        return makeResponse(emptyDuckDuckGoBody);
+      }
+
+      if (url.includes('search.yahoo.com')) {
         return makeResponse(emptyDuckDuckGoBody);
       }
 
@@ -1459,11 +1522,17 @@ Researcher studying dental public health in Austin, Texas.
         ? 'brave'
         : url.includes('bing.com')
           ? 'bing'
-          : 'duckduckgo';
+          : url.includes('search.yahoo.com')
+            ? 'yahoo'
+            : 'duckduckgo';
       providerCalls.set(provider, (providerCalls.get(provider) ?? 0) + 1);
 
       if (provider === 'brave' || provider === 'bing') {
         return makeResponse('Verify you are not a bot. Too many requests.');
+      }
+
+      if (provider === 'yahoo') {
+        return makeResponse('Yahoo Search is temporarily unavailable.');
       }
 
       return makeResponse(`<!doctype html><html><body>

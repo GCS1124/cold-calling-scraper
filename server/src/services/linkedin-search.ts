@@ -23,7 +23,7 @@ type CollectedSearchResult = SearchResult & {
 type SearchSource = {
   name: string;
   label: string;
-  kind: 'markdown' | 'bing-html' | 'duckduckgo-html';
+  kind: 'markdown' | 'bing-html' | 'duckduckgo-html' | 'yahoo-html';
   buildUrl: (query: string, page?: number) => string;
   decodeUrl: (value: string) => string;
 };
@@ -148,6 +148,7 @@ const blockedBodyPatterns = [
   /temporarily blocked/i,
   /(?:cf-chl|just a moment|checking your browser|enable javascript)/i,
   /(?:robot check|prove you are human|rate limit(?:ed)?)/i,
+  /temporarily unavailable/i,
   /anomaly\.js/i,
   /bots use duckduckgo/i,
 ];
@@ -176,6 +177,14 @@ const searchSources: SearchSource[] = [
     buildUrl: (query: string, page = 0) =>
       `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&s=${page * publicSearchPageSize}&dc=${page * publicSearchPageSize + 1}`,
     decodeUrl: (value: string) => decodeDuckDuckGoUrl(value),
+  },
+  {
+    name: 'yahoo',
+    label: 'Yahoo Search',
+    kind: 'yahoo-html',
+    buildUrl: (query: string, page = 0) =>
+      `https://search.yahoo.com/search?p=${encodeURIComponent(query)}&b=${page * publicSearchPageSize + 1}&n=${publicSearchPageSize}`,
+    decodeUrl: (value: string) => decodeYahooUrl(value),
   },
 ];
 
@@ -300,6 +309,33 @@ const decodeDuckDuckGoUrl = (value: string) => {
     return destination ? decodeURIComponent(destination) : normalized;
   } catch {
     return value;
+  }
+};
+
+const decodeYahooUrl = (value: string) => {
+  const decode = (candidate: string) => {
+    try {
+      return decodeURIComponent(candidate.replace(/&amp;/g, '&'));
+    } catch {
+      return candidate;
+    }
+  };
+
+  try {
+    const normalized = value.startsWith('//') ? `https:${value}` : value;
+    const url = new URL(normalized, 'https://search.yahoo.com');
+    const destination =
+      url.searchParams.get('RU') ??
+      url.searchParams.get('u') ??
+      url.searchParams.get('url');
+
+    const pathDestination = normalized.match(/(?:^|\/)RU=([^/?#]+)/i)?.[1];
+
+    return destination ? decode(destination) : pathDestination ? decode(pathDestination) : normalized;
+  } catch {
+    // Some Yahoo result pages use a path-based redirect instead of query
+    // parameters. Keep the raw value so profile extraction can inspect it.
+    return decode(value);
   }
 };
 
@@ -1548,6 +1584,39 @@ const parseBingResults = (html: string, decodeUrl: (value: string) => string) =>
   return results.length ? results : parseMarkdownResults(html, decodeUrl);
 };
 
+const parseYahooResults = (html: string, decodeUrl: (value: string) => string) => {
+  const results: SearchResult[] = [];
+  const anchors = [
+    ...html.matchAll(
+      /<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+    ),
+  ];
+
+  anchors.forEach((match, index) => {
+    const rawUrl = decodeHtmlEntities(match[1] ?? '').trim();
+    const url = decodeUrl(rawUrl);
+
+    if (!isLinkedInProfileUrl(url)) {
+      return;
+    }
+
+    const start = (match.index ?? 0) + match[0].length;
+    const end = anchors[index + 1]?.index ?? Math.min(html.length, start + 4_000);
+    const resultTail = html.slice(start, end);
+    const snippetMatch = resultTail.match(
+      /<(?:p|div)\b[^>]*\bclass=["'][^"']*(?:compText|aAbs|snippet|description)[^"']*["'][^>]*>([\s\S]*?)<\/(?:p|div)>/i,
+    );
+
+    results.push({
+      title: stripMarkdown(match[2] ?? ''),
+      url,
+      snippet: stripMarkdown(snippetMatch?.[1] ?? resultTail),
+    });
+  });
+
+  return results;
+};
+
 const searchProvider = async (
   source: SearchSource,
   query: string,
@@ -1573,6 +1642,8 @@ const searchProvider = async (
     const parsed =
       source.kind === 'duckduckgo-html'
         ? parseDuckDuckGoResults(body, source.decodeUrl)
+        : source.kind === 'yahoo-html'
+          ? parseYahooResults(body, source.decodeUrl)
         : source.kind === 'bing-html'
           ? parseBingResults(body, source.decodeUrl)
           : parseMarkdownResults(body, source.decodeUrl);
