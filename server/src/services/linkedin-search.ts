@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 
-import { usStateProfiles } from '../data/us-states';
+import { usStateNames, usStateProfiles, type UsStateCode } from '../data/us-states';
 import type { Lead } from '../types/lead';
 import type { ProviderWarning, SearchRequest } from '../types/search';
 import type { NormalizedUsLocation } from './us-location';
+import { timezoneStateQueries } from './us-timezones';
 import { buildDiscoverySeeds } from './discovery-seeds';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
@@ -1087,6 +1088,9 @@ const publicLocationNoiseWords = new Set([
   'rn',
 ]);
 
+const foreignLocationPattern =
+  /\b(?:india|canada|mexico|brazil|australia|new zealand|singapore|pakistan|bangladesh|philippines|germany|france|spain|italy|china|japan|south africa|united kingdom|uae|united arab emirates)\b/i;
+
 const extractPublicProfileLocation = (candidate: Pick<LinkedInCandidate, 'title' | 'headline' | 'snippet'>) => {
   const searchable = normalizeText(`${candidate.title} ${candidate.headline ?? ''} ${candidate.snippet}`);
   const match =
@@ -1169,6 +1173,26 @@ const buildCategoryEvidenceTerms = (
   return unique([...phrases, ...significantWords]);
 };
 
+const buildLocationEvidenceTerms = (location: NormalizedUsLocation) => {
+  const queryTerms = buildLocationTerms(location);
+
+  if (location.mode === 'timezone' && location.timeZoneCode) {
+    return unique([
+      ...queryTerms,
+      ...(timezoneStateQueries[location.timeZoneCode] ?? []),
+    ]).map(normalizeMatchText);
+  }
+
+  if (location.mode === 'nationwide') {
+    return unique([
+      ...queryTerms,
+      ...usStateProfiles.flatMap((state) => [state.name, state.code]),
+    ]).map(normalizeMatchText);
+  }
+
+  return queryTerms.map(normalizeMatchText);
+};
+
 const matchesEvidence = (searchable: string, terms: string[]) =>
   terms.some((term) => {
     const normalizedTerm = normalizeMatchText(term);
@@ -1200,7 +1224,7 @@ const scoreCandidateRelevance = (
 
   const profile = resolveCategoryProfile(request.companyType);
   const categoryTerms = buildCategoryEvidenceTerms(request, profile);
-  const locationTerms = buildLocationTerms(location).map(normalizeMatchText);
+  const locationTerms = buildLocationEvidenceTerms(location);
   const identitySearchable = normalizeMatchText(
     `${candidate.title} ${candidate.headline ?? ''}`,
   );
@@ -1215,6 +1239,28 @@ const scoreCandidateRelevance = (
   const hasLocationEvidence = matchesEvidence(searchable, locationTerms);
   const hasProfileEvidence =
     hasLinkedInProfileSignals(candidate.title) || hasLinkedInProfileSignals(candidate.snippet);
+
+  if (
+    candidate.location &&
+    location.mode === 'timezone' &&
+    location.timeZoneCode
+  ) {
+    const stateName = usStateNames[candidate.location.stateCode as UsStateCode];
+    const allowedStates = (timezoneStateQueries[location.timeZoneCode] ?? []).map(
+      normalizeMatchText,
+    );
+
+    if (!stateName || !allowedStates.includes(normalizeMatchText(stateName))) {
+      return 0;
+    }
+  }
+
+  if (
+    (location.mode === 'timezone' || location.mode === 'nationwide') &&
+    foreignLocationPattern.test(searchable)
+  ) {
+    return 0;
+  }
 
   // A specific vertical must appear in the public result itself. This prevents
   // an owner from an unrelated industry slipping through a broad search page.
@@ -1272,6 +1318,12 @@ const scoreCandidateRelevance = (
   score += hasProfileEvidence ? 5 : 0;
   score += candidate.headline ? 3 : 0;
   score += candidate.snippet ? 2 : 0;
+
+  // Keep profiles without an explicit public location available for recall,
+  // but prefer results that prove their geographic fit in the public excerpt.
+  if (location.mode === 'timezone' && !hasLocationEvidence) {
+    score -= 10;
+  }
 
   return Math.min(score, 100);
 };
@@ -1826,7 +1878,9 @@ const toLeadConfidence = (candidate: LinkedInCandidate) => {
   if (hasLinkedInProfileSignals(candidate.title)) score += 5;
   if (hasLinkedInProfileSignals(candidate.snippet)) score += 3;
 
-  return Math.min(score, 98);
+  const cappedScore = Math.min(score, 98);
+
+  return candidate.location ? cappedScore : Math.max(0, cappedScore - 10);
 };
 
 const limitPublicEvidence = (value: string | undefined, maxLength: number) => {

@@ -1204,7 +1204,12 @@ Markdown Content:
   });
 
   it('uses concrete metros for timezone searches instead of a timezone label', async () => {
-    const { fetchMock, queries } = makeQueryCaptureFetch(dentalProfileBody);
+    const { fetchMock, queries } = makeQueryCaptureFetch(
+      dentalProfileBody
+        .replaceAll('Austin, Texas', 'Miami, Florida')
+        .replaceAll('Austin', 'Miami')
+        .replaceAll('austin', 'miami'),
+    );
 
     vi.stubGlobal('fetch', fetchMock as typeof fetch);
 
@@ -1296,6 +1301,68 @@ Markdown Content:
     expect(result.leads[0]?.city).toBe('Miami');
     expect(result.leads[0]?.stateCode).toBe('FL');
     expect(result.leads[0]?.address).toBe('Miami, FL');
+  });
+
+  it('rejects public profiles with an explicit state outside the selected timezone', async () => {
+    const { fetchMock } = makeQueryCaptureFetch(
+      [
+        'Title: LinkedIn search results',
+        '',
+        'Markdown Content:',
+        '1. [Alicia Stone - Dentist in Los Angeles, CA | LinkedIn](https://www.linkedin.com/in/alicia-stone-los-angeles/)',
+        'Dentist and practice owner in Los Angeles, CA.',
+      ].join('\n'),
+    );
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Dentist', city: 'Eastern Time', count: 50 },
+      location: {
+        ...sampleLocation,
+        mode: 'timezone',
+        label: 'Eastern Time',
+        city: '',
+        stateCode: '',
+        timeZoneCode: 'ET',
+      },
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads).toHaveLength(0);
+    expect(result.warnings[0]?.message).toContain('No public LinkedIn profiles');
+  });
+
+  it('ranks timezone profiles with public location evidence above unknown-location profiles', async () => {
+    const { fetchMock } = makeQueryCaptureFetch(
+      [
+        'Title: LinkedIn search results',
+        '',
+        'Markdown Content:',
+        '1. [Jordan Carter - Dentist in New York, NY | LinkedIn](https://www.linkedin.com/in/jordan-carter-new-york/)',
+        'Dentist and practice owner in New York, NY.',
+        '2. [Alicia Stone - Dentist | LinkedIn](https://www.linkedin.com/in/alicia-stone/)',
+        'Dentist and practice owner.',
+      ].join('\n'),
+    );
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Dentist', city: 'Eastern Time', count: 50 },
+      location: {
+        ...sampleLocation,
+        mode: 'timezone',
+        label: 'Eastern Time',
+        city: '',
+        stateCode: '',
+        timeZoneCode: 'ET',
+      },
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.leads.map((lead) => lead.name)).toEqual(['Jordan Carter', 'Alicia Stone']);
+    expect(result.leads[0]?.confidence).toBeGreaterThan(result.leads[1]?.confidence ?? 0);
   });
 
   it('parses bare LinkedIn profile references and unpunctuated city-state evidence', async () => {
