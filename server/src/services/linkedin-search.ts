@@ -130,14 +130,14 @@ const sourceLabel = 'LinkedIn';
 const leadSourceLabel = 'LinkedIn, Public Profile';
 const providerId = 'linkedin-search';
 
-// Collect a small ranked headroom above the requested count. Public search
+// Collect bounded ranked headroom above the requested count. Public search
 // engines often repeat the same employer or surface a weak profile first; the
 // extra candidates let the final ranking prefer stronger, better corroborated
 // public matches without ever returning more than the requested count.
 const getCandidateBudget = (requestedCount: number) =>
   Math.min(
     600,
-    requestedCount + Math.max(12, Math.ceil(requestedCount * 0.2)),
+    requestedCount + Math.max(24, Math.ceil(requestedCount * 0.35)),
   );
 
 const queryCache = new Map<
@@ -825,6 +825,22 @@ const quoteQueryTerm = (value: string) => {
   return normalized.includes(' ') ? `"${normalized}"` : normalized;
 };
 
+const publicSearchNoiseFilters = [
+  { term: 'jobs', filter: '-jobs' },
+  { term: 'careers', filter: '-careers' },
+  { term: 'intern', filter: '-intern' },
+  { term: 'student', filter: '-student' },
+];
+
+const addPublicSearchNoiseFilters = (query: string) => {
+  const normalizedQuery = query.toLowerCase();
+  const filters = publicSearchNoiseFilters
+    .filter(({ term }) => !new RegExp(`\\b${term}\\b`, 'i').test(normalizedQuery))
+    .map(({ filter }) => filter);
+
+  return normalizeText([query, ...filters].filter(Boolean).join(' '));
+};
+
 const buildBooleanQuery = (terms: string[], limit: number) => {
   const quotedTerms = unique(terms)
     .slice(0, limit)
@@ -870,23 +886,27 @@ const buildLinkedInQuery = (
   role?: string,
   profilePath: LinkedInProfilePath = 'in',
 ) =>
-  normalizeText(
-    [
-      `site:linkedin.com/${profilePath}/`,
-      role ? quoteQueryTerm(role) : '',
-      quoteQueryTerm(company),
-      quoteQueryTerm(location),
-    ]
-      .filter(Boolean)
-      .join(' '),
+  addPublicSearchNoiseFilters(
+    normalizeText(
+      [
+        `site:linkedin.com/${profilePath}/`,
+        role ? quoteQueryTerm(role) : '',
+        quoteQueryTerm(company),
+        quoteQueryTerm(location),
+      ]
+        .filter(Boolean)
+        .join(' '),
+    ),
   );
 
 const buildLinkedInQueryFromPhrase = (
   phrase: string,
   profilePath: LinkedInProfilePath = 'in',
 ) =>
-  normalizeText(
-    [`site:linkedin.com/${profilePath}/`, phrase].filter(Boolean).join(' '),
+  addPublicSearchNoiseFilters(
+    normalizeText(
+      [`site:linkedin.com/${profilePath}/`, phrase].filter(Boolean).join(' '),
+    ),
   );
 
 const buildLinkedInProfilePathQueries = (phrase: string) =>

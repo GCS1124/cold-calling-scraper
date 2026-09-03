@@ -1,7 +1,10 @@
 import { Check, Crosshair, Globe2, Radar, ShieldCheck } from 'lucide-react';
 
 import type { Lead } from '../../types/lead';
-import { isHighFitLinkedInLead } from '../../utils/linkedin-quality';
+import {
+  getLinkedInQualityTier,
+  isHighFitLinkedInLead,
+} from '../../utils/linkedin-quality';
 
 type LinkedInQualityPanelProps = {
   leads: Lead[];
@@ -79,6 +82,13 @@ export function LinkedInQualityPanel({
     ? Math.round(leads.reduce((sum, lead) => sum + lead.confidence, 0) / total)
     : 0;
   const highFit = leads.filter(isHighFitLinkedInLead).length;
+  const tierCounts = leads.reduce(
+    (counts, lead) => {
+      counts[getLinkedInQualityTier(lead)] += 1;
+      return counts;
+    },
+    { A: 0, B: 0, C: 0 },
+  );
   const corroborated = leads.filter((lead) => (lead.matchSignals?.publicSources ?? 0) > 1).length;
   const roleSignals = leads.filter((lead) => lead.matchSignals?.roleMatched).length;
   const evidenceBacked = leads.filter(
@@ -170,6 +180,22 @@ export function LinkedInQualityPanel({
           tone="amber"
           value={contactDepth}
         />
+      </div>
+
+      <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-950 p-4 text-white sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">
+            Research tiers
+          </p>
+          <p className="mt-1 text-xs leading-5 text-slate-300">
+            Prioritize profiles with the strongest public evidence first.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-bold">
+          <span className="rounded-full bg-white px-3 py-1.5 text-slate-950">A · {tierCounts.A}</span>
+          <span className="rounded-full bg-blue-500/20 px-3 py-1.5 text-blue-100">B · {tierCounts.B}</span>
+          <span className="rounded-full bg-white/10 px-3 py-1.5 text-slate-300">C · {tierCounts.C}</span>
+        </div>
       </div>
 
       <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">

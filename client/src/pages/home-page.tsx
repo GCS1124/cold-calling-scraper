@@ -13,11 +13,18 @@ import {
   Zap,
   BriefcaseBusiness,
 } from 'lucide-react';
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 
-import { ExportModal } from '../components/export/export-modal';
 import { SessionAction } from '../components/auth/session-action';
 import { FiltersPanel } from '../components/results/filters-panel';
 import { LinkedInQualityPanel } from '../components/results/linkedin-quality-panel';
@@ -45,6 +52,12 @@ import type { Lead, SearchDraft, SearchRequest, SearchResponse } from '../types/
 type HomePageProps = {
   searchApi: SearchApi;
 };
+
+const ExportModal = lazy(async () => {
+  const module = await import('../components/export/export-modal');
+
+  return { default: module.ExportModal };
+});
 
 const pollingStatuses = ['queued', 'discovering', 'enriching'];
 
@@ -164,7 +177,10 @@ export function HomePage({ searchApi }: HomePageProps) {
     result?.leads,
   ]);
 
-  const deferredLeads = useDeferredValue(visibleLeads);
+  const deferredVisibleLeads = useDeferredValue(visibleLeads);
+  // Small result sets should never show a stale empty table while the header
+  // already reports the updated count. Keep deferral for larger tables only.
+  const tableLeads = visibleLeads.length <= 100 ? visibleLeads : deferredVisibleLeads;
 
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -181,15 +197,15 @@ export function HomePage({ searchApi }: HomePageProps) {
     const allLeads = result?.leads ?? [];
 
     return {
-      total: deferredLeads.length,
-      withEmail: deferredLeads.filter((lead) => lead.hasEmail).length,
-      withPhone: deferredLeads.filter((lead) => lead.hasPhone).length,
-      withWebsite: deferredLeads.filter((lead) => lead.hasWebsite).length,
-      publicContacts: deferredLeads.filter((lead) => lead.hasEmail || lead.hasPhone).length,
+      total: visibleLeads.length,
+      withEmail: visibleLeads.filter((lead) => lead.hasEmail).length,
+      withPhone: visibleLeads.filter((lead) => lead.hasPhone).length,
+      withWebsite: visibleLeads.filter((lead) => lead.hasWebsite).length,
+      publicContacts: visibleLeads.filter((lead) => lead.hasEmail || lead.hasPhone).length,
       missingEmail: allLeads.filter((lead) => !lead.hasEmail).length,
       missingPhone: allLeads.filter((lead) => !lead.hasPhone).length,
     };
-  }, [deferredLeads, result?.leads]);
+  }, [result?.leads, visibleLeads]);
 
   const progressBasis = result
     ? Math.max(
@@ -449,7 +465,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   };
 
   const toggleSelectAll = () => {
-    const visibleIds = deferredLeads.map((lead) => lead.id);
+    const visibleIds = visibleLeads.map((lead) => lead.id);
 
     if (!visibleIds.length) {
       setSelectedIds([]);
@@ -1009,7 +1025,7 @@ export function HomePage({ searchApi }: HomePageProps) {
 
                 <ResultsTable
                   emptyStateMessage={emptyStateMessage}
-                  leads={deferredLeads}
+                  leads={tableLeads}
                   onCopyRow={(lead) => void handleCopyRow(lead)}
                   onSelectAll={toggleSelectAll}
                   onToggleSelect={toggleSelected}
@@ -1060,11 +1076,23 @@ export function HomePage({ searchApi }: HomePageProps) {
         </div>
       ) : null}
 
-      <ExportModal
-        leads={exportableLeads}
-        onClose={() => setShowExport(false)}
-        open={showExport}
-      />
+      {showExport ? (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4 backdrop-blur-sm">
+              <div className="rounded-2xl bg-white px-5 py-4 text-sm font-semibold text-slate-700 shadow-xl">
+                Preparing export...
+              </div>
+            </div>
+          }
+        >
+          <ExportModal
+            leads={exportableLeads}
+            onClose={() => setShowExport(false)}
+            open={showExport}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 }

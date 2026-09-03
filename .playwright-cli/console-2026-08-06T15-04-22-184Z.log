@@ -1,2 +1,0 @@
-[ 6844002ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:5174/?token=-TnDTjWcXPaH' failed: The operation couldn’t be completed. Socket is not connected @ :0
-[ 6844037ms] [LOG] [vite] server connection lost. Polling for restart... @ http://127.0.0.1:5174/@vite/client:968

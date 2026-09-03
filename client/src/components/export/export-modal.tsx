@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 
 import {
   defaultExportColumns,
@@ -20,6 +21,7 @@ export function ExportModal({ leads, open, onClose }: ExportModalProps) {
   const [fileName, setFileName] = useState('lead-finder-export');
   const [format, setFormat] = useState<'csv' | 'xlsx'>('xlsx');
   const [columns, setColumns] = useState<ExportColumn[]>([...defaultExportColumns]);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   if (!open) {
     return null;
@@ -91,17 +93,21 @@ export function ExportModal({ leads, open, onClose }: ExportModalProps) {
 
         <button
           className="mt-6 inline-flex h-12 w-full items-center justify-center rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white transition hover:bg-emerald-700"
+          disabled={isDownloading || !columns.length}
           onClick={() => {
-            downloadLeads(leads, {
+            setIsDownloading(true);
+            void downloadLeads(leads, {
               fileName: fileName || 'lead-finder-export',
               format,
               columns,
-            });
-            onClose();
+            })
+              .then(onClose)
+              .catch(() => toast.error('Export failed'))
+              .finally(() => setIsDownloading(false));
           }}
           type="button"
         >
-          Download file
+          {isDownloading ? 'Preparing file...' : 'Download file'}
         </button>
       </div>
     </div>

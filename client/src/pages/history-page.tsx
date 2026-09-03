@@ -372,13 +372,13 @@ export function HistoryPage() {
       return;
     }
 
-    downloadLeads(item.leads, {
+    void downloadLeads(item.leads, {
       fileName: buildFileName(item.companyType, item.locationLabel, item.createdAt),
       format: 'xlsx',
       columns: [...defaultExportColumns],
-    });
-
-    toast.success('Export started');
+    })
+      .then(() => toast.success('Export started'))
+      .catch(() => toast.error('Export failed'));
   };
 
   const handleCopySummary = async (item: SearchHistoryItem) => {

@@ -1,5 +1,3 @@
-import * as XLSX from 'xlsx';
-
 import type { Lead } from '../types/lead';
 
 export const exportColumns = [
@@ -47,10 +45,11 @@ export const buildExportRows = (leads: Lead[], columns: readonly ExportColumn[])
     }, {}),
   );
 
-export const downloadLeads = (
+export const downloadLeads = async (
   leads: Lead[],
   options: { fileName: string; format: 'csv' | 'xlsx'; columns: ExportColumn[] },
 ) => {
+  const XLSX = await import('xlsx');
   const rows = buildExportRows(leads, options.columns);
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.json_to_sheet(rows);

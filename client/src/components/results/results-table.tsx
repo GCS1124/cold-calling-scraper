@@ -4,6 +4,7 @@ import { Fragment, useState } from 'react';
 
 import type { Lead } from '../../types/lead';
 import {
+  getLinkedInQualityTier,
   getLinkedInReadinessLabel,
   isHighFitLinkedInLead,
 } from '../../utils/linkedin-quality';
@@ -130,6 +131,7 @@ export function ResultsTable({
               const isStrongMatch = isLinkedInLead
                 ? isHighFitLinkedInLead(lead)
                 : lead.confidence >= 85;
+              const qualityTier = isLinkedInLead ? getLinkedInQualityTier(lead) : undefined;
               const matchLabel =
                 isStrongMatch
                   ? 'Strong match'
@@ -186,6 +188,20 @@ export function ResultsTable({
                             <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
                               {matchLabel} · {lead.confidence}%
                             </span>
+                            {qualityTier ? (
+                              <span
+                                className={`rounded-full px-2 py-1 font-black ${
+                                  qualityTier === 'A'
+                                    ? 'bg-slate-950 text-white'
+                                    : qualityTier === 'B'
+                                      ? 'bg-blue-50 text-blue-700'
+                                      : 'bg-slate-100 text-slate-600'
+                                }`}
+                                title="Research tier based on public category, role, location, and corroboration signals."
+                              >
+                                Tier {qualityTier}
+                              </span>
+                            ) : null}
                             {lead.matchSignals?.publicSources && lead.matchSignals.publicSources > 1 ? (
                               <span
                                 className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-700"
@@ -416,6 +432,11 @@ export function ResultsTable({
                               <span className="rounded-full bg-white px-3 py-2 text-slate-700">
                                 Confidence {lead.confidence}%
                               </span>
+                              {isLinkedInLead ? (
+                                <span className="rounded-full bg-slate-950 px-3 py-2 text-white">
+                                  Research tier {getLinkedInQualityTier(lead)}
+                                </span>
+                              ) : null}
                               {isLinkedInLead && lead.matchSignals ? (
                                 <>
                                   {lead.matchSignals.categoryMatched ? (

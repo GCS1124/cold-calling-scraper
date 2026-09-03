@@ -207,6 +207,25 @@ Owner at Austin Dental Spa.
           /hvac|heating|cooling/i.test(query),
       ),
     ).toBe(true);
+    expect([...queries].some((query) => /-jobs|-careers|-student/i.test(query))).toBe(true);
+  });
+
+  it('keeps category terms intact when they overlap with noise filters', async () => {
+    const { fetchMock, queries } = makeQueryCaptureFetch(emptyDuckDuckGoBody);
+
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    await discoverUsLeadsFromLinkedinSearch({
+      request: { companyType: 'Student housing', city: 'Austin', count: 10 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(
+      [...queries].some(
+        (query) => /student housing/i.test(query) && !query.includes('-student'),
+      ),
+    ).toBe(true);
   });
 
   it('fans out the highest-signal public query paths for corroboration', async () => {

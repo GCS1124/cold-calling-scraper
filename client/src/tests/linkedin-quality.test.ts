@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Lead } from '../types/lead';
 import {
   getLinkedInLeadReadiness,
+  getLinkedInQualityTier,
   getLinkedInRankingScore,
   isContactReadyLinkedInLead,
   isEvidenceBackedLinkedInLead,
@@ -99,5 +100,33 @@ describe('LinkedIn result quality helpers', () => {
         publicEvidence: { profileSnippet: 'Public result excerpt.' },
       }),
     ).toBe(true);
+  });
+
+  it('assigns research tiers from public fit and corroboration signals', () => {
+    expect(
+      getLinkedInQualityTier({
+        ...baseLead,
+        publicEvidence: { profileSnippet: 'Public result excerpt.' },
+      }),
+    ).toBe('B');
+    expect(
+      getLinkedInQualityTier({
+        ...baseLead,
+        confidence: 94,
+        publicEvidence: { profileSnippet: 'Public result excerpt.' },
+        matchSignals: {
+          ...baseLead.matchSignals!,
+          queryMatches: 3,
+          publicSources: 2,
+        },
+      }),
+    ).toBe('A');
+    expect(
+      getLinkedInQualityTier({
+        ...baseLead,
+        confidence: 74,
+        publicEvidence: undefined,
+      }),
+    ).toBe('C');
   });
 });
