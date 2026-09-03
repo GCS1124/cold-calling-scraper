@@ -10,6 +10,7 @@ import {
 } from './linkedin-search';
 import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
 import { enforcePhoneRequirement } from './phone-requirement';
+import { noUsableResultsWarning } from './search-finalization';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 
 // Keep the no-database path within the Vercel function budget. It returns a
@@ -58,6 +59,10 @@ const buildResponse = ({
     addWarnings(responseWarnings, [phoneRequirement.warning]);
   }
   const visibleLeads = phoneRequirement.leads.slice(0, request.count);
+  const status = visibleLeads.length ? 'complete' : 'failed';
+  if (!visibleLeads.length) {
+    addWarnings(responseWarnings, [noUsableResultsWarning()]);
+  }
 
   return {
     searchId,
@@ -67,7 +72,7 @@ const buildResponse = ({
       locationLabel,
       researchDepth: request.researchDepth ?? 'verified',
       researchBrief: request.researchBrief,
-      status: 'complete',
+      status,
       progress: {
         discovered,
         enriched,
@@ -82,7 +87,7 @@ const buildResponse = ({
         requestedCount: request.count,
         foundCount: visibleLeads.length,
         duplicatesRemoved: Math.max(0, leads.length - visibleLeads.length),
-        currentSource: 'Complete',
+        currentSource: status === 'complete' ? 'Complete' : 'Failed',
         batchesCompleted: 1,
         estimatedRemaining: Math.max(0, request.count - visibleLeads.length),
       },

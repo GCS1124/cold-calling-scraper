@@ -144,6 +144,9 @@ create table if not exists public.research_contact_points (
 create index if not exists research_contact_points_entity_idx
   on public.research_contact_points (entity_key, kind, status);
 
+create unique index if not exists research_contact_points_unique_idx
+  on public.research_contact_points (search_id, entity_key, kind, normalized_value);
+
 create table if not exists public.research_verification_events (
   id uuid primary key default gen_random_uuid(),
   search_id text,

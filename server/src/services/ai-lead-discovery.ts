@@ -15,13 +15,16 @@ import {
   type LinkedInDiscoveryResult,
 } from './linkedin-search';
 import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
+import { discoverUsLeadsFromOsm } from './osm-discovery';
 import { normalizeUsLocation } from './us-location';
+import { resolveCategoryProfile } from './us-category-mapping';
 import { freeAiModePolicy, salesProviderAudits } from '../providers/sales-intelligence';
 import {
   expandQueryWithGemini,
   isGeminiQueryAssistanceEnabled,
 } from '../providers/gemini';
 import { enforcePhoneRequirement } from './phone-requirement';
+import { noUsableResultsWarning } from './search-finalization';
 
 export type AiDiscoveryResult = {
   leads: Lead[];
@@ -34,6 +37,7 @@ export type AiDiscoveryResult = {
 
 type AiDiscoveryDeps = {
   discoverLinkedin?: typeof discoverUsLeadsFromLinkedinSearch;
+  discoverPublicListings?: typeof discoverUsLeadsFromOsm;
   enrichPublicContacts?: typeof enrichLinkedinLeadsWithPublicContacts;
   expandQuery?: typeof expandQueryWithGemini;
 };
@@ -96,6 +100,13 @@ const buildCoverage = (): ProviderCoverage[] => [
     message: 'A bounded crawl checks public business pages; only their published phone numbers and emails are used.',
   },
   {
+    providerId: 'public-business-listings',
+    providerName: 'Public Business Listings',
+    status: 'configured' as const,
+    leadCount: 0,
+    message: 'Free OpenStreetMap/Overpass data only; public listing records are merged without paid databases.',
+  },
+  {
     providerId: 'gemini-query-assistance',
     providerName: 'Gemini query assistance',
     status: isGeminiQueryAssistanceEnabled() ? 'configured' : 'not_configured',
@@ -119,6 +130,7 @@ const updateCoverage = (
 
 export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
   const discoverLinkedin = deps.discoverLinkedin ?? discoverUsLeadsFromLinkedinSearch;
+  const discoverPublicListings = deps.discoverPublicListings;
   const enrichPublicContacts =
     deps.enrichPublicContacts ?? enrichLinkedinLeadsWithPublicContacts;
   const expandQuery = deps.expandQuery ?? expandQueryWithGemini;
@@ -223,7 +235,46 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       });
     }
 
-    let leads = deduplicateLeads(discoveryResult.leads.map(enrichLead));
+    let publicListingLeads: Lead[] = [];
+    if (discoverPublicListings && Date.now() < deadlineMs) {
+      try {
+        publicListingLeads = await withTimeout(
+          discoverPublicListings({
+            request: {
+              companyType: request.companyType,
+              count: Math.min(Math.max(request.count * 2, 50), 180),
+            },
+            location,
+            profile: resolveCategoryProfile(request.companyType),
+            deadlineMs: Math.min(deadlineMs, Date.now() + discoveryWindowMs),
+          }),
+          deadlineMs,
+          'Public business-listing discovery timed out; LinkedIn results were preserved.',
+        );
+        updateCoverage(coverage, 'public-business-listings', {
+          status: 'returned',
+          leadCount: publicListingLeads.length,
+          message: 'Free public business listings were merged with public LinkedIn results.',
+        });
+      } catch (error) {
+        addWarning(warnings, {
+          providerId: 'public-business-listings',
+          providerName: 'Public Business Listings',
+          message:
+            error instanceof Error
+              ? `${error.message} LinkedIn results were preserved.`
+              : 'Public business-listing discovery failed. LinkedIn results were preserved.',
+        });
+        updateCoverage(coverage, 'public-business-listings', {
+          status: 'failed',
+          message: error instanceof Error ? error.message : 'Public business-listing discovery failed.',
+        });
+      }
+    }
+
+    let leads = deduplicateLeads(
+      [...discoveryResult.leads, ...publicListingLeads].map(enrichLead),
+    );
     let enrichedCount = 0;
 
     if (leads.length && Date.now() < deadlineMs) {
@@ -284,7 +335,11 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
   };
 };
 
-export const discoverUsLeadsFromAiMode = createAiLeadDiscovery();
+export const discoverUsLeadsFromAiMode = createAiLeadDiscovery(
+  process.env.NODE_ENV === 'test'
+    ? {}
+    : { discoverPublicListings: discoverUsLeadsFromOsm },
+);
 
 const buildResponse = ({
   searchId,
@@ -304,6 +359,10 @@ const buildResponse = ({
     addWarning(responseWarnings, phoneRequirement.warning);
   }
   const visibleLeads = phoneRequirement.leads.slice(0, request.count);
+  const status = visibleLeads.length ? 'complete' : 'failed';
+  if (!visibleLeads.length) {
+    addWarning(responseWarnings, noUsableResultsWarning());
+  }
 
   return {
     searchId,
@@ -313,7 +372,7 @@ const buildResponse = ({
       locationLabel,
       researchDepth: request.researchDepth ?? 'verified',
       researchBrief: request.researchBrief,
-      status: 'complete',
+      status,
       progress: {
         discovered: visibleLeads.length,
         enriched: result.enrichedCount,
@@ -328,7 +387,7 @@ const buildResponse = ({
         requestedCount: request.count,
         foundCount: visibleLeads.length,
         duplicatesRemoved: Math.max(0, result.leads.length - visibleLeads.length),
-        currentSource: 'Complete',
+        currentSource: status === 'complete' ? 'Complete' : 'Failed',
         batchesCompleted: 1,
         estimatedRemaining: Math.max(0, request.count - visibleLeads.length),
       },

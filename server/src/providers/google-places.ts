@@ -80,6 +80,11 @@ export const isGooglePlacesConfigured = () =>
 const toLeadId = (placeId?: string, fallbackIndex?: number) =>
   placeId ? `google-${placeId}` : `google-${fallbackIndex ?? 0}`;
 
+const toGoogleMapsListingUrl = (candidate: PlaceCandidate) =>
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    candidate.name?.trim() || candidate.placeId,
+  )}&query_place_id=${encodeURIComponent(candidate.placeId)}`;
+
 const normalizeWebsite = (value?: string) => {
   const trimmed = value?.trim() ?? '';
   if (!trimmed) {
@@ -594,6 +599,7 @@ const hydrateLegacyCandidate = async (
     email: '',
     website: normalizeWebsite(candidate.website),
     address: candidate.formattedAddress?.trim() ?? '',
+    listingUrl: toGoogleMapsListingUrl(candidate),
     category: request.companyType,
     city: request.city,
     source: 'Google Places',
@@ -647,6 +653,7 @@ const hydrateNewCandidate = async (
     email: '',
     website: normalizeWebsite(candidate.website),
     address: candidate.formattedAddress?.trim() ?? '',
+    listingUrl: toGoogleMapsListingUrl(candidate),
     category: request.companyType,
     city: request.city,
     source: 'Google Places',

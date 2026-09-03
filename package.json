@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "npm run dev --workspace client",
     "build": "npm run build --workspace client && npm run build --workspace server",
-    "test": "npm run test --workspace server && npm run test --workspace client"
+    "test": "npm run test --workspace server && npm run test --workspace client",
+    "test:e2e": "node scripts/e2e-search-flow.mjs"
   },
   "license": "ISC",
   "type": "module",

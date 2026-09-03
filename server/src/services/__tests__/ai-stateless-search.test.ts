@@ -4,6 +4,7 @@ import type { Lead } from '../../types/lead';
 
 const mocks = vi.hoisted(() => ({
   discover: vi.fn(),
+  listings: vi.fn(),
   enrich: vi.fn(),
   normalize: vi.fn(),
 }));
@@ -21,12 +22,21 @@ vi.mock('../us-location', () => ({
 }));
 
 import { runStatelessAiSearch } from '../ai-lead-discovery';
+import { createAiLeadDiscovery } from '../ai-lead-discovery';
 
 const location = {
   mode: 'local' as const,
   label: 'Austin, TX',
   city: 'Austin',
   stateCode: 'TX',
+  lat: 30.2672,
+  lon: -97.7431,
+  boundingBox: {
+    south: 30,
+    west: -98,
+    north: 31,
+    east: -97,
+  },
   warnings: [],
 };
 
@@ -113,6 +123,70 @@ describe('runStatelessAiSearch', () => {
       expect.objectContaining({
         providerId: 'phone-required',
         message: expect.stringContaining('Excluded 1 lead'),
+      }),
+    );
+  });
+
+  it('fails instead of claiming completion when no public-phone lead survives validation', async () => {
+    mocks.discover.mockResolvedValue({ leads: [], warnings: [], blocked: false });
+
+    const response = await runStatelessAiSearch({
+      companyType: 'Dentist',
+      city: 'Austin, TX',
+      count: 50,
+      phoneRequired: true,
+    });
+
+    expect(response.meta.status).toBe('failed');
+    expect(response.meta.progress.currentSource).toBe('Failed');
+    expect(response.meta.providerWarnings).toContainEqual(
+      expect.objectContaining({
+        providerId: 'no-usable-results',
+        severity: 'error',
+      }),
+    );
+  });
+
+  it('merges free public business listings with public LinkedIn discovery', async () => {
+    mocks.listings.mockResolvedValue([
+      makeLead({
+        id: 'osm-public-listing',
+        name: 'Austin Public Listing',
+        source: 'OpenStreetMap',
+        listingUrl: 'https://www.openstreetmap.org/node/123',
+        mobile: '+1 512 555 0198',
+        hasPhone: true,
+        verifiedPhone: true,
+      }),
+    ]);
+    mocks.enrich.mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
+      leads,
+      warnings: [],
+      enrichedCount: leads.length,
+    }));
+
+    const discovery = createAiLeadDiscovery({
+      discoverLinkedin: mocks.discover,
+      discoverPublicListings: mocks.listings,
+      enrichPublicContacts: mocks.enrich,
+    });
+    const result = await discovery({
+      request: {
+        companyType: 'Dentist',
+        city: 'Austin, TX',
+        count: 50,
+        phoneRequired: true,
+      },
+      location,
+      deadlineMs: Date.now() + 10_000,
+    });
+
+    expect(result.leads.map((lead) => lead.id)).toContain('osm-public-listing');
+    expect(result.coverage).toContainEqual(
+      expect.objectContaining({
+        providerId: 'public-business-listings',
+        status: 'returned',
+        leadCount: 1,
       }),
     );
   });

@@ -99,6 +99,20 @@ export const buildLeadEvidence = (lead: Lead): LeadEvidence[] => {
     });
   }
 
+  if (
+    lead.verifiedPhone &&
+    lead.listingUrl?.trim() &&
+    !lead.contactSourceUrl?.trim()
+  ) {
+    evidence.push({
+      sourceUrl: lead.listingUrl,
+      sourceName: lead.source || 'Public listing',
+      claim: 'The public listing publishes the validated phone number.',
+      status: 'confirmed',
+      observedAt,
+    });
+  }
+
   if (lead.website?.trim()) {
     for (const signal of lead.opportunitySignals ?? []) {
       evidence.push({

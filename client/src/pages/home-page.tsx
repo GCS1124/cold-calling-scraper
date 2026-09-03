@@ -239,13 +239,20 @@ export function HomePage({ searchApi }: HomePageProps) {
   const linkedinDiscoveryBlocked = Boolean(
     result &&
       activeSourceMode === 'linkedin' &&
-      result.meta.status === 'complete' &&
+      (result.meta.status === 'complete' || result.meta.status === 'failed') &&
       result.leads.length === 0 &&
       result.meta.providerWarnings.some(
         (warning) =>
           warning.providerId === 'linkedin-search' &&
           /blocked|rate-limited/i.test(warning.message),
       ),
+  );
+  const providerFailureNotice = Boolean(
+    result?.meta.providerWarnings.some(
+      (warning) =>
+        warning.severity === 'error' ||
+        /failed|blocked|rate-limited|timed out|timeout/i.test(warning.message),
+    ),
   );
   const resultsExhausted =
     result !== null &&
@@ -254,7 +261,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   const canRetryEmptyLinkedInSearch = Boolean(
     result &&
       activeSourceMode === 'linkedin' &&
-      result.meta.status === 'complete' &&
+      (result.meta.status === 'complete' || result.meta.status === 'failed') &&
       result.leads.length === 0,
   );
 
@@ -277,10 +284,12 @@ export function HomePage({ searchApi }: HomePageProps) {
         ? 'Collecting contact details'
         : result.meta.status === 'cancelled'
           ? 'Search cancelled'
-        : result.meta.status === 'failed'
-            ? 'Search failed'
-            : linkedinDiscoveryBlocked
+        : linkedinDiscoveryBlocked
               ? 'LinkedIn discovery blocked'
+              : result.meta.status === 'failed'
+                ? 'Search failed'
+                : providerFailureNotice
+                  ? 'Search finished with provider limits'
               : activeSourceMode === 'linkedin'
                 ? 'Public LinkedIn discovery complete'
                 : resultsExhausted
@@ -301,10 +310,12 @@ export function HomePage({ searchApi }: HomePageProps) {
               ? 'Adding emails, phone numbers, websites, and source details.'
               : result.meta.status === 'cancelled'
                 ? 'The partial research snapshot is preserved. Resume when you want to continue public-source discovery.'
-              : result.meta.status === 'failed'
-                  ? 'The search could not be completed. Adjust the query and try again.'
-                    : linkedinDiscoveryBlocked
+              : linkedinDiscoveryBlocked
                       ? 'Free public-search providers temporarily blocked this request. No unverified or fabricated leads were added.'
+                      : result.meta.status === 'failed'
+                        ? 'The search could not be completed. Adjust the query and try again.'
+                        : providerFailureNotice
+                          ? 'Some public providers were unavailable. Only verified results were retained; review the provider notices before exporting.'
                         : phoneRequirementWarning
                           ? 'Only leads with a validated publicly listed phone/mobile number were retained. Private or Premium contact data is not accessed.'
                         : activeSourceMode === 'linkedin'
@@ -318,15 +329,17 @@ export function HomePage({ searchApi }: HomePageProps) {
 
   const emptyStateMessage =
     result && result.leads.length === 0
-      ? result.meta.status === 'complete'
-        ? phoneRequirementWarning
-          ? 'No leads with a validated publicly listed phone/mobile number were found. Broaden the category or location and try again.'
-          : linkedinDiscoveryBlocked
-          ? 'LinkedIn discovery was blocked by the free public-search providers. Try again later or switch location.'
-          : activeSourceMode === 'ai'
-            ? 'Free AI mode found no verified public leads. Try a broader category or location; paid sources are not used.'
-          : 'No leads were found for this search. Try a broader company type or different location.'
-        : 'Still finding leads.'
+      ? linkedinDiscoveryBlocked
+        ? 'LinkedIn discovery was blocked by the free public-search providers. Try again later or switch location.'
+        : result.meta.status === 'failed'
+          ? 'Search could not be completed because no usable leads passed the public-contact validation gate.'
+          : result.meta.status === 'complete'
+            ? phoneRequirementWarning
+              ? 'No leads with a validated publicly listed phone/mobile number were found. Broaden the category or location and try again.'
+              : activeSourceMode === 'ai'
+                ? 'Free AI mode found no verified public leads. Try a broader category or location; paid sources are not used.'
+                : 'No leads were found for this search. Try a broader company type or different location.'
+            : 'Still finding leads.'
       : 'No leads match the current filters.';
 
   useEffect(() => {
@@ -389,11 +402,21 @@ export function HomePage({ searchApi }: HomePageProps) {
                     ...current,
                     meta: {
                       ...current.meta,
-                      status: 'complete',
+                      status: 'failed',
                       progress: {
                         ...current.meta.progress,
-                        currentSource: 'Complete',
+                        currentSource: 'Failed',
                       },
+                      providerWarnings: [
+                        ...current.meta.providerWarnings,
+                        {
+                          providerId: 'search-status',
+                          providerName: 'Search status',
+                          message:
+                            'The durable search snapshot is no longer available. The search was not marked complete.',
+                          severity: 'error',
+                        },
+                      ],
                     },
                   }
                 : current,
@@ -956,7 +979,8 @@ export function HomePage({ searchApi }: HomePageProps) {
                           </li>
                         ))}
                       </ul>
-                      {result.meta.status === 'complete' && result.leads.length === 0 ? (
+                      {(result.meta.status === 'complete' || result.meta.status === 'failed') &&
+                      result.leads.length === 0 ? (
                         <button
                           className="mt-4 inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-bold text-white transition hover:bg-slate-700"
                           onClick={() => void handleSearch(submittedSearch ?? undefined)}

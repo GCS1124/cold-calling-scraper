@@ -41,6 +41,7 @@ import {
 } from './search-source-mode';
 import { getResearchDepthConfig } from './research-depth';
 import { reverifyLeads } from './research-reverification';
+import { noUsableResultsWarning } from './search-finalization';
 
 type SearchJob = {
   searchId: string;
@@ -261,6 +262,21 @@ const finalizeLeads = (job: SearchJob) => {
     appendUniqueWarnings(job, [phoneRequirement.warning]);
   }
   job.leads = rankDiscoveryCandidates(phoneRequirement.leads).slice(0, job.request.count);
+  refreshProgress(job);
+};
+
+const finalizeJobStatus = (job: SearchJob) => {
+  finalizeLeads(job);
+
+  if (!job.leads.length) {
+    appendUniqueWarnings(job, [noUsableResultsWarning()]);
+    job.status = 'failed';
+    job.progress.currentSource = 'Failed';
+  } else {
+    job.status = 'complete';
+    job.progress.currentSource = 'Complete';
+  }
+
   refreshProgress(job);
 };
 
@@ -678,22 +694,14 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
 
       if (!isCurrentRun(job, executionToken)) return;
 
-      finalizeLeads(job);
-      refreshProgress(job);
-      job.status = 'complete';
-      job.progress.currentSource = 'Complete';
-      refreshProgress(job);
+      finalizeJobStatus(job);
       return;
     }
 
     if (sourceMode === 'ai') {
       await runAiDiscovery(job, job.request, location, discoverAiLeads, now);
       if (!isCurrentRun(job, executionToken)) return;
-      finalizeLeads(job);
-      refreshProgress(job);
-      job.status = 'complete';
-      job.progress.currentSource = 'Complete';
-      refreshProgress(job);
+      finalizeJobStatus(job);
       return;
     }
 
@@ -785,10 +793,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
 
     if (!isCurrentRun(job, executionToken)) return;
 
-    finalizeLeads(job);
-    job.status = 'complete';
-    job.progress.currentSource = 'Complete';
-    refreshProgress(job);
+    finalizeJobStatus(job);
   };
 
   return {
@@ -801,6 +806,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         searchId,
         request: {
           ...request,
+          phoneRequired: true,
           researchDepth: request.researchDepth ?? 'verified',
         },
         leads: [],

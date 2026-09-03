@@ -77,7 +77,7 @@ const stateLocation = {
 const makeLead = (overrides: Partial<Lead> = {}): Lead => ({
   id: 'lead-1',
   name: 'Northstar Labs',
-  mobile: '',
+  mobile: '+1 512 555 0101',
   email: '',
   website: 'https://northstarlabs.ai',
   address: '123 Congress Ave, Austin, TX 78701',
@@ -91,6 +91,7 @@ const makeLead = (overrides: Partial<Lead> = {}): Lead => ({
   hasWebsite: true,
   verifiedPhone: true,
   verifiedEmail: false,
+  listingUrl: 'https://www.google.com/maps/search/?api=1&query=Northstar+Labs',
   scrapedAt: '2026-05-21T00:00:00.000Z',
   ...overrides,
 });
@@ -167,6 +168,7 @@ describe('createVercelSearchServiceWithDeps', () => {
         name: `Northstar Labs ${index + 1}`,
         mobile: `512555${String(1000 + index)}`,
         website: `https://northstar-${index + 1}.example.com`,
+        listingUrl: `https://www.google.com/maps/search/?api=1&query=Northstar+Labs+${index + 1}`,
         address: `${100 + index} Congress Ave, Austin, TX 78701`,
       }),
     );
@@ -208,6 +210,7 @@ describe('createVercelSearchServiceWithDeps', () => {
             name: 'Phone Ready Dental',
             mobile: '+1 512 555 0102',
             website: 'https://phone-ready-dental.example',
+            listingUrl: 'https://www.google.com/maps/search/?api=1&query=Phone+Ready+Dental',
             hasPhone: true,
             verifiedPhone: true,
           }),
@@ -216,6 +219,7 @@ describe('createVercelSearchServiceWithDeps', () => {
             name: 'Phone Missing Dental',
             mobile: '',
             website: 'https://phone-missing-dental.example',
+            listingUrl: 'https://www.google.com/maps/search/?api=1&query=Phone+Missing+Dental',
             hasPhone: false,
             verifiedPhone: false,
           }),
@@ -424,7 +428,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     releaseDiscovery({ leads: [], warnings: [], blocked: false });
     const completedSnapshot = await firstPoll;
 
-    expect(completedSnapshot?.meta.status).toBe('complete');
+    expect(completedSnapshot?.meta.status).toBe('failed');
     expect(completedSnapshot?.leads).toHaveLength(0);
   });
 
@@ -479,7 +483,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     releaseDiscovery({ leads: [], warnings: [], blocked: false });
     const completedSnapshot = await firstAdvance;
 
-    expect(completedSnapshot?.meta.status).toBe('complete');
+    expect(completedSnapshot?.meta.status).toBe('failed');
   });
 
   it('persists public LinkedIn contact enrichment in the Vercel search job', async () => {
@@ -553,6 +557,9 @@ describe('createVercelSearchServiceWithDeps', () => {
         id: `linkedin-batch-${index}`,
         name: `Mark Sweeney ${index}`,
         source: 'LinkedIn',
+        mobile: '',
+        hasPhone: false,
+        verifiedPhone: false,
         website: '',
         listingUrl: `https://linkedin.com/in/mark-sweeney-${index}`,
       }),
@@ -600,6 +607,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       city: 'Austin, TX',
       count: 50,
       sourceMode: 'linkedin',
+      phoneRequired: true,
     });
 
     const discoveringSnapshot = await service.getSearch(response.searchId);
@@ -619,7 +627,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(completedSnapshot?.leads.every((lead) => lead.hasEmail && lead.hasPhone)).toBe(true);
   });
 
-  it('completes LinkedIn searches gracefully when public profile pages are blocked', async () => {
+  it('fails LinkedIn searches honestly when public profile pages are blocked', async () => {
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
       normalizeLocation: vi.fn().mockResolvedValue(localLocation),
@@ -648,8 +656,8 @@ describe('createVercelSearchServiceWithDeps', () => {
 
     const snapshot = await service.getSearch(response.searchId);
 
-    expect(snapshot?.meta.status).toBe('complete');
-    expect(snapshot?.meta.progress.currentSource).toBe('Complete');
+    expect(snapshot?.meta.status).toBe('failed');
+    expect(snapshot?.meta.progress.currentSource).toBe('Failed');
     expect(snapshot?.leads).toHaveLength(0);
     expect(snapshot?.meta.providerWarnings.some((warning) => warning.providerName === 'Brave Search')).toBe(true);
     expect(snapshot?.meta.providerWarnings.some((warning) => warning.providerName === 'LinkedIn')).toBe(true);
@@ -775,7 +783,7 @@ describe('createVercelSearchServiceWithDeps', () => {
 
     const snapshot = await pollJob(service, 'search-3c', 120);
 
-    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.meta.status).toBe('failed');
     expect(snapshot?.meta.progress.foundCount).toBe(0);
     expect(snapshot?.leads).toHaveLength(0);
     expect(googleCalls.length).toBeGreaterThan(1);
@@ -1109,7 +1117,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     currentTime = 50_000;
     snapshot = await service.getSearch('search-stalled');
 
-    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.meta.status).toBe('failed');
     expect(snapshot?.meta.providerWarnings.some((warning) => warning.providerId === 'discovery-limit')).toBe(true);
     expect(googleCalls.length).toBeGreaterThan(1);
   });

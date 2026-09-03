@@ -120,6 +120,8 @@ describe('googlePlacesProvider', () => {
     });
 
     expect(leads).toHaveLength(4);
+    expect(leads[0]?.listingUrl).toContain('www.google.com/maps/search/');
+    expect(leads[0]?.listingUrl).toContain('query_place_id=place-1');
     expect(mockedGet.mock.calls.filter(([url]) => String(url).includes('/textsearch/')).length).toBeGreaterThan(2);
     expect(mockedGet.mock.calls.some(([, config]) => (config as { params?: { query?: string } }).params?.query === 'Dental office in Austin, TX')).toBe(true);
     expect(mockedGet.mock.calls.some(([, config]) => (config as { params?: { pagetoken?: string } }).params?.pagetoken === 'page-2')).toBe(true);

@@ -345,22 +345,65 @@ export function SearchForm({
       </fieldset>
 
       {isAiMode ? (
-        <label className="flex flex-col gap-2 text-sm font-semibold text-slate-900 md:col-span-2">
-          Research brief <span className="font-normal text-slate-400">Optional</span>
-          <textarea
-            className="min-h-24 w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
-            maxLength={1_000}
-            placeholder="Find owner-led HVAC companies in Austin that publicly list a mobile number and show signs they need a new website."
-            value={value.researchBrief}
-            onChange={(event) =>
-              onChange((current) => ({ ...current, researchBrief: event.target.value }))
-            }
-          />
-          <span className="text-xs font-normal leading-5 text-slate-500">
-            AI turns this into a research plan. Gemini may help word queries, but public sources
-            and deterministic checks decide what becomes a lead.
-          </span>
-        </label>
+        <>
+          <label className="flex flex-col gap-2 text-sm font-semibold text-slate-900 md:col-span-2">
+            Research brief <span className="font-normal text-slate-400">Optional</span>
+            <textarea
+              className="min-h-24 w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-[15px] font-medium text-slate-950 outline-none transition focus:border-blue-500"
+              maxLength={1_000}
+              placeholder="Find owner-led HVAC companies in Austin that publicly list a mobile number and show signs they need a new website."
+              value={value.researchBrief}
+              onChange={(event) =>
+                onChange((current) => ({ ...current, researchBrief: event.target.value }))
+              }
+            />
+            <span className="text-xs font-normal leading-5 text-slate-500">
+              AI turns this into a research plan. Gemini may help word queries, but public sources
+              and deterministic checks decide what becomes a lead.
+            </span>
+          </label>
+
+          <aside
+            aria-label="AI interpretation preview"
+            className="rounded-2xl border border-cyan-200 bg-cyan-50/80 p-4 text-sm text-slate-800 md:col-span-2"
+          >
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-cyan-700 shadow-sm">
+                <Sparkles className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="font-bold text-cyan-950">AI interpretation preview</p>
+                <p className="mt-1 leading-5 text-slate-600">
+                  The search will use a bounded, public-only plan before any provider is called.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-cyan-100 bg-white/80 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-700">Intent</p>
+                <p className="mt-1 truncate text-sm font-semibold">
+                  {value.researchBrief.trim() || 'Find decision-makers'}
+                </p>
+              </div>
+              <div className="rounded-xl border border-cyan-100 bg-white/80 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-700">Scope</p>
+                <p className="mt-1 truncate text-sm font-semibold">{locationSummary}</p>
+              </div>
+              <div className="rounded-xl border border-cyan-100 bg-white/80 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-700">Public lenses</p>
+                <p className="mt-1 text-sm font-semibold">Listings, profiles, websites, social links</p>
+              </div>
+              <div className="rounded-xl border border-cyan-100 bg-white/80 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-700">Acceptance gate</p>
+                <p className="mt-1 text-sm font-semibold">US phone + public evidence</p>
+              </div>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-slate-600">
+              Paid databases, private profiles, login sessions, paywalls, contact-reveal credits,
+              and CAPTCHA bypasses are excluded. Unsupported owner or mobile claims stay unknown.
+            </p>
+          </aside>
+        </>
       ) : null}
 
       <datalist id="company-type-options">

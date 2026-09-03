@@ -34,6 +34,7 @@ import { buildDiscoverySeeds } from './discovery-seeds';
 import { getResearchDepthConfig } from './research-depth';
 import { createResearchQueue, type ResearchQueue } from './research-queue';
 import { reverifyLeads } from './research-reverification';
+import { noUsableResultsWarning } from './search-finalization';
 import {
   leadSourceModeLabels,
   normalizeLeadSourceMode,
@@ -202,6 +203,21 @@ const finalizeLeads = (job: SearchJobRecord) => {
     appendWarningOnce(job, phoneRequirement.warning);
   }
   job.leads = rankDiscoveryCandidates(phoneRequirement.leads).slice(0, job.request.count);
+  refreshProgress(job);
+};
+
+const finalizeJobStatus = (job: SearchJobRecord) => {
+  finalizeLeads(job);
+
+  if (!job.leads.length) {
+    appendWarningOnce(job, noUsableResultsWarning());
+    job.status = 'failed';
+    job.progress.currentSource = 'Failed';
+  } else {
+    job.status = 'complete';
+    job.progress.currentSource = 'Complete';
+  }
+
   refreshProgress(job);
 };
 
@@ -585,10 +601,7 @@ const tickJob = async (
     }
 
     job.discoveryComplete = true;
-    finalizeLeads(job);
-    job.status = 'complete';
-    job.progress.currentSource = 'Complete';
-    refreshProgress(job);
+    finalizeJobStatus(job);
     job.updatedAt = withNow();
     await store.upsert(job);
     return job;
@@ -676,10 +689,7 @@ const tickJob = async (
     }
 
     job.discoveryComplete = true;
-    finalizeLeads(job);
-    job.status = 'complete';
-    job.progress.currentSource = 'Complete';
-    refreshProgress(job);
+    finalizeJobStatus(job);
     job.updatedAt = withNow();
     await store.upsert(job);
     return job;
@@ -777,9 +787,7 @@ const tickJob = async (
   }
 
   if (job.progress.foundCount >= job.request.count || job.discoveryComplete) {
-    finalizeLeads(job);
-    job.status = 'complete';
-    job.progress.currentSource = 'Complete';
+    finalizeJobStatus(job);
   } else {
     job.status = 'discovering';
     job.progress.currentSource = 'Google Places API';
@@ -895,6 +903,7 @@ export const createVercelSearchServiceWithDeps = (
       const createdAt = now();
       const normalizedRequest: SearchRequest = {
         ...request,
+        phoneRequired: true,
         researchDepth: request.researchDepth ?? 'verified',
       };
       let job: SearchJobRecord = {
@@ -967,7 +976,7 @@ export const createVercelSearchServiceWithDeps = (
           'Reverification refreshed public phone, email, website, evidence, and scores without refetching provider pages.',
         severity: 'info',
       });
-      finalizeLeads(job);
+      finalizeJobStatus(job);
       job.updatedAt = now();
       await store.upsert(job);
 

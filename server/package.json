@@ -7,7 +7,7 @@
     "dev": "tsx watch --exclude ../node_modules src/index.ts",
     "worker": "tsx src/worker.ts",
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run --coverage && npm run test:runtime",
+    "test": "vitest run --pool=forks --maxWorkers=1 && npm run test:runtime",
     "test:runtime": "npm run build && node scripts/verify-vercel-runtime.cjs"
   },
   "license": "ISC",

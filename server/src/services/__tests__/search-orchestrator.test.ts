@@ -21,6 +21,7 @@ const sampleLead: Lead = {
   hasWebsite: true,
   verifiedPhone: true,
   verifiedEmail: false,
+  listingUrl: 'https://www.openstreetmap.org/node/lead-1',
   scrapedAt: '2026-04-21T00:00:00.000Z',
 };
 
@@ -201,6 +202,7 @@ describe('createSearchService', () => {
       name: 'Phone Missing Dental',
       mobile: '',
       website: 'https://phone-missing-dental.example',
+      listingUrl: 'https://www.openstreetmap.org/node/lead-without-phone',
       address: '456 Congress Ave, Austin, TX 78701',
       hasPhone: false,
       verifiedPhone: false,
@@ -250,6 +252,7 @@ describe('createSearchService', () => {
       name: `Lattice Dental ${index + 1}`,
       mobile: `512555${String(1000 + index)}`,
       website: `https://lattice-dental-${index + 1}.com`,
+      listingUrl: `https://www.openstreetmap.org/node/lead-${index + 1}`,
       address: `${100 + index} Congress Ave, Austin, TX 78701`,
     }));
 
@@ -454,7 +457,7 @@ describe('createSearchService', () => {
     ).toBe(true);
   });
 
-  it('completes a LinkedIn search gracefully when public profile pages are blocked', async () => {
+  it('fails a LinkedIn search honestly when public profile pages are blocked', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 
     const service = createSearchService({
@@ -493,8 +496,8 @@ describe('createSearchService', () => {
     await task();
     const completed = await service.getSearch('search-linkedin-blocked');
 
-    expect(completed?.meta.status).toBe('complete');
-    expect(completed?.meta.progress.currentSource).toBe('Complete');
+    expect(completed?.meta.status).toBe('failed');
+    expect(completed?.meta.progress.currentSource).toBe('Failed');
     expect(completed?.leads).toHaveLength(0);
     expect(completed?.meta.providerWarnings.some((warning) => warning.providerName === 'Brave Search')).toBe(true);
     expect(
@@ -502,7 +505,7 @@ describe('createSearchService', () => {
     ).toBe(true);
   });
 
-  it('completes a LinkedIn search gracefully when the orchestrator timeout expires', async () => {
+  it('fails a LinkedIn search honestly when the orchestrator timeout expires', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 
     const service = createSearchService({
@@ -533,8 +536,8 @@ describe('createSearchService', () => {
     await task();
     const completed = await service.getSearch('search-linkedin-timeout');
 
-    expect(completed?.meta.status).toBe('complete');
-    expect(completed?.meta.progress.currentSource).toBe('Complete');
+    expect(completed?.meta.status).toBe('failed');
+    expect(completed?.meta.progress.currentSource).toBe('Failed');
     expect(completed?.leads).toHaveLength(0);
     expect(completed?.meta.providerWarnings.some((warning) => warning.providerName === 'LinkedIn')).toBe(true);
   });
@@ -805,7 +808,7 @@ describe('createSearchService', () => {
     await (backgroundTask as () => Promise<void>)();
     const completed = await service.getSearch('search-maps-failure');
 
-    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.meta.status).toBe('failed');
     expect(discoverGoogleMapsLeads).toHaveBeenCalledTimes(1);
     expect(
       completed?.meta.providerWarnings.some((warning) =>
@@ -965,7 +968,7 @@ describe('createSearchService', () => {
     await task();
     const completed = await service.getSearch('search-4b');
 
-    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.meta.status).toBe('failed');
     expect(completed?.meta.providerWarnings.some((warning) => warning.providerId === 'discovery-limit')).toBe(true);
     expect(googleCalls.length).toBe(0);
   });
@@ -1011,7 +1014,7 @@ describe('createSearchService', () => {
     await task();
     const result = await service.getSearch('search-5');
 
-    expect(result?.meta.status).toBe('complete');
+    expect(result?.meta.status).toBe('failed');
     expect(result?.meta.providerWarnings.some((warning) => warning.message.includes('California'))).toBe(true);
   });
 });

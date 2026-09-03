@@ -2,10 +2,28 @@ import type { Lead } from '../types/lead';
 import type { ProviderWarning, SearchRequest } from '../types/search';
 
 export const isPhoneQualifiedLead = (lead: Lead) =>
-  Boolean(lead.hasPhone && lead.verifiedPhone && lead.mobile?.trim());
+  Boolean(
+    lead.hasPhone &&
+      lead.verifiedPhone &&
+      lead.mobile?.trim() &&
+      [
+        lead.contactSourceUrl,
+        lead.listingUrl,
+        ...(lead.evidence ?? []).map((evidence) => evidence.sourceUrl),
+      ].some((url) => {
+        try {
+          const parsed = new URL(url ?? '');
+          return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+        } catch {
+          return false;
+        }
+      }),
+  );
 
 export const enforcePhoneRequirement = (leads: Lead[], request: SearchRequest) => {
-  if (request.phoneRequired !== true) {
+  const phoneRequired = (request as unknown as { phoneRequired?: boolean }).phoneRequired;
+
+  if (phoneRequired === false) {
     return {
       leads,
       excludedCount: 0,

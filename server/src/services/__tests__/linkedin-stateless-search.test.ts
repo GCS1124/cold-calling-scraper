@@ -179,19 +179,25 @@ describe('runStatelessLinkedinSearch', () => {
     );
   });
 
-  it('returns a truthful complete response when location normalization fails', async () => {
+  it('returns a truthful failed response when location normalization fails', async () => {
     mocks.normalize.mockRejectedValue(new Error('No US location match found'));
 
     const response = await runStatelessLinkedinSearch(request);
 
-    expect(response.meta.status).toBe('complete');
+    expect(response.meta.status).toBe('failed');
     expect(response.leads).toHaveLength(0);
-    expect(response.meta.providerWarnings).toEqual([
-      expect.objectContaining({
-        providerId: 'location-normalizer',
-        message: 'No US location match found',
-      }),
-    ]);
+    expect(response.meta.providerWarnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerId: 'location-normalizer',
+          message: 'No US location match found',
+        }),
+        expect.objectContaining({
+          providerId: 'no-usable-results',
+          severity: 'error',
+        }),
+      ]),
+    );
     expect(mocks.discover).not.toHaveBeenCalled();
     expect(mocks.enrich).not.toHaveBeenCalled();
   });

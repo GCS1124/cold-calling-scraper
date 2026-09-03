@@ -574,6 +574,7 @@ const toLead = ({
     email,
     website,
     address,
+    listingUrl: `https://www.openstreetmap.org/${element.type ?? 'node'}/${element.id}`,
     category: request.companyType,
     city: location.label,
     source: 'OpenStreetMap',

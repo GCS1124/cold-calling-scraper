@@ -9,6 +9,7 @@ import type {
   SearchStatus,
 } from '../types/search';
 import { deduplicateLeads } from './lead-deduplication';
+import { persistNormalizedResearch } from './research-normalizer';
 import type { NormalizedUsLocation } from './us-location';
 
 export type SearchLocationMode =
@@ -622,7 +623,9 @@ const postgresStore = (): SearchJobStore => {
         throw new Error('Missing Postgres connection string');
       }
 
-      await client.query(
+      const persistedResult = await client.query<{
+        payload: SearchJobRecord | string;
+      }>(
         `
           insert into lead_finder_jobs (
             search_id,
@@ -653,6 +656,7 @@ const postgresStore = (): SearchJobStore => {
             end,
             expires_at = excluded.expires_at,
             updated_at = excluded.updated_at
+          returning payload
         `,
         [
           sanitized.searchId,
@@ -662,6 +666,15 @@ const postgresStore = (): SearchJobStore => {
           sanitized.updatedAt,
         ],
       );
+
+      const persistedJob = parsePayload(persistedResult.rows[0]?.payload);
+      if (persistedJob && ['complete', 'failed', 'cancelled'].includes(persistedJob.status)) {
+        try {
+          await persistNormalizedResearch(client, persistedJob);
+        } catch (error) {
+          console.error('[search-job-store] normalized research persistence skipped', error);
+        }
+      }
     },
 
     requestCancel: async (searchId: string, now: number) => {

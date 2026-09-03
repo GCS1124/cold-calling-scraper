@@ -182,12 +182,14 @@ const blockedLinkedinResponse: SearchResponse = {
   meta: {
     ...completedResponse.meta,
     query: 'Dentist in Eastern Time',
+    status: 'failed',
     progress: {
       ...completedResponse.meta.progress,
       discovered: 0,
       enriched: 0,
       totalCandidates: 0,
       foundCount: 0,
+      currentSource: 'Failed',
       batchesCompleted: 0,
       estimatedRemaining: 50,
     },
@@ -759,6 +761,8 @@ describe('App', () => {
     await clickElement(getButton(container, /ai mode/i));
     expect(normalizedText(container)).toContain('Free public discovery');
     expect(normalizedText(container)).toContain('no paid databases');
+    expect(normalizedText(container)).toContain('AI interpretation preview');
+    expect(normalizedText(container)).toContain('Listings, profiles, websites, social links');
     await typeValue(getCompanyTypeInput(container), 'Dentist');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
@@ -835,7 +839,7 @@ describe('App', () => {
     await unmount();
   });
 
-  it('lets users retry a completed empty LinkedIn search with the same request', async () => {
+  it('lets users retry a failed empty LinkedIn search with the same request', async () => {
     const searchApi: SearchApi = {
       startSearch: vi.fn().mockResolvedValue(blockedLinkedinResponse),
       getSearch: vi.fn().mockResolvedValue(blockedLinkedinResponse),
@@ -878,7 +882,7 @@ describe('App', () => {
     await typeValue(getCompanyTypeInput(container), 'Dentist');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
-    await waitForText(container, /discovery complete/i, 6000);
+    await waitForText(container, /search failed/i, 6000);
 
     await clickElement(getButton(container, /try public search again/i));
     expect(searchApi.startSearch).toHaveBeenCalledTimes(2);
