@@ -1031,6 +1031,7 @@ describe('App', () => {
     expect(content).toContain('3 public search sources');
     expect(content).toContain('Public match');
     expect(content).toContain('Role signal');
+    expect(content).toContain('Owner signal');
     expect(content).toContain('Location signal');
     expect(content).toContain('3 query paths');
     expect(content).toContain('Match intelligence');
@@ -1063,6 +1064,7 @@ describe('App', () => {
     expect(expandedContent).toContain('Bing');
     expect(expandedContent).toContain('Category: Dentist, dental clinic');
     expect(expandedContent).toContain('Role: Founder, owner');
+    expect(expandedContent).toContain('Owner/head: Founder, owner');
     expect(expandedContent).toContain('Public location: Austin, TX');
     expect(expandedContent).toContain('3 query paths · 2 public sources');
     expect(expandedContent).toContain('Brave Search + Bing');

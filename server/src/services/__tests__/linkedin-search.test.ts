@@ -181,6 +181,7 @@ Owner at Austin Dental Spa.
       ]),
       locationEvidence: 'Austin, TX',
       categoryMatched: true,
+      ownerMatched: true,
       roleMatched: true,
       locationMatched: true,
     });

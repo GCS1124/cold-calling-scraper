@@ -3,6 +3,7 @@ import { Check, Crosshair, Globe2, Radar, ShieldCheck } from 'lucide-react';
 import type { Lead } from '../../types/lead';
 import {
   getLinkedInQualityTier,
+  hasPublicOwnerSignal,
   isHighFitLinkedInLead,
 } from '../../utils/linkedin-quality';
 
@@ -110,6 +111,7 @@ export function LinkedInQualityPanel({
     { A: 0, B: 0, C: 0 },
   );
   const corroborated = leads.filter((lead) => (lead.matchSignals?.publicSources ?? 0) > 1).length;
+  const ownerSignals = leads.filter(hasPublicOwnerSignal).length;
   const roleSignals = leads.filter((lead) => lead.matchSignals?.roleMatched).length;
   const evidenceBacked = leads.filter(
     (lead) => lead.publicEvidence?.profileTitle || lead.publicEvidence?.profileSnippet,
@@ -121,6 +123,7 @@ export function LinkedInQualityPanel({
   const contactDepth = ratioPercent(boundedContacts, total);
   const checklist = [
     { label: 'Category', ready: leads.some((lead) => lead.matchSignals?.categoryMatched) },
+    { label: 'Owner lens', ready: ownerSignals > 0 },
     { label: 'Decision-maker', ready: roleSignals > 0 },
     { label: 'Location', ready: leads.some((lead) => lead.matchSignals?.locationMatched) },
     { label: 'Public evidence', ready: evidenceBacked > 0 },
@@ -152,11 +155,16 @@ export function LinkedInQualityPanel({
         </div>
       </div>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         <div className="rounded-2xl bg-slate-950 p-3 text-white">
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">High-fit score</p>
           <p className="mt-2 text-2xl font-black">{highFit}</p>
           <p className="mt-1 text-[11px] text-slate-400">85%+ with location and role proof</p>
+        </div>
+        <div className="rounded-2xl border border-sky-100 bg-sky-50 p-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-sky-700">Owner/founder</p>
+          <p className="mt-2 text-2xl font-black text-slate-950">{ownerSignals}</p>
+          <p className="mt-1 text-[11px] text-slate-600">Public owner or founder evidence</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-3">
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Cross-source</p>

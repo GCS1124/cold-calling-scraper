@@ -11,6 +11,16 @@ export type LinkedInLeadReadiness =
 
 export type LinkedInQualityTier = 'A' | 'B' | 'C';
 
+const ownerRolePattern =
+  /\b(founder|co-founder|owner|co-owner|business owner|owner operator|proprietor|franchisee|franchise owner|president|principal|managing partner|managing member|brand owner|brand founder|practice owner|clinic owner|store owner|agency principal|insurance agency owner|dealer principal)\b/i;
+
+export function hasPublicOwnerSignal(lead: Lead) {
+  return Boolean(
+    lead.matchSignals?.ownerMatched ||
+      lead.matchSignals?.roleMatchedTerms?.some((term) => ownerRolePattern.test(term)),
+  );
+}
+
 export function getLinkedInLeadReadiness(lead: Lead): LinkedInLeadReadiness {
   if (lead.hasEmail && lead.hasPhone) {
     return 'email-and-phone';
@@ -83,20 +93,21 @@ export function getLinkedInQualityTier(lead: Lead): LinkedInQualityTier {
 export function getLinkedInRankingScore(lead: Lead, sortMode: LinkedInSortMode) {
   const signals = lead.matchSignals;
   const contactScore = Number(lead.hasEmail) * 18 + Number(lead.hasPhone) * 18;
+  const ownerScore = Number(hasPublicOwnerSignal(lead)) * 10;
   const evidenceScore =
     Math.min(4, signals?.queryMatches ?? 0) * 3 +
     Math.min(3, signals?.publicSources ?? 0) * 7 +
     Number(isEvidenceBackedLinkedInLead(lead)) * 8;
 
   if (sortMode === 'contact-ready') {
-    return contactScore * 4 + lead.confidence + evidenceScore;
+    return contactScore * 4 + lead.confidence + evidenceScore + ownerScore;
   }
 
   if (sortMode === 'corroborated') {
-    return evidenceScore * 4 + lead.confidence + contactScore;
+    return evidenceScore * 4 + lead.confidence + contactScore + ownerScore;
   }
 
-  return lead.confidence * 2 + evidenceScore + contactScore;
+  return lead.confidence * 2 + evidenceScore + contactScore + ownerScore;
 }
 
 export function isHighFitLinkedInLead(lead: Lead) {

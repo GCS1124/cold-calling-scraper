@@ -859,6 +859,8 @@ const buildBooleanQuery = (terms: string[], limit: number) => {
 const ownerRolePattern =
   /\b(founder|co-founder|owner|co-owner|business owner|owner operator|proprietor|franchisee|franchise owner|president|principal|managing partner|managing member|brand owner|brand founder|practice owner|clinic owner|store owner|agency principal|insurance agency owner|dealer principal)\b/i;
 
+const isOwnerRoleTerm = (term: string) => ownerRolePattern.test(normalizeText(term));
+
 const getLinkedInQueryFamily = (query: string) => {
   const normalized = query.toLowerCase();
 
@@ -1377,6 +1379,7 @@ type CandidateMatchEvidence = {
   hasCategoryEvidence: boolean;
   hasCategoryIdentityEvidence: boolean;
   hasRoleEvidence: boolean;
+  ownerMatched: boolean;
   hasCredentialEvidence: boolean;
   hasProfessionalTitleEvidence: boolean;
   hasLocationEvidence: boolean;
@@ -1432,6 +1435,7 @@ const getCandidateMatchEvidence = (
     hasCategoryEvidence: categoryMatchedTerms.length > 0,
     hasCategoryIdentityEvidence: categoryIdentityMatchedTerms.length > 0,
     hasRoleEvidence: roleMatchedTerms.length > 0 || decisionMakerPattern.test(identitySearchable),
+    ownerMatched: roleMatchedTerms.some(isOwnerRoleTerm),
     hasCredentialEvidence: credentialIdentityPattern.test(identitySearchable),
     hasProfessionalTitleEvidence: professionalTitlePattern.test(identitySearchable),
     hasLocationEvidence: locationMatchedTerms.length > 0,
@@ -1561,6 +1565,7 @@ const scoreCandidateRelevance = (
   score += evidence.hasCategoryIdentityEvidence ? 8 : 0;
   score += Math.min(6, Math.max(0, evidence.categoryMatchedTerms.length - 1) * 3);
   score += evidence.hasRoleEvidence ? 16 : 0;
+  score += evidence.ownerMatched ? 10 : 0;
   score += evidence.hasLocationEvidence ? 12 : 0;
   score += evidence.hasProfileEvidence ? 5 : 0;
   score += candidate.headline ? 3 : 0;
@@ -2286,6 +2291,7 @@ const buildLeadFromCandidate = (
       queryFamilies: candidate.matchedQueryFamilies,
       locationEvidence: publicLocation?.label,
       categoryMatched: candidate.matchedCategoryTerms.length > 0,
+      ownerMatched: candidate.matchedRoleTerms.some(isOwnerRoleTerm),
       roleMatched: candidate.matchedRoleTerms.length > 0,
       locationMatched: Boolean(publicLocation),
     },

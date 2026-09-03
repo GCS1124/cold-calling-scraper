@@ -5,6 +5,7 @@ import {
   getLinkedInLeadReadiness,
   getLinkedInQualityTier,
   getLinkedInRankingScore,
+  hasPublicOwnerSignal,
   isContactReadyLinkedInLead,
   isEvidenceBackedLinkedInLead,
   isHighFitLinkedInLead,
@@ -88,6 +89,23 @@ describe('LinkedIn result quality helpers', () => {
     expect(
       getLinkedInRankingScore(contactReady, 'contact-ready'),
     ).toBeGreaterThan(getLinkedInRankingScore(baseLead, 'contact-ready'));
+  });
+
+  it('recognizes public owner terms and ranks them ahead of non-owner roles', () => {
+    const ownerLead = {
+      ...baseLead,
+      matchSignals: { ...baseLead.matchSignals!, roleMatchedTerms: ['Founder'] },
+    };
+    const operatorLead = {
+      ...baseLead,
+      matchSignals: { ...baseLead.matchSignals!, roleMatchedTerms: ['Operations manager'] },
+    };
+
+    expect(hasPublicOwnerSignal(ownerLead)).toBe(true);
+    expect(hasPublicOwnerSignal(operatorLead)).toBe(false);
+    expect(getLinkedInRankingScore(ownerLead, 'best-match')).toBeGreaterThan(
+      getLinkedInRankingScore(operatorLead, 'best-match'),
+    );
   });
 
   it('recognizes evidence-backed profiles and falls back to profile-only readiness', () => {

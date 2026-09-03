@@ -16,6 +16,11 @@ const normalizeText = (value?: string) =>
     .toLowerCase()
     .replace(/\s+/g, ' ');
 
+const ownerRolePattern =
+  /\b(founder|co-founder|owner|co-owner|business owner|owner operator|proprietor|franchisee|franchise owner|president|principal|managing partner|managing member|brand owner|brand founder|practice owner|clinic owner|store owner|agency principal|insurance agency owner|dealer principal)\b/i;
+
+const isOwnerRoleTerm = (term: string) => ownerRolePattern.test(term);
+
 const isLinkedInProfileListing = (value?: string) => {
   if (!value?.trim()) {
     return false;
@@ -158,6 +163,8 @@ const mergeMatchSignals = (group: Lead[]) => {
     ...(queryFamilies.length > 0 ? { queryFamilies } : {}),
     ...(locationEvidence ? { locationEvidence } : {}),
     categoryMatched: signals.some((signal) => signal.categoryMatched),
+    ownerMatched:
+      signals.some((signal) => signal.ownerMatched) || roleMatchedTerms.some(isOwnerRoleTerm),
     roleMatched: signals.some((signal) => signal.roleMatched),
     locationMatched: signals.some((signal) => signal.locationMatched),
   } satisfies NonNullable<Lead['matchSignals']>;

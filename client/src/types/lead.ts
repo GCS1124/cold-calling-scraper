@@ -51,6 +51,7 @@ export type Lead = {
     queryFamilies?: string[];
     locationEvidence?: string;
     categoryMatched?: boolean;
+    ownerMatched?: boolean;
     roleMatched: boolean;
     locationMatched: boolean;
   };

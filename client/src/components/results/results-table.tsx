@@ -6,6 +6,7 @@ import type { Lead } from '../../types/lead';
 import {
   getLinkedInQualityTier,
   getLinkedInReadinessLabel,
+  hasPublicOwnerSignal,
   isHighFitLinkedInLead,
 } from '../../utils/linkedin-quality';
 
@@ -132,6 +133,7 @@ export function ResultsTable({
               const isStrongMatch = isLinkedInLead
                 ? isHighFitLinkedInLead(lead)
                 : lead.confidence >= 85;
+              const hasOwnerSignal = isLinkedInLead && hasPublicOwnerSignal(lead);
               const qualityTier = isLinkedInLead ? getLinkedInQualityTier(lead) : undefined;
               const matchLabel =
                 isStrongMatch
@@ -223,6 +225,14 @@ export function ResultsTable({
                                   title="The public profile matched an expanded decision-maker role term."
                                 >
                                   Role signal
+                                </span>
+                              ) : null}
+                              {hasOwnerSignal ? (
+                                <span
+                                  className="rounded-full border border-sky-100 bg-sky-50 px-2 py-1 text-sky-700"
+                                  title="The public profile matched an owner, founder, principal, or operating-head term."
+                                >
+                                  Owner signal
                                 </span>
                               ) : null}
                               {lead.matchSignals.locationMatched ? (
@@ -479,6 +489,11 @@ export function ResultsTable({
                                       Role not confirmed
                                     </span>
                                   )}
+                                  {hasOwnerSignal ? (
+                                    <span className="rounded-full bg-sky-50 px-3 py-2 text-sky-700">
+                                      Owner/head: {lead.matchSignals.roleMatchedTerms?.join(', ') || 'matched'}
+                                    </span>
+                                  ) : null}
                                   {lead.matchSignals.locationMatched ? (
                                     <span className="rounded-full bg-amber-50 px-3 py-2 text-amber-700">
                                       Public location: {lead.matchSignals.locationEvidence || 'matched'}
