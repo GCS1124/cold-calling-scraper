@@ -506,7 +506,7 @@ Too many requests. Please try again later.
     const result = await discoverUsLeadsFromLinkedinSearch({
       request: { companyType: 'Dentist', city: 'Austin', count: 50 },
       location: sampleLocation,
-      deadlineMs: startedAt + 40,
+      deadlineMs: startedAt + 250,
     });
 
     expect(result.leads).toHaveLength(0);

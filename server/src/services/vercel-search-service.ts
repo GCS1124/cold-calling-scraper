@@ -15,7 +15,10 @@ import {
   discoverUsLeadsFromAiMode,
   type AiDiscoveryResult,
 } from './ai-lead-discovery';
-import { googlePlacesProvider } from '../providers/google-places';
+import {
+  googlePlacesProvider,
+  isGooglePlacesConfigured,
+} from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
 import {
@@ -372,25 +375,37 @@ const discoverRegionLeads = async (
     deadlineMs,
     now() + getGooglePlacesTimeoutMs(request.count),
   );
+  const googlePlacesAvailable =
+    googlePlaces !== googlePlacesProvider || isGooglePlacesConfigured();
 
   let googleLeads: Lead[] = [];
-  try {
-    googleLeads = await googlePlaces.fetchLeads({
-      rawQuery: request.companyType,
-      query,
-      queryVariants,
-      request: googleRequest,
-      location: discoveryLocation,
-      deadlineMs: googlePlacesDeadlineMs,
-    });
-  } catch (error) {
+  if (googlePlacesAvailable) {
+    try {
+      googleLeads = await googlePlaces.fetchLeads({
+        rawQuery: request.companyType,
+        query,
+        queryVariants,
+        request: googleRequest,
+        location: discoveryLocation,
+        deadlineMs: googlePlacesDeadlineMs,
+      });
+    } catch (error) {
+      warnings.push({
+        providerId: 'google-places',
+        providerName: 'Google Places',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Google Places discovery failed',
+      });
+    }
+  } else {
     warnings.push({
       providerId: 'google-places',
       providerName: 'Google Places',
       message:
-        error instanceof Error
-          ? error.message
-          : 'Google Places discovery failed',
+        'Optional Google Places is not configured. Continuing with free OpenStreetMap and public map discovery.',
+      severity: 'info',
     });
   }
 

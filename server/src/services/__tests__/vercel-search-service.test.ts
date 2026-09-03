@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createSearchJobStore } from '../search-job-store';
 import { createVercelSearchServiceWithDeps } from '../vercel-search-service';
 import type { Lead } from '../../types/lead';
+import { googlePlacesProvider } from '../../providers/google-places';
 
 const nationwideLocation = {
   mode: 'nationwide' as const,
@@ -228,6 +229,60 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.leads[0]?.website).toBe('https://northstarlabs.ai');
     expect(snapshot?.leads[0]?.hasPhone).toBe(true);
     expect(snapshot?.leads[0]?.hasWebsite).toBe(true);
+  });
+
+  it('treats an unconfigured Google Places key as an informational free fallback', async () => {
+    const previousApiKey = process.env.GOOGLE_PLACES_API_KEY;
+    delete process.env.GOOGLE_PLACES_API_KEY;
+
+    try {
+      const service = createVercelSearchServiceWithDeps({
+        store: createSearchJobStore(),
+        normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+        googlePlaces: googlePlacesProvider,
+        discoverOsmLeads: vi.fn().mockResolvedValue([
+          makeLead({
+            id: 'free-fallback-lead',
+            source: 'OpenStreetMap',
+          }),
+        ]),
+        discoverGoogleMapsLeads: vi.fn().mockResolvedValue([]),
+        idFactory: () => 'search-free-fallback',
+        now: () => 1000,
+      });
+
+      const started = await service.startSearch({
+        companyType: 'Dental Clinics',
+        city: 'Austin, TX',
+        count: 50,
+      });
+      const snapshot = await pollJob(service, started.searchId);
+
+      expect(snapshot?.meta.status).toBe('complete');
+      expect(snapshot?.leads[0]?.source).toContain('OpenStreetMap');
+      expect(snapshot?.meta.providerWarnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            providerId: 'google-places',
+            severity: 'info',
+            message: expect.stringContaining('free OpenStreetMap'),
+          }),
+        ]),
+      );
+      expect(snapshot?.meta.providerWarnings).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            message: 'GOOGLE_PLACES_API_KEY is not configured',
+          }),
+        ]),
+      );
+    } finally {
+      if (previousApiKey === undefined) {
+        delete process.env.GOOGLE_PLACES_API_KEY;
+      } else {
+        process.env.GOOGLE_PLACES_API_KEY = previousApiKey;
+      }
+    }
   });
 
   it('completes a LinkedIn search with public profile listings', async () => {

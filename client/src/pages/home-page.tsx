@@ -5,6 +5,7 @@ import {
   Clock3,
   Download,
   Filter,
+  Info,
   LoaderCircle,
   MapPin,
   Search,
@@ -164,6 +165,9 @@ export function HomePage({ searchApi }: HomePageProps) {
           (warning) => warning.providerId !== 'ai-mode-policy',
         )
       : result?.meta.providerWarnings ?? [];
+  const providerNoticesAreInformational =
+    displayedProviderWarnings.length > 0 &&
+    displayedProviderWarnings.every((warning) => warning.severity === 'info');
   const linkedinQuality = useMemo(() => {
     const linkedinLeads = (result?.leads ?? []).filter((lead) =>
       lead.source.toLowerCase().includes('linkedin'),
@@ -800,18 +804,34 @@ export function HomePage({ searchApi }: HomePageProps) {
               ) : null}
 
               {displayedProviderWarnings.length ? (
-                <div className="mt-5 rounded-2xl border border-amber-200 bg-white/80 p-4 text-sm text-amber-950">
+                <div
+                  className={`mt-5 rounded-2xl border p-4 text-sm ${
+                    providerNoticesAreInformational
+                      ? 'border-blue-200 bg-blue-50/80 text-blue-950'
+                      : 'border-amber-200 bg-white/80 text-amber-950'
+                  }`}
+                >
                   <div className="flex items-start gap-3">
-                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                    {providerNoticesAreInformational ? (
+                      <Info className="mt-0.5 h-5 w-5 shrink-0 text-blue-700" />
+                    ) : (
+                      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                    )}
                     <div>
                       <p className="font-bold">
                         {linkedinDiscoveryBlocked
                           ? 'Provider access blocked'
                           : activeSourceMode === 'ai'
                             ? 'Public source notices'
-                            : 'Provider notices'}
+                            : providerNoticesAreInformational
+                              ? 'Provider notes'
+                              : 'Provider notices'}
                       </p>
-                      <ul className="mt-2 space-y-1.5 leading-5 text-amber-900/80">
+                      <ul
+                        className={`mt-2 space-y-1.5 leading-5 ${
+                          providerNoticesAreInformational ? 'text-blue-900/80' : 'text-amber-900/80'
+                        }`}
+                      >
                         {displayedProviderWarnings.map((warning) => (
                           <li key={`${warning.providerId}-${warning.message}`}>
                             <span className="font-semibold">{warning.providerName}:</span>{' '}

@@ -74,6 +74,9 @@ const newSearchFieldMask =
 const newDetailsFieldMask =
   'id,displayName,formattedAddress,nationalPhoneNumber,internationalPhoneNumber,websiteUri';
 
+export const isGooglePlacesConfigured = () =>
+  Boolean(process.env.GOOGLE_PLACES_API_KEY?.trim());
+
 const toLeadId = (placeId?: string, fallbackIndex?: number) =>
   placeId ? `google-${placeId}` : `google-${fallbackIndex ?? 0}`;
 
@@ -697,7 +700,7 @@ export const googlePlacesProvider: LeadProvider = {
     deadlineMs: requestDeadlineMs,
   }: LeadProviderRequest) {
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-    if (!apiKey) {
+    if (!isGooglePlacesConfigured() || !apiKey) {
       throw new Error('GOOGLE_PLACES_API_KEY is not configured');
     }
 

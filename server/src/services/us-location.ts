@@ -939,6 +939,7 @@ export const normalizeUsLocation = async (
           providerId: 'location-normalizer',
           providerName: 'Location Normalizer',
           message: `Resolved "${cleaned}" using a built-in regional alias.`,
+          severity: 'info',
         },
       ],
     };

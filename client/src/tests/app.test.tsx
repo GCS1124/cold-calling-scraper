@@ -296,7 +296,7 @@ async function renderApp(
     </MemoryRouter>,
   );
 
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 25));
 
   const unmount = async () => {
     if (cleanedUp) {
@@ -538,6 +538,48 @@ describe('App', () => {
     await waitForText(container, /public linkedin discovery complete/i, 6000);
     await waitForText(container, /Publicly validated/i, 1000);
     expect(normalizedText(container)).toContain('Public LinkedIn Northstar Labs');
+    expect(normalizedText(container)).toContain('LinkedIn profile');
+    expect(normalizedText(container)).toContain('Business website');
+    expect(
+      container
+        .querySelector('a[aria-label="Open LinkedIn profile for Public LinkedIn Northstar Labs"]')
+        ?.getAttribute('href'),
+    ).toBe('https://www.linkedin.com/in/public-linkedin-0');
+
+    await unmount();
+  });
+
+  it('renders optional provider configuration as informational notes', async () => {
+    const infoResponse: SearchResponse = {
+      ...completedResponse,
+      searchId: 'search-provider-info',
+      meta: {
+        ...completedResponse.meta,
+        providerWarnings: [
+          {
+            providerId: 'google-places',
+            providerName: 'Google Places',
+            message:
+              'Optional Google Places is not configured. Continuing with free OpenStreetMap and public map discovery.',
+            severity: 'info',
+          },
+        ],
+      },
+    };
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(infoResponse),
+      getSearch: vi.fn().mockResolvedValue(infoResponse),
+    };
+
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await typeValue(getCompanyTypeInput(container), 'Dental Clinics');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+
+    await waitForText(container, /provider notes/i, 6000);
+    expect(normalizedText(container)).toContain('free OpenStreetMap and public map discovery');
+    expect(normalizedText(container)).not.toContain('Provider notices');
 
     await unmount();
   });
@@ -628,6 +670,7 @@ describe('App', () => {
     await clickElement(getButton(container, /find leads/i));
 
     await waitForText(container, /live scan/i, 10000);
+    await waitForText(container, /Northstar Labs/i, 1000);
     expect(normalizedText(container)).toContain('2 visible leads');
     expect(normalizedText(container)).toContain('Northstar Labs');
     expect(normalizedText(container)).toContain('Collecting contact details');

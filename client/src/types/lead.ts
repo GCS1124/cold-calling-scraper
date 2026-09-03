@@ -130,10 +130,11 @@ export type SearchResponse = {
       withPhone: number;
       withWebsite: number;
     };
-    providerWarnings: Array<{
-      providerId: string;
-      providerName: string;
-      message: string;
-    }>;
+  providerWarnings: Array<{
+    providerId: string;
+    providerName: string;
+    message: string;
+    severity?: 'info' | 'warning' | 'error';
+  }>;
   };
 };

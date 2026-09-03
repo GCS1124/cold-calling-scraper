@@ -10,7 +10,10 @@ import type {
 } from '../types/search';
 import { deduplicateLeads } from './lead-deduplication';
 import { enrichLeads } from './lead-validation';
-import { googlePlacesProvider } from '../providers/google-places';
+import {
+  googlePlacesProvider,
+  isGooglePlacesConfigured,
+} from '../providers/google-places';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
 import {
   discoverUsLeadsFromGoogleMaps,
@@ -429,9 +432,22 @@ const runRegionalDiscovery = async (
     discoveryLocation,
     profile,
   );
+  const googlePlacesAvailable =
+    discoverGoogleLeads !== googlePlacesProvider || isGooglePlacesConfigured();
 
   await Promise.all([
     (async () => {
+      if (!googlePlacesAvailable) {
+        appendUniqueWarnings(job, [{
+          providerId: 'google-places',
+          providerName: 'Google Places',
+          message:
+            'Optional Google Places is not configured. Continuing with free OpenStreetMap and public map discovery.',
+          severity: 'info',
+        }]);
+        return;
+      }
+
       try {
         const googleLeads = await withTimeout(
           typeof discoverGoogleLeads === 'function'

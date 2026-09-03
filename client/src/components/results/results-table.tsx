@@ -89,6 +89,10 @@ export function ResultsTable({
             {leads.map((lead, index) => {
               const isSelected = selectedIds.includes(lead.id);
               const isPublicLinkedInLead = lead.source.toLowerCase().includes('linkedin');
+              const profileUrl = isPublicLinkedInLead ? lead.listingUrl : undefined;
+              const websiteUrl = lead.website && lead.website !== profileUrl ? lead.website : undefined;
+              const fallbackUrl = !profileUrl && !websiteUrl ? lead.listingUrl : undefined;
+              const primaryActionUrl = profileUrl || websiteUrl || fallbackUrl;
               const isExpanded = expandedLeadId === lead.id;
               const matchLabel =
                 lead.confidence >= 85
@@ -193,18 +197,43 @@ export function ResultsTable({
                       <ContactCell verified={lead.verifiedEmail} value={lead.email} />
                     </td>
                     <td className="px-4 py-4">
-                      {lead.website || lead.listingUrl ? (
-                        <a
-                          className="text-blue-700 hover:text-blue-800"
-                          href={lead.website || lead.listingUrl || '#'}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {(lead.website || lead.listingUrl || '').replace(/^https?:\/\//, '')}
-                        </a>
-                      ) : (
-                        '—'
-                      )}
+                      <div className="flex min-w-[160px] flex-col gap-1.5">
+                        {profileUrl ? (
+                          <a
+                            aria-label={`Open LinkedIn profile for ${lead.name}`}
+                            className="font-semibold text-blue-700 hover:text-blue-800"
+                            href={profileUrl}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            LinkedIn profile
+                          </a>
+                        ) : null}
+                        {websiteUrl ? (
+                          <a
+                            aria-label={`Open business website for ${lead.name}`}
+                            className={isPublicLinkedInLead ? 'text-xs text-slate-500 hover:text-blue-700' : 'text-blue-700 hover:text-blue-800'}
+                            href={websiteUrl}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            {isPublicLinkedInLead
+                              ? 'Business website'
+                              : websiteUrl.replace(/^https?:\/\//, '')}
+                          </a>
+                        ) : null}
+                        {fallbackUrl ? (
+                          <a
+                            className="text-blue-700 hover:text-blue-800"
+                            href={fallbackUrl}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            {fallbackUrl.replace(/^https?:\/\//, '')}
+                          </a>
+                        ) : null}
+                        {!profileUrl && !websiteUrl && !fallbackUrl ? '—' : null}
+                      </div>
                     </td>
                     <td className="px-4 py-4 text-slate-600">
                       <span className="block max-w-[220px] truncate" title={lead.address || undefined}>
@@ -232,10 +261,11 @@ export function ResultsTable({
                           <Copy className="h-4 w-4" />
                         </button>
                         <a
+                          aria-label={`Open ${isPublicLinkedInLead ? 'LinkedIn profile' : 'lead source'} for ${lead.name}`}
                           className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-blue-200 hover:text-blue-700"
-                          href={lead.website || lead.listingUrl || '#'}
+                          href={primaryActionUrl || '#'}
                           onClick={(event) => {
-                            if (!lead.website && !lead.listingUrl) event.preventDefault();
+                            if (!primaryActionUrl) event.preventDefault();
                           }}
                           rel="noreferrer"
                           target="_blank"

@@ -25,6 +25,7 @@ export type ProviderWarning = {
   providerId: string;
   providerName: string;
   message: string;
+  severity?: 'info' | 'warning' | 'error';
 };
 
 export type ProviderCoverage = {
