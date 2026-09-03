@@ -177,7 +177,7 @@ Owner at Austin Dental Spa.
       categoryMatchedTerms: expect.arrayContaining([expect.stringMatching(/dentist|dental/i)]),
       roleMatchedTerms: expect.arrayContaining([expect.stringMatching(/owner/i)]),
       queryFamilies: expect.arrayContaining([
-        expect.stringMatching(/multi-term-cluster|role-led|category-location|legacy-profile/),
+        expect.stringMatching(/multi-term-cluster|owner-led|role-led|category-location|legacy-profile/),
       ]),
       locationEvidence: 'Austin, TX',
       categoryMatched: true,
@@ -187,9 +187,10 @@ Owner at Austin Dental Spa.
     expect(result.coverage?.queriesAttempted).toBeGreaterThan(0);
     expect(result.coverage?.providersChecked).toBe(4);
     expect(result.coverage?.queryFamilies).toEqual(
-      expect.arrayContaining(['multi-term-cluster', 'role-led']),
+      expect.arrayContaining(['multi-term-cluster', 'owner-led', 'role-led']),
     );
     expect(result.coverage?.queryFamilyCounts['multi-term-cluster']).toBeGreaterThan(0);
+    expect(result.coverage?.queryFamilyCounts['owner-led']).toBeGreaterThan(0);
     expect(result.coverage?.queryFamilyCounts['role-led']).toBeGreaterThan(0);
   });
 

@@ -984,9 +984,10 @@ describe('App', () => {
           publicContactsFound: 1,
           publicQueriesAttempted: 12,
           publicProvidersChecked: 3,
-          publicQueryFamilies: ['multi-term-cluster', 'role-led', 'legacy-profile'],
+          publicQueryFamilies: ['multi-term-cluster', 'owner-led', 'role-led', 'legacy-profile'],
           publicQueryFamilyCounts: {
             'multi-term-cluster': 5,
+            'owner-led': 3,
             'role-led': 4,
             'legacy-profile': 3,
           },
@@ -1024,6 +1025,7 @@ describe('App', () => {
     expect(content).toContain('Role-led paths');
     expect(content).toContain('Legacy profiles');
     expect(content).toContain('5 queries');
+    expect(content).toContain('3 queries');
     expect(content).toContain('4 queries');
     expect(content).toContain('12 query paths');
     expect(content).toContain('3 public search sources');

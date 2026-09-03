@@ -77,6 +77,7 @@ const queryFamilyLabels: Record<string, string> = {
   'category-location': 'Category + location',
   'legacy-profile': 'Legacy profiles',
   'multi-term-cluster': 'Multi-term clusters',
+  'owner-led': 'Owner/founder paths',
   'role-led': 'Role-led paths',
 };
 
@@ -84,6 +85,7 @@ const queryFamilyDescriptions: Record<string, string> = {
   'category-location': 'Direct category and regional profile searches.',
   'legacy-profile': 'Public legacy /pub profile searches.',
   'multi-term-cluster': 'Grouped category and role term searches.',
+  'owner-led': 'Public searches for founders, owners, principals, and operating heads.',
   'role-led': 'Decision-maker role searches across the category.',
 };
 

@@ -856,6 +856,9 @@ const buildBooleanQuery = (terms: string[], limit: number) => {
   return `(${quotedTerms.join(' OR ')})`;
 };
 
+const ownerRolePattern =
+  /\b(founder|co-founder|owner|co-owner|business owner|owner operator|proprietor|franchisee|franchise owner|president|principal|managing partner|managing member|brand owner|brand founder|practice owner|clinic owner|store owner|agency principal|insurance agency owner|dealer principal)\b/i;
+
 const getLinkedInQueryFamily = (query: string) => {
   const normalized = query.toLowerCase();
 
@@ -865,6 +868,10 @@ const getLinkedInQueryFamily = (query: string) => {
 
   if (normalized.includes(' or ')) {
     return 'multi-term-cluster';
+  }
+
+  if (ownerRolePattern.test(normalized)) {
+    return 'owner-led';
   }
 
   if (
@@ -1608,6 +1615,10 @@ const buildQueryVariants = (
   const secondaryCompany = selectSecondaryCompanyTerm(companyTerms, primaryCompany);
   const primaryLocation = locationTerms[0] ?? normalizeQueryTerm(location.label);
   const prioritizedRoleTerms = prioritizeRoleTerms(genericRoleTerms, categoryRoleTerms);
+  const ownerRoleQueries = prioritizedRoleTerms
+    .filter((role) => ownerRolePattern.test(role))
+    .slice(0, 2)
+    .map((role) => buildLinkedInQuery(primaryCompany, primaryLocation, role));
   const assistedQueries = unique(
     queryHints
       .map((hint) =>
@@ -1653,6 +1664,9 @@ const buildQueryVariants = (
       return buildLinkedInQuery(company, locationTerm, role);
     }),
   ];
+  const roleLedQueries = roleQueries
+    .filter((query) => getLinkedInQueryFamily(query) === 'role-led')
+    .slice(0, 1);
 
   const companyQueries = locationTerms.flatMap((locationTerm, index) => [
     buildLinkedInQuery(index % 2 === 0 ? primaryCompany : secondaryCompany, locationTerm),
@@ -1679,11 +1693,12 @@ const buildQueryVariants = (
     ...highSignalClusters,
     ...assistedQueries,
     buildLinkedInQueryFromPhrase(`${request.companyType} in ${primaryLocation}`),
+    ...roleLedQueries,
     ...aliasQueries,
-    ...roleQueries.slice(0, 4),
     legacyProfileQuery,
+    ...ownerRoleQueries,
+    ...roleQueries,
     ...legacyRoleQueries,
-    ...roleQueries.slice(4, 10),
     ...discoveryQueries.slice(0, 5),
     ...companyQueries.slice(0, 5),
     ...roleQueries.slice(10),
@@ -1692,7 +1707,7 @@ const buildQueryVariants = (
   ]);
 
   const minimumBudget =
-    location.mode === 'timezone' || location.mode === 'nationwide' ? 16 : 12;
+    location.mode === 'timezone' || location.mode === 'nationwide' ? 16 : 13;
   const queryBudget = Math.min(
     maxQueries,
     Math.max(minimumBudget, Math.ceil(request.count / 35) + 8),

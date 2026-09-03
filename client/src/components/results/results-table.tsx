@@ -31,6 +31,7 @@ const queryFamilyLabels: Record<string, string> = {
   'category-location': 'Category + location',
   'legacy-profile': 'Legacy profile',
   'multi-term-cluster': 'Multi-term cluster',
+  'owner-led': 'Owner/founder path',
   'role-led': 'Role-led',
 };
 
