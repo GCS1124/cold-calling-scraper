@@ -55,6 +55,8 @@ export type SearchProgress = {
   enriched: number;
   /** Count of leads with a validated public email or phone number. */
   publicContactsFound?: number;
+  /** Number of discovered candidates removed by the mandatory phone gate. */
+  phoneExcludedCount?: number;
   /** Number of public LinkedIn query paths attempted during discovery. */
   publicQueriesAttempted?: number;
   /** Number of free public search sources contacted during discovery. */

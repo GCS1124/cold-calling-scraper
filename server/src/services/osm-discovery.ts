@@ -51,6 +51,13 @@ const overpassRequestTimeoutMs = Number(
   process.env.OSM_OVERPASS_HTTP_TIMEOUT_MS ?? 30_000,
 );
 
+// A slow Overpass replica should not consume the whole AI-mode window. The
+// remaining replicas are useful only if we fail fast enough to reach them.
+const overpassAttemptTimeoutMs = Math.min(
+  overpassRequestTimeoutMs,
+  Math.max(2_000, Number(process.env.OSM_OVERPASS_ATTEMPT_TIMEOUT_MS ?? 8_000)),
+);
+
 const maxReturnedCandidates = Number(
   process.env.OSM_MAX_RETURNED_CANDIDATES ?? 600,
 );
@@ -489,7 +496,7 @@ const fetchOverpass = async (
             'Content-Type': 'text/plain',
             'User-Agent': overpassUserAgent,
           },
-          timeout: Math.min(overpassRequestTimeoutMs, remainingMs),
+          timeout: Math.min(overpassAttemptTimeoutMs, remainingMs),
           validateStatus: () => true,
         });
 

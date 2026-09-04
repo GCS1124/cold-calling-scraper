@@ -25,6 +25,7 @@ import {
 } from '../providers/gemini';
 import { enforcePhoneRequirement } from './phone-requirement';
 import { noUsableResultsWarning } from './search-finalization';
+import { mergeLinkedInWithPublicListings } from './public-entity-matching';
 
 export type AiDiscoveryResult = {
   leads: Lead[];
@@ -193,52 +194,50 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
         });
       }
     }
-    let discoveryResult: LinkedInDiscoveryResult = {
-      leads: [],
-      warnings: [],
-      blocked: false,
-    };
+    // Run independent free sources together so a slow LinkedIn provider does
+    // not consume the entire window before OSM gets a chance to return phones.
+    const discoveryDeadlineMs = Math.min(deadlineMs, Date.now() + discoveryWindowMs);
+    const linkedinDiscoveryPromise = withTimeout(
+      discoverLinkedin({
+        request,
+        location,
+        queryHints,
+        deadlineMs: discoveryDeadlineMs,
+      }),
+      discoveryDeadlineMs,
+      'Free public discovery timed out before the batch completed.',
+    )
+      .then((result) => {
+        for (const warning of result.warnings) {
+          addWarning(warnings, warning);
+        }
+        updateCoverage(coverage, 'linkedin-public-search', {
+          status: result.blocked ? 'failed' : 'returned',
+          leadCount: result.leads.length,
+          message: result.blocked
+            ? 'Public search providers were blocked or rate-limited; no unverified profiles were added.'
+            : 'Public LinkedIn profile results were matched and deduplicated.',
+        });
+        return result;
+      })
+      .catch((error): LinkedInDiscoveryResult => {
+        addWarning(warnings, {
+          providerId: 'linkedin-public-search',
+          providerName: 'Public LinkedIn Search',
+          message:
+            error instanceof Error
+              ? `${error.message} No unverified leads were added.`
+              : 'Free public discovery failed. No unverified leads were added.',
+        });
+        updateCoverage(coverage, 'linkedin-public-search', {
+          status: 'failed',
+          message: error instanceof Error ? error.message : 'Public discovery failed.',
+        });
+        return { leads: [], warnings: [], blocked: false };
+      });
 
-    try {
-      discoveryResult = await withTimeout(
-        discoverLinkedin({
-          request,
-          location,
-          queryHints,
-          deadlineMs: Math.min(deadlineMs, Date.now() + discoveryWindowMs),
-        }),
-        deadlineMs,
-        'Free public discovery timed out before the batch completed.',
-      );
-      for (const warning of discoveryResult.warnings) {
-        addWarning(warnings, warning);
-      }
-      updateCoverage(coverage, 'linkedin-public-search', {
-        status: discoveryResult.blocked ? 'failed' : 'returned',
-        leadCount: discoveryResult.leads.length,
-        message: discoveryResult.blocked
-          ? 'Public search providers were blocked or rate-limited; no unverified profiles were added.'
-          : 'Public LinkedIn profile results were matched and deduplicated.',
-      });
-    } catch (error) {
-      addWarning(warnings, {
-        providerId: 'linkedin-public-search',
-        providerName: 'Public LinkedIn Search',
-        message:
-          error instanceof Error
-            ? `${error.message} No unverified leads were added.`
-            : 'Free public discovery failed. No unverified leads were added.',
-      });
-      updateCoverage(coverage, 'linkedin-public-search', {
-        status: 'failed',
-        message: error instanceof Error ? error.message : 'Public discovery failed.',
-      });
-    }
-
-    let publicListingLeads: Lead[] = [];
-    if (discoverPublicListings && Date.now() < deadlineMs) {
-      try {
-        publicListingLeads = await withTimeout(
+    const publicListingPromise = discoverPublicListings
+      ? withTimeout(
           discoverPublicListings({
             request: {
               companyType: request.companyType,
@@ -246,34 +245,44 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
             },
             location,
             profile: resolveCategoryProfile(request.companyType),
-            deadlineMs: Math.min(deadlineMs, Date.now() + discoveryWindowMs),
+            deadlineMs: discoveryDeadlineMs,
           }),
-          deadlineMs,
+          discoveryDeadlineMs,
           'Public business-listing discovery timed out; LinkedIn results were preserved.',
-        );
-        updateCoverage(coverage, 'public-business-listings', {
-          status: 'returned',
-          leadCount: publicListingLeads.length,
-          message: 'Free public business listings were merged with public LinkedIn results.',
-        });
-      } catch (error) {
-        addWarning(warnings, {
-          providerId: 'public-business-listings',
-          providerName: 'Public Business Listings',
-          message:
-            error instanceof Error
-              ? `${error.message} LinkedIn results were preserved.`
-              : 'Public business-listing discovery failed. LinkedIn results were preserved.',
-        });
-        updateCoverage(coverage, 'public-business-listings', {
-          status: 'failed',
-          message: error instanceof Error ? error.message : 'Public business-listing discovery failed.',
-        });
-      }
-    }
+        )
+          .then((leads) => {
+            updateCoverage(coverage, 'public-business-listings', {
+              status: 'returned',
+              leadCount: leads.length,
+              message: 'Free public business listings were merged with public LinkedIn results.',
+            });
+            return leads;
+          })
+          .catch((error): Lead[] => {
+            addWarning(warnings, {
+              providerId: 'public-business-listings',
+              providerName: 'Public Business Listings',
+              message:
+                error instanceof Error
+                  ? `${error.message} LinkedIn results were preserved.`
+                  : 'Public business-listing discovery failed. LinkedIn results were preserved.',
+            });
+            updateCoverage(coverage, 'public-business-listings', {
+              status: 'failed',
+              message:
+                error instanceof Error ? error.message : 'Public business-listing discovery failed.',
+            });
+            return [];
+          })
+      : Promise.resolve([] as Lead[]);
+
+    const [discoveryResult, publicListingLeads] = await Promise.all([
+      linkedinDiscoveryPromise,
+      publicListingPromise,
+    ]);
 
     let leads = deduplicateLeads(
-      [...discoveryResult.leads, ...publicListingLeads].map(enrichLead),
+      mergeLinkedInWithPublicListings(discoveryResult.leads, publicListingLeads).map(enrichLead),
     );
     let enrichedCount = 0;
 
@@ -377,6 +386,7 @@ const buildResponse = ({
         discovered: visibleLeads.length,
         enriched: result.enrichedCount,
         publicContactsFound: visibleLeads.filter((lead) => lead.hasEmail || lead.hasPhone).length,
+        phoneExcludedCount: phoneRequirement.excludedCount,
         publicQueriesAttempted: result.publicCoverage?.queriesAttempted,
         publicProvidersChecked: result.publicCoverage?.providersChecked,
         publicQueryFamilies: result.publicCoverage?.queryFamilies,

@@ -79,6 +79,7 @@ const buildResponse = ({
         publicContactsFound: visibleLeads.filter(
           (lead) => lead.hasEmail || lead.hasPhone,
         ).length,
+        phoneExcludedCount: phoneRequirement.excludedCount,
         publicQueriesAttempted: coverage?.queriesAttempted,
         publicProvidersChecked: coverage?.providersChecked,
         publicQueryFamilies: coverage?.queryFamilies,

@@ -193,6 +193,13 @@ export function HomePage({ searchApi }: HomePageProps) {
 
   const isWaiting = Boolean(result && pollingStatuses.includes(result.meta.status));
   const isCancelled = result?.meta.status === 'cancelled';
+  const phoneExcludedCount = result?.meta.progress.phoneExcludedCount ?? 0;
+  const phoneGateFailure = Boolean(
+    result &&
+      result.meta.status === 'failed' &&
+      result.meta.progress.foundCount === 0 &&
+      phoneExcludedCount > 0,
+  );
 
   const summary = useMemo(() => {
     const allLeads = result?.leads ?? [];
@@ -204,9 +211,9 @@ export function HomePage({ searchApi }: HomePageProps) {
       withWebsite: visibleLeads.filter((lead) => lead.hasWebsite).length,
       publicContacts: visibleLeads.filter((lead) => lead.hasEmail || lead.hasPhone).length,
       missingEmail: allLeads.filter((lead) => !lead.hasEmail).length,
-      missingPhone: allLeads.filter((lead) => !lead.hasPhone).length,
+      missingPhone: Math.max(allLeads.filter((lead) => !lead.hasPhone).length, phoneExcludedCount),
     };
-  }, [result?.leads, visibleLeads]);
+  }, [phoneExcludedCount, result?.leads, visibleLeads]);
 
   const progressBasis = result
     ? Math.max(
@@ -284,6 +291,8 @@ export function HomePage({ searchApi }: HomePageProps) {
         ? 'Collecting contact details'
         : result.meta.status === 'cancelled'
           ? 'Search cancelled'
+        : phoneGateFailure
+          ? 'No eligible leads after phone validation'
         : linkedinDiscoveryBlocked
               ? 'LinkedIn discovery blocked'
               : result.meta.status === 'failed'
@@ -312,6 +321,8 @@ export function HomePage({ searchApi }: HomePageProps) {
                 ? 'The partial research snapshot is preserved. Resume when you want to continue public-source discovery.'
               : linkedinDiscoveryBlocked
                       ? 'Free public-search providers temporarily blocked this request. No unverified or fabricated leads were added.'
+                      : phoneGateFailure
+                        ? `${phoneExcludedCount} public candidate${phoneExcludedCount === 1 ? '' : 's'} were discovered, but none exposed a validated public phone/mobile number. Those profiles were not accepted as leads.`
                       : result.meta.status === 'failed'
                         ? 'The search could not be completed. Adjust the query and try again.'
                         : providerFailureNotice
@@ -332,7 +343,9 @@ export function HomePage({ searchApi }: HomePageProps) {
       ? linkedinDiscoveryBlocked
         ? 'LinkedIn discovery was blocked by the free public-search providers. Try again later or switch location.'
         : result.meta.status === 'failed'
-          ? 'Search could not be completed because no usable leads passed the public-contact validation gate.'
+          ? phoneGateFailure
+            ? `${phoneExcludedCount} public candidates were found, but none had a validated publicly listed phone/mobile number. Broaden the category or location and try again.`
+            : 'Search could not be completed because no usable leads passed the public-contact validation gate.'
           : result.meta.status === 'complete'
             ? phoneRequirementWarning
               ? 'No leads with a validated publicly listed phone/mobile number were found. Broaden the category or location and try again.'
@@ -668,6 +681,7 @@ export function HomePage({ searchApi }: HomePageProps) {
               missingEmail={summary.missingEmail}
               missingPhone={summary.missingPhone}
               duplicatesRemoved={result.meta.progress.duplicatesRemoved ?? 0}
+              phoneExcludedCount={phoneExcludedCount}
             />
           ) : (
             <section className="grid gap-4 md:grid-cols-3">
@@ -696,9 +710,11 @@ export function HomePage({ searchApi }: HomePageProps) {
 
           {result ? (
             <section
-              className={`rounded-[1.75rem] border p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] ${
-                result.meta.status === 'failed'
+                className={`rounded-[1.75rem] border p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] ${
+                result.meta.status === 'failed' && !phoneGateFailure
                   ? 'border-red-200 bg-red-50/90'
+                  : phoneGateFailure
+                    ? 'border-amber-200 bg-amber-50/90'
                   : result.meta.status === 'cancelled'
                     ? 'border-slate-300 bg-slate-100/90'
                   : linkedinDiscoveryBlocked
@@ -712,8 +728,10 @@ export function HomePage({ searchApi }: HomePageProps) {
                 <div className="flex items-start gap-4">
                   <div
                     className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${
-                      result.meta.status === 'failed'
+                      result.meta.status === 'failed' && !phoneGateFailure
                         ? 'bg-red-100 text-red-700'
+                        : phoneGateFailure
+                          ? 'bg-amber-100 text-amber-700'
                         : result.meta.status === 'cancelled'
                           ? 'bg-slate-200 text-slate-700'
                         : linkedinDiscoveryBlocked
@@ -725,7 +743,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                   >
                     {isWaiting ? (
                       <LoaderCircle className="h-6 w-6 animate-spin" />
-                    ) : linkedinDiscoveryBlocked ? (
+                    ) : linkedinDiscoveryBlocked || phoneGateFailure ? (
                       <AlertTriangle className="h-6 w-6" />
                     ) : result.meta.status === 'complete' ? (
                       <CheckCircle2 className="h-6 w-6" />
@@ -868,10 +886,12 @@ export function HomePage({ searchApi }: HomePageProps) {
                       <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                         {aiProviderCoverage.map((provider) => {
                           const statusLabel =
-                            provider.status === 'not_configured'
-                              ? 'Not used'
-                              : provider.status === 'returned'
-                                ? `${provider.leadCount} leads`
+                              provider.status === 'not_configured'
+                                ? 'Not used'
+                                : provider.status === 'returned'
+                                ? provider.providerId === 'gemini-query-assistance'
+                                  ? 'Query wording returned'
+                                  : `${provider.leadCount} discovered`
                                 : provider.status === 'failed'
                                   ? 'Unavailable'
                                   : 'Ready';
@@ -897,6 +917,16 @@ export function HomePage({ searchApi }: HomePageProps) {
                             </div>
                           );
                         })}
+                      </div>
+                    ) : null}
+
+                    {phoneExcludedCount > 0 ? (
+                      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-sm text-amber-950">
+                        <p className="font-bold">Eligibility gate</p>
+                        <p className="mt-1 leading-5 text-amber-900/80">
+                          {phoneExcludedCount} discovered candidate{phoneExcludedCount === 1 ? '' : 's'}
+                          {' '}were excluded because AI mode requires a validated public phone/mobile number.
+                        </p>
                       </div>
                     ) : null}
 

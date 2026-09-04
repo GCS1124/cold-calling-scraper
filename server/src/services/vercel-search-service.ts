@@ -129,6 +129,7 @@ const createProgress = (requestedCount: number): SearchProgress => ({
   discovered: 0,
   enriched: 0,
   publicContactsFound: 0,
+  phoneExcludedCount: 0,
   totalCandidates: 0,
   requestedCount,
   foundCount: 0,
@@ -199,6 +200,7 @@ const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
 
 const finalizeLeads = (job: SearchJobRecord) => {
   const phoneRequirement = enforcePhoneRequirement(job.leads, job.request);
+  job.progress.phoneExcludedCount = phoneRequirement.excludedCount;
   if (phoneRequirement.warning) {
     appendWarningOnce(job, phoneRequirement.warning);
   }

@@ -6,6 +6,7 @@ type ResultsSummaryProps = {
   missingEmail: number;
   missingPhone: number;
   duplicatesRemoved: number;
+  phoneExcludedCount?: number;
 };
 
 function Stat({ label, value }: { label: string; value: number }) {
@@ -27,6 +28,7 @@ export function ResultsSummary({
   missingEmail,
   missingPhone,
   duplicatesRemoved,
+  phoneExcludedCount = 0,
 }: ResultsSummaryProps) {
   return (
     <section className="grid gap-4 lg:grid-cols-[1.6fr_repeat(5,0.55fr)]">
@@ -37,6 +39,12 @@ export function ResultsSummary({
         <h2 className="mt-3 text-2xl font-semibold text-slate-950">
           {found} leads found for {companyType || 'your query'} in {location || 'your location'}
         </h2>
+        {phoneExcludedCount > 0 ? (
+          <p className="mt-3 text-sm leading-5 text-amber-800">
+            {phoneExcludedCount} discovered candidate{phoneExcludedCount === 1 ? '' : 's'} were
+            excluded because a validated public phone/mobile number is required.
+          </p>
+        ) : null}
       </div>
 
       <Stat label="Requested" value={requested} />

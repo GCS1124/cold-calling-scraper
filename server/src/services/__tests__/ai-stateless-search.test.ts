@@ -125,6 +125,7 @@ describe('runStatelessAiSearch', () => {
         message: expect.stringContaining('Excluded 1 lead'),
       }),
     );
+    expect(response.meta.progress.phoneExcludedCount).toBe(1);
   });
 
   it('fails instead of claiming completion when no public-phone lead survives validation', async () => {
@@ -189,5 +190,50 @@ describe('runStatelessAiSearch', () => {
         leadCount: 1,
       }),
     );
+  });
+
+  it('bridges a public listing phone into an unqualified LinkedIn owner lead', async () => {
+    const owner = makeLead({
+      name: 'Avery Smith',
+      headline: 'Owner at Austin Dental Studio',
+      mobile: '',
+      website: 'https://austindentalstudio.com',
+      hasPhone: false,
+      verifiedPhone: false,
+    });
+    const listing = makeLead({
+      id: 'osm-owner-business',
+      name: 'Austin Dental Studio',
+      source: 'OpenStreetMap',
+      listingUrl: 'https://www.openstreetmap.org/node/456',
+      website: 'https://austindentalstudio.com',
+      mobile: '+1 512 555 0199',
+      hasPhone: true,
+      verifiedPhone: true,
+    });
+    const discovery = createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({
+        leads: [owner],
+        warnings: [],
+        blocked: false,
+      }) as never,
+      discoverPublicListings: vi.fn().mockResolvedValue([listing]) as never,
+      enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
+        leads,
+        warnings: [],
+        enrichedCount: leads.length,
+      })) as never,
+    });
+
+    const result = await discovery({
+      request: { companyType: 'Dentist', city: 'Austin, TX', count: 50, phoneRequired: true },
+      location,
+    });
+
+    expect(result.leads).toHaveLength(1);
+    expect(result.leads[0]?.name).toBe('Avery Smith');
+    expect(result.leads[0]?.mobile).toBe('+1 512 555 0199');
+    expect(result.leads[0]?.source).toContain('OpenStreetMap');
+    expect(result.leads[0]?.contactSourceUrl).toBe(listing.listingUrl);
   });
 });

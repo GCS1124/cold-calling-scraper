@@ -172,6 +172,7 @@ export type SearchResponse = {
       discovered: number;
       enriched: number;
       publicContactsFound?: number;
+      phoneExcludedCount?: number;
       publicQueriesAttempted?: number;
       publicProvidersChecked?: number;
       publicQueryFamilies?: string[];
