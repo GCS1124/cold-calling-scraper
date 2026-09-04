@@ -5,6 +5,7 @@ import type { SearchRequest } from '../../types/search';
 
 const mocks = vi.hoisted(() => ({
   discover: vi.fn(),
+  listings: vi.fn(),
   enrich: vi.fn(),
   normalize: vi.fn(),
 }));
@@ -17,11 +18,18 @@ vi.mock('../linkedin-contact-enrichment', () => ({
   enrichLinkedinLeadsWithPublicContacts: mocks.enrich,
 }));
 
+vi.mock('../osm-discovery', () => ({
+  discoverUsLeadsFromOsm: mocks.listings,
+}));
+
 vi.mock('../us-location', () => ({
   normalizeUsLocation: mocks.normalize,
 }));
 
-import { runStatelessLinkedinSearch } from '../linkedin-stateless-search';
+import {
+  createStatelessLinkedinSearch,
+  runStatelessLinkedinSearch,
+} from '../linkedin-stateless-search';
 
 const location = {
   mode: 'local' as const,
@@ -70,6 +78,7 @@ describe('runStatelessLinkedinSearch', () => {
       warnings: [],
       blocked: false,
     });
+    mocks.listings.mockResolvedValue([]);
     mocks.enrich.mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
       leads: leads.map((lead) =>
         makeLead({
@@ -177,6 +186,56 @@ describe('runStatelessLinkedinSearch', () => {
         message: expect.stringContaining('Excluded 1 lead'),
       }),
     );
+  });
+
+  it('bridges a matching free listing phone into a LinkedIn owner profile', async () => {
+    const owner = makeLead({
+      id: 'linkedin-owner',
+      name: 'Avery Smith',
+      headline: 'Owner at Austin Dental Studio',
+      website: 'https://austindental.example',
+      listingUrl: 'https://linkedin.com/in/avery-smith',
+    });
+    const listing = makeLead({
+      id: 'osm-owner-business',
+      name: 'Austin Dental Studio',
+      headline: '',
+      source: 'OpenStreetMap',
+      listingUrl: 'https://www.openstreetmap.org/node/456',
+      website: 'https://austindental.example',
+      mobile: '+1 512 555 0199',
+      hasPhone: true,
+      verifiedPhone: true,
+    });
+    const search = createStatelessLinkedinSearch({
+      discoverLinkedin: vi.fn().mockResolvedValue({
+        leads: [owner],
+        warnings: [],
+        blocked: false,
+      }),
+      discoverPublicListings: vi.fn().mockResolvedValue([listing]),
+      enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
+        leads,
+        warnings: [],
+        enrichedCount: leads.length,
+      })),
+      normalizeLocation: vi.fn().mockResolvedValue(location),
+    });
+
+    const response = await search({
+      ...request,
+      phoneRequired: true,
+    });
+
+    expect(response.meta.status).toBe('complete');
+    expect(response.leads).toHaveLength(1);
+    expect(response.leads[0]).toMatchObject({
+      id: 'linkedin-owner',
+      mobile: '+1 512 555 0199',
+      contactSourceUrl: 'https://www.openstreetmap.org/node/456',
+    });
+    expect(response.leads[0]?.listingUrl).toBe('https://linkedin.com/in/avery-smith');
+    expect(response.leads[0]?.source).toContain('OpenStreetMap');
   });
 
   it('returns a truthful failed response when location normalization fails', async () => {

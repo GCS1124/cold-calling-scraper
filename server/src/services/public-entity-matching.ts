@@ -129,7 +129,7 @@ const mergePersonWithListing = (person: Lead, listing: Lead) =>
     ],
   });
 
-export const mergeLinkedInWithPublicListings = (
+const matchLinkedInPeopleToPublicListings = (
   linkedinLeads: Lead[],
   publicListingLeads: Lead[],
 ) => {
@@ -149,6 +149,27 @@ export const mergeLinkedInWithPublicListings = (
     usedListingIds.add(listing.id);
     return mergePersonWithListing(person, listing);
   });
+
+  return { mergedPeople, usedListingIds };
+};
+
+/**
+ * Bridge only corroborated listing data into LinkedIn profiles. Unmatched
+ * listings stay out of LinkedIn mode so its result set remains profile-led.
+ */
+export const bridgeLinkedInWithPublicListings = (
+  linkedinLeads: Lead[],
+  publicListingLeads: Lead[],
+) => matchLinkedInPeopleToPublicListings(linkedinLeads, publicListingLeads).mergedPeople;
+
+export const mergeLinkedInWithPublicListings = (
+  linkedinLeads: Lead[],
+  publicListingLeads: Lead[],
+) => {
+  const { mergedPeople, usedListingIds } = matchLinkedInPeopleToPublicListings(
+    linkedinLeads,
+    publicListingLeads,
+  );
 
   return [
     ...mergedPeople,

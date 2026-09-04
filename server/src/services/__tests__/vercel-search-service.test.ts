@@ -379,6 +379,76 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.meta.providerWarnings).toHaveLength(0);
   });
 
+  it('bridges a matching free listing phone into durable LinkedIn discovery', async () => {
+    const owner = makeLead({
+      id: 'linkedin-owner',
+      name: 'Avery Smith',
+      headline: 'Owner at Austin Dental Studio',
+      mobile: '',
+      hasPhone: false,
+      verifiedPhone: false,
+      website: 'https://austindental.example',
+      hasWebsite: true,
+      source: 'LinkedIn',
+      listingUrl: 'https://linkedin.com/in/avery-smith',
+    });
+    const listing = makeLead({
+      id: 'osm-owner-business',
+      name: 'Austin Dental Studio',
+      source: 'OpenStreetMap',
+      listingUrl: 'https://www.openstreetmap.org/node/456',
+      website: 'https://austindental.example',
+      mobile: '+1 512 555 0199',
+      hasPhone: true,
+      verifiedPhone: true,
+    });
+    const discoverLinkedinLeads = vi.fn().mockResolvedValue({
+      leads: [owner],
+      warnings: [],
+      blocked: false,
+    });
+    const discoverLinkedinListings = vi.fn().mockResolvedValue([listing]);
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      discoverLinkedinLeads,
+      discoverLinkedinListings,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-linkedin-bridge',
+      now: () => 1000,
+    });
+
+    const response = await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin, TX',
+      count: 50,
+      sourceMode: 'linkedin',
+      phoneRequired: true,
+    });
+    const completed = await service.getSearch(response.searchId);
+
+    expect(discoverLinkedinLeads).toHaveBeenCalledTimes(1);
+    expect(discoverLinkedinListings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: { companyType: 'Dentist', count: 150 },
+      }),
+    );
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.leads).toHaveLength(1);
+    expect(completed?.leads[0]).toMatchObject({
+      name: 'Avery Smith',
+      mobile: '+1 512 555 0199',
+      contactSourceUrl: 'https://www.openstreetmap.org/node/456',
+    });
+    expect(completed?.leads[0]?.listingUrl).toBe('https://linkedin.com/in/avery-smith');
+    expect(completed?.meta.providerWarnings).toContainEqual(
+      expect.objectContaining({
+        providerId: 'public-business-listings',
+        severity: 'info',
+      }),
+    );
+  });
+
   it('returns the durable in-progress snapshot for overlapping LinkedIn polls', async () => {
     let markDiscoveryStarted = () => {};
     const discoveryStarted = new Promise<void>((resolve) => {

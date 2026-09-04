@@ -9,14 +9,25 @@ import {
   type LinkedInDiscoveryResult,
 } from './linkedin-search';
 import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
+import { discoverUsLeadsFromOsm } from './osm-discovery';
+import { bridgeLinkedInWithPublicListings } from './public-entity-matching';
 import { enforcePhoneRequirement } from './phone-requirement';
 import { noUsableResultsWarning } from './search-finalization';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
+import { resolveCategoryProfile } from './us-category-mapping';
+import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 
 // Keep the no-database path within the Vercel function budget. It returns a
 // completed public-only response, so the client does not need a durable poll.
 const discoveryWindowMs = 25_000;
 const contactEnrichmentWindowMs = 18_000;
+
+type StatelessLinkedInSearchDeps = {
+  discoverLinkedin?: typeof discoverUsLeadsFromLinkedinSearch;
+  discoverPublicListings?: typeof discoverUsLeadsFromOsm;
+  enrichPublicContacts?: typeof enrichLinkedinLeadsWithPublicContacts;
+  normalizeLocation?: typeof normalizeUsLocation;
+};
 
 const addWarnings = (target: ProviderWarning[], incoming: ProviderWarning[]) => {
   for (const warning of incoming) {
@@ -134,86 +145,160 @@ const buildDiscoveryFailureWarning = (error: unknown): ProviderWarning => ({
       : 'Public LinkedIn discovery failed. No unverified leads were added.',
 });
 
-export const runStatelessLinkedinSearch = async (
-  request: SearchRequest,
-): Promise<SearchResponse> => {
-  const searchId = `linkedin-stateless-${randomUUID()}`;
-  let location: NormalizedUsLocation;
+export const createStatelessLinkedinSearch = (
+  deps: StatelessLinkedInSearchDeps = {},
+) => {
+  const discoverLinkedin = deps.discoverLinkedin ?? discoverUsLeadsFromLinkedinSearch;
+  const discoverPublicListings =
+    deps.discoverPublicListings ??
+    (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromOsm);
+  const enrichPublicContacts =
+    deps.enrichPublicContacts ?? enrichLinkedinLeadsWithPublicContacts;
+  const normalizeLocation = deps.normalizeLocation ?? normalizeUsLocation;
 
-  try {
-    location = await normalizeUsLocation(request.city);
-  } catch (error) {
-    return buildLocationFailureResponse(searchId, request, error);
-  }
+  return async (request: SearchRequest): Promise<SearchResponse> => {
+    const searchId = `linkedin-stateless-${randomUUID()}`;
+    let location: NormalizedUsLocation;
 
-  const warnings: ProviderWarning[] = [];
-  addWarnings(warnings, location.warnings);
-
-  let discoveryResult: LinkedInDiscoveryResult = {
-    leads: [],
-    warnings: [],
-    blocked: false,
-  };
-
-  try {
-    discoveryResult = await discoverUsLeadsFromLinkedinSearch({
-      request,
-      location,
-      deadlineMs: Date.now() + discoveryWindowMs,
-    });
-    addWarnings(warnings, discoveryResult.warnings);
-  } catch (error) {
-    addWarnings(warnings, [buildDiscoveryFailureWarning(error)]);
-  }
-
-  if (!discoveryResult.leads.length && discoveryResult.blocked) {
-    addWarnings(warnings, [
-      {
-        providerId: 'linkedin-search',
-        providerName: 'LinkedIn',
-        message:
-          'LinkedIn search providers were blocked or rate-limited, so no public profiles were returned.',
-      },
-    ]);
-  }
-
-  let leads = deduplicateLeads(discoveryResult.leads.map(enrichLead));
-  const discovered = leads.length;
-  let enriched = 0;
-
-  if (leads.length) {
     try {
-      const contactResult = await enrichLinkedinLeadsWithPublicContacts({
-        leads,
-        request,
-        location,
-        deadlineMs: Date.now() + contactEnrichmentWindowMs,
-      });
-      addWarnings(warnings, contactResult.warnings);
-      leads = deduplicateLeads(contactResult.leads.map(enrichLead));
-      enriched = contactResult.enrichedCount;
+      location = await normalizeLocation(request.city);
     } catch (error) {
+      return buildLocationFailureResponse(searchId, request, error);
+    }
+
+    const warnings: ProviderWarning[] = [];
+    addWarnings(warnings, location.warnings);
+
+    let discoveryResult: LinkedInDiscoveryResult = {
+      leads: [],
+      warnings: [],
+      blocked: false,
+    };
+
+    const discoveryDeadlineMs = Date.now() + discoveryWindowMs;
+    const [linkedinResult, publicListingLeads] = await Promise.all([
+      (async () => {
+        try {
+          return await discoverLinkedin({
+            request,
+            location,
+            deadlineMs: discoveryDeadlineMs,
+          });
+        } catch (error) {
+          addWarnings(warnings, [buildDiscoveryFailureWarning(error)]);
+          return discoveryResult;
+        }
+      })(),
+      (async () => {
+        if (!discoverPublicListings) {
+          return [] as Lead[];
+        }
+
+        try {
+          const listings = await discoverPublicListings({
+            request: {
+              companyType: request.companyType,
+              count: getLeadDiscoveryCandidateTarget(request.count, 3),
+            },
+            location,
+            profile: resolveCategoryProfile(request.companyType),
+            deadlineMs: discoveryDeadlineMs,
+          });
+
+          if (listings.length) {
+            addWarnings(warnings, [
+              {
+                providerId: 'public-business-listings',
+                providerName: 'Public Business Listings',
+                message:
+                  `Checked ${listings.length} free public listings to corroborate LinkedIn organizations and phone evidence.`,
+                severity: 'info',
+              },
+            ]);
+          }
+
+          return listings;
+        } catch (error) {
+          addWarnings(warnings, [
+            {
+              providerId: 'public-business-listings',
+              providerName: 'Public Business Listings',
+              message:
+                error instanceof Error
+                  ? `${error.message} LinkedIn profiles were preserved.`
+                  : 'Public business-listing discovery failed. LinkedIn profiles were preserved.',
+              severity: 'warning',
+            },
+          ]);
+          return [] as Lead[];
+        }
+      })(),
+    ]);
+
+    discoveryResult = linkedinResult;
+    addWarnings(warnings, discoveryResult.warnings);
+
+    if (publicListingLeads.length && discoveryResult.leads.length) {
+      discoveryResult = {
+        ...discoveryResult,
+        leads: bridgeLinkedInWithPublicListings(
+          discoveryResult.leads,
+          publicListingLeads,
+        ),
+      };
+    }
+
+    if (!discoveryResult.leads.length && discoveryResult.blocked) {
       addWarnings(warnings, [
         {
-          providerId: 'linkedin-public-contact-enrichment',
-          providerName: 'Public Contact Search',
+          providerId: 'linkedin-search',
+          providerName: 'LinkedIn',
           message:
-            error instanceof Error
-              ? `${error.message}. Public profiles were preserved; contact fields may be incomplete.`
-              : 'Public contact enrichment failed. Public profiles were preserved; contact fields may be incomplete.',
+            'LinkedIn search providers were blocked or rate-limited, so no public profiles were returned.',
         },
       ]);
     }
-  }
 
-  return buildResponse({
-    searchId,
-    request,
-    locationLabel: location.label,
-    leads,
-    discovered,
-    enriched,
-    warnings,
-    coverage: discoveryResult.coverage,
-  });
+    let leads = deduplicateLeads(discoveryResult.leads.map(enrichLead));
+    const discovered = leads.length;
+    let enriched = 0;
+
+    if (leads.length) {
+      try {
+        const contactResult = await enrichPublicContacts({
+          leads,
+          request,
+          location,
+          deadlineMs: Date.now() + contactEnrichmentWindowMs,
+        });
+        addWarnings(warnings, contactResult.warnings);
+        leads = deduplicateLeads(contactResult.leads.map(enrichLead));
+        enriched = contactResult.enrichedCount;
+      } catch (error) {
+        addWarnings(warnings, [
+          {
+            providerId: 'linkedin-public-contact-enrichment',
+            providerName: 'Public Contact Search',
+            message:
+              error instanceof Error
+                ? `${error.message}. Public profiles were preserved; contact fields may be incomplete.`
+                : 'Public contact enrichment failed. Public profiles were preserved; contact fields may be incomplete.',
+          },
+        ]);
+      }
+    }
+
+    return buildResponse({
+      searchId,
+      request,
+      locationLabel: location.label,
+      leads,
+      discovered,
+      enriched,
+      warnings,
+      coverage: discoveryResult.coverage,
+    });
+  };
 };
+
+export const runStatelessLinkedinSearch = createStatelessLinkedinSearch();

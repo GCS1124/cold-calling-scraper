@@ -336,6 +336,72 @@ describe('createSearchService', () => {
     expect(completed?.meta.providerWarnings).toHaveLength(0);
   });
 
+  it('bridges a matching free listing phone into local LinkedIn discovery', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+    const owner = {
+      ...sampleLead,
+      id: 'linkedin-owner',
+      name: 'Avery Smith',
+      headline: 'Owner at Austin Dental Studio',
+      mobile: '',
+      hasPhone: false,
+      verifiedPhone: false,
+      website: 'https://austindental.example',
+      hasWebsite: true,
+      source: 'LinkedIn',
+      listingUrl: 'https://linkedin.com/in/avery-smith',
+    };
+    const listing = {
+      ...sampleLead,
+      id: 'osm-owner-business',
+      name: 'Austin Dental Studio',
+      source: 'OpenStreetMap',
+      listingUrl: 'https://www.openstreetmap.org/node/456',
+      website: 'https://austindental.example',
+      mobile: '+1 512 555 0199',
+      hasPhone: true,
+      verifiedPhone: true,
+    };
+    const service = createSearchService({
+      idFactory: () => 'search-linkedin-bridge',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverLinkedinLeads: vi.fn().mockResolvedValue({
+        leads: [owner],
+        warnings: [],
+        blocked: false,
+      }),
+      discoverOsmLeads: vi.fn().mockResolvedValue([listing]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin',
+      count: 50,
+      sourceMode: 'linkedin',
+      phoneRequired: true,
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-linkedin-bridge');
+
+    expect(completed?.meta.status).toBe('complete');
+    expect(completed?.leads).toHaveLength(1);
+    expect(completed?.leads[0]).toMatchObject({
+      name: 'Avery Smith',
+      mobile: '+1 512 555 0199',
+      contactSourceUrl: 'https://www.openstreetmap.org/node/456',
+    });
+    expect(completed?.leads[0]?.listingUrl).toBe('https://linkedin.com/in/avery-smith');
+  });
+
   it('merges public LinkedIn contact enrichment into the completed lead', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
     const enrichLinkedinLeads = vi.fn().mockImplementation(async ({ leads }) => ({

@@ -36,6 +36,7 @@ import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 import { createResearchQueue, type ResearchQueue } from './research-queue';
 import { reverifyLeads } from './research-reverification';
 import { noUsableResultsWarning } from './search-finalization';
+import { bridgeLinkedInWithPublicListings } from './public-entity-matching';
 import {
   leadSourceModeLabels,
   normalizeLeadSourceMode,
@@ -82,6 +83,7 @@ type VercelSearchServiceDeps = {
     profile: ReturnType<typeof resolveCategoryProfile>;
     deadlineMs?: number;
   }) => Promise<Lead[]>;
+  discoverLinkedinListings?: NonNullable<VercelSearchServiceDeps['discoverOsmLeads']>;
   enrichWebsiteLead?: (lead: Lead) => Promise<unknown>;
   now?: () => number;
   idFactory?: () => string;
@@ -251,15 +253,47 @@ const runLinkedinDiscovery = async (
   request: SearchRequest,
   location: NormalizedUsLocation,
   discoverLinkedinLeads: NonNullable<VercelSearchServiceDeps['discoverLinkedinLeads']>,
+  discoverPublicListings: VercelSearchServiceDeps['discoverLinkedinListings'],
   now: () => number,
 ) => {
   job.progress.currentSource = leadSourceModeLabels.linkedin;
 
-  const linkedinResult = await discoverLinkedinLeads({
+  const discoveryDeadlineMs = now() + getLinkedinProfileDiscoveryWindowMs(request.count);
+  const linkedinResultPromise = discoverLinkedinLeads({
     request,
     location,
-    deadlineMs: now() + getLinkedinProfileDiscoveryWindowMs(request.count),
+    deadlineMs: discoveryDeadlineMs,
   });
+  const publicListingPromise = discoverPublicListings
+    ? discoverPublicListings({
+        request: {
+          companyType: request.companyType,
+          count: getLeadDiscoveryCandidateTarget(request.count, 3),
+        },
+        location,
+        profile: resolveCategoryProfile(request.companyType),
+        deadlineMs: Math.min(
+          discoveryDeadlineMs,
+          now() + getGooglePlacesTimeoutMs(request.count),
+        ),
+      }).catch((error): Lead[] => {
+        appendWarningOnce(job, {
+          providerId: 'public-business-listings',
+          providerName: 'Public Business Listings',
+          message:
+            error instanceof Error
+              ? `${error.message} LinkedIn profiles were preserved.`
+              : 'Public business-listing discovery failed. LinkedIn profiles were preserved.',
+          severity: 'warning',
+        });
+        return [];
+      })
+    : Promise.resolve([] as Lead[]);
+
+  const [linkedinResult, publicListingLeads] = await Promise.all([
+    linkedinResultPromise,
+    publicListingPromise,
+  ]);
 
   for (const warning of linkedinResult.warnings) {
     appendWarningOnce(job, warning);
@@ -285,7 +319,21 @@ const runLinkedinDiscovery = async (
     return;
   }
 
-  mergeLeads(job, linkedinResult.leads, now);
+  if (publicListingLeads.length) {
+    appendWarningOnce(job, {
+      providerId: 'public-business-listings',
+      providerName: 'Public Business Listings',
+      message:
+        `Checked ${publicListingLeads.length} free public listings to corroborate LinkedIn organizations and phone evidence.`,
+      severity: 'info',
+    });
+  }
+
+  mergeLeads(
+    job,
+    bridgeLinkedInWithPublicListings(linkedinResult.leads, publicListingLeads),
+    now,
+  );
   job.progress.batchesCompleted += 1;
 };
 
@@ -530,6 +578,7 @@ const tickJob = async (
       VercelSearchServiceDeps,
       | 'discoverGoogleMapsLeads'
       | 'discoverLinkedinLeads'
+      | 'discoverLinkedinListings'
       | 'discoverAiLeads'
       | 'enrichLinkedinLeads'
     >,
@@ -663,6 +712,7 @@ const tickJob = async (
           job.request,
           targetLocation,
           discoverLinkedinLeads,
+          deps.discoverLinkedinListings,
           deps.now,
         );
 
@@ -841,6 +891,9 @@ export const createVercelSearchServiceWithDeps = (
     deps.enrichLinkedinLeads ??
     (deps.discoverLinkedinLeads ? undefined : enrichLinkedinLeadsWithPublicContacts);
   const discoverOsm = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
+  const discoverLinkedinListings =
+    deps.discoverLinkedinListings ??
+    (process.env.NODE_ENV === 'test' ? undefined : discoverOsm);
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
   const getStoredSearch = async (searchId: string) => {
@@ -883,6 +936,7 @@ export const createVercelSearchServiceWithDeps = (
       normalizeLocation,
       discoverGoogleMapsLeads,
       discoverLinkedinLeads,
+      discoverLinkedinListings,
       discoverAiLeads,
       enrichLinkedinLeads,
       discoverOsmLeads: discoverOsm,

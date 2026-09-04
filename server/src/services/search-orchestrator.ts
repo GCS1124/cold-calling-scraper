@@ -43,6 +43,7 @@ import { getResearchDepthConfig } from './research-depth';
 import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 import { reverifyLeads } from './research-reverification';
 import { noUsableResultsWarning } from './search-finalization';
+import { bridgeLinkedInWithPublicListings } from './public-entity-matching';
 
 type SearchJob = {
   searchId: string;
@@ -97,9 +98,10 @@ type SearchDeps = {
     deadlineMs?: number;
   }) => Promise<AiDiscoveryResult>;
   discoverOsmLeads?: (args: {
-    request: SearchRequest;
+    request: { companyType: string; count: number };
     location: NormalizedUsLocation;
     profile: ReturnType<typeof resolveCategoryProfile>;
+    deadlineMs?: number;
   }) => Promise<Lead[]>;
   schedule?: (task: () => Promise<void>) => void;
   now?: () => number;
@@ -311,21 +313,60 @@ const runLinkedinDiscovery = async (
   location: NormalizedUsLocation,
   discoverLinkedinLeads: NonNullable<SearchDeps['discoverLinkedinLeads']>,
   enrichLinkedinLeads: SearchDeps['enrichLinkedinLeads'],
+  discoverPublicListings: SearchDeps['discoverOsmLeads'] | undefined,
   now: () => number,
 ) => {
   job.progress.currentSource = leadSourceModeLabels.linkedin;
 
+  const discoveryDeadlineMs = Date.now() + linkedinProfileDiscoveryWindowMs;
+  const linkedinResultPromise = withTimeout(
+    discoverLinkedinLeads({
+      request,
+      location,
+      deadlineMs: discoveryDeadlineMs,
+    }),
+    linkedinDiscoveryTimeoutMs,
+    'LinkedIn discovery timed out before the batch completed',
+  );
+  const publicListingPromise = discoverPublicListings
+    ? withTimeout(
+        discoverPublicListings({
+          request: {
+            companyType: request.companyType,
+            count: getLeadDiscoveryCandidateTarget(request.count, 3),
+          },
+          location,
+          profile: resolveCategoryProfile(request.companyType),
+          deadlineMs: Math.min(
+            discoveryDeadlineMs,
+            Date.now() + osmDiscoveryTimeoutMs,
+          ),
+        }),
+        osmDiscoveryTimeoutMs,
+        'Public business-listing discovery timed out before the batch completed',
+      ).catch((error): Lead[] => {
+        appendUniqueWarnings(job, [
+          {
+            providerId: 'public-business-listings',
+            providerName: 'Public Business Listings',
+            message:
+              error instanceof Error
+                ? `${error.message} LinkedIn profiles were preserved.`
+                : 'Public business-listing discovery failed. LinkedIn profiles were preserved.',
+            severity: 'warning',
+          },
+        ]);
+        return [];
+      })
+    : Promise.resolve([] as Lead[]);
+
   let linkedinResult: LinkedInDiscoveryResult;
+  let publicListingLeads: Lead[];
   try {
-    linkedinResult = await withTimeout(
-      discoverLinkedinLeads({
-        request,
-        location,
-        deadlineMs: Date.now() + linkedinProfileDiscoveryWindowMs,
-      }),
-      linkedinDiscoveryTimeoutMs,
-      'LinkedIn discovery timed out before the batch completed',
-    );
+    [linkedinResult, publicListingLeads] = await Promise.all([
+      linkedinResultPromise,
+      publicListingPromise,
+    ]);
   } catch (error) {
     if (error instanceof Error && /timed out/i.test(error.message)) {
       appendUniqueWarnings(job, [
@@ -365,7 +406,23 @@ const runLinkedinDiscovery = async (
     return;
   }
 
-  upsertLeads(job, linkedinResult.leads, now);
+  if (publicListingLeads.length) {
+    appendUniqueWarnings(job, [
+      {
+        providerId: 'public-business-listings',
+        providerName: 'Public Business Listings',
+        message:
+          `Checked ${publicListingLeads.length} free public listings to corroborate LinkedIn organizations and phone evidence.`,
+        severity: 'info',
+      },
+    ]);
+  }
+
+  const bridgedLinkedinLeads = bridgeLinkedInWithPublicListings(
+    linkedinResult.leads,
+    publicListingLeads,
+  );
+  upsertLeads(job, bridgedLinkedinLeads, now);
 
   if (enrichLinkedinLeads) {
     job.status = 'enriching';
@@ -375,7 +432,7 @@ const runLinkedinDiscovery = async (
     try {
       const contactResult = await withTimeout(
         enrichLinkedinLeads({
-          leads: linkedinResult.leads,
+          leads: bridgedLinkedinLeads,
           request,
           location,
           deadlineMs: Date.now() + linkedinContactEnrichmentWindowMs,
@@ -615,6 +672,9 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     deps.enrichLinkedinLeads ??
     (deps.discoverLinkedinLeads ? undefined : enrichLinkedinLeadsWithPublicContacts);
   const discoverOsmLeads = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
+  const discoverLinkedinListings =
+    deps.discoverOsmLeads ??
+    (process.env.NODE_ENV === 'test' ? undefined : discoverOsmLeads);
   const now = deps.now ?? Date.now;
   const idFactory = deps.idFactory ?? randomUUID;
   const schedule =
@@ -693,6 +753,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
           location,
           discoverLinkedinLeads,
           enrichLinkedinLeads,
+          discoverLinkedinListings,
           now,
         );
       } catch (error) {
