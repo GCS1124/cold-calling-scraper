@@ -1,5 +1,6 @@
 import type { Lead } from '../types/lead';
 import type { ProviderWarning, SearchRequest } from '../types/search';
+import { isPhoneQualifiedLead } from './phone-requirement';
 import type { NormalizedUsLocation } from './us-location';
 import { enrichLead } from './lead-validation';
 import {
@@ -1161,11 +1162,21 @@ export const enrichLinkedinLeadsWithPublicContacts = async ({
   const warnings: ProviderWarning[] = [];
   const providerHealth = createContactProviderHealth();
   let completed = 0;
+  const prioritizedLeads = leads
+    .map((lead, index) => ({ lead, index }))
+    .sort((left, right) => {
+      const leftPriority =
+        Number(!isPhoneQualifiedLead(left.lead)) * 10 + Number(Boolean(left.lead.website)) * 2;
+      const rightPriority =
+        Number(!isPhoneQualifiedLead(right.lead)) * 10 + Number(Boolean(right.lead.website)) * 2;
+
+      return rightPriority - leftPriority || left.index - right.index;
+    });
 
   await runWithConcurrency(
-    leads,
+    prioritizedLeads,
     Math.min(10, concurrency),
-    async (lead, index) => {
+    async ({ lead, index }) => {
       if (Date.now() >= deadlineMs) {
         enriched[index] = preserveLeadAfterEnrichmentFailure(lead);
         completed += 1;

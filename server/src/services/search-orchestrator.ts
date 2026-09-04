@@ -32,7 +32,7 @@ import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
-import { enforcePhoneRequirement } from './phone-requirement';
+import { enforcePhoneRequirement, isPhoneQualifiedLead } from './phone-requirement';
 import { buildDiscoverySeeds } from './discovery-seeds';
 import {
   leadSourceModeLabels,
@@ -40,6 +40,7 @@ import {
   type LeadSourceMode,
 } from './search-source-mode';
 import { getResearchDepthConfig } from './research-depth';
+import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 import { reverifyLeads } from './research-reverification';
 import { noUsableResultsWarning } from './search-finalization';
 
@@ -247,12 +248,15 @@ const appendUniqueWarnings = (job: SearchJob, warnings: ProviderWarning[]) => {
 const refreshProgress = (job: SearchJob) => {
   job.progress.discovered = job.leads.length;
   job.progress.totalCandidates = job.leads.length;
-  job.progress.foundCount = job.leads.length;
+  job.progress.foundCount = Math.min(job.leads.length, job.request.count);
   job.progress.publicContactsFound = job.leads.filter(
     (lead) => lead.hasEmail || lead.hasPhone,
   ).length;
   job.progress.estimatedRemaining = Math.max(0, job.request.count - job.leads.length);
 };
+
+const hasRequestedPhoneCandidates = (job: SearchJob) =>
+  job.leads.filter(isPhoneQualifiedLead).length >= job.request.count;
 
 const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
   rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
@@ -461,6 +465,11 @@ const runRegionalDiscovery = async (
   discoverOsmLeads: NonNullable<SearchDeps['discoverOsmLeads']>,
   now: () => number,
 ) => {
+  const candidateTargetCount = getLeadDiscoveryCandidateTarget(request.count);
+  const discoveryRequest = {
+    ...request,
+    count: candidateTargetCount,
+  };
   job.progress.currentSource =
     discoveryLocation.mode === 'nationwide' ? 'Nationwide Discovery' : 'Google Places API';
   const queryVariants = buildDiscoveryQueryVariants(
@@ -488,7 +497,7 @@ const runRegionalDiscovery = async (
         const googleLeads = await withTimeout(
           typeof discoverGoogleLeads === 'function'
             ? discoverGoogleLeads({
-                request,
+                request: discoveryRequest,
                 location: discoveryLocation,
                 queryVariants,
                 deadlineMs: Date.now() + googleDiscoveryTimeoutMs,
@@ -498,9 +507,9 @@ const runRegionalDiscovery = async (
                 query: `${request.companyType} in ${discoveryLocation.label}`,
                 queryVariants,
                 request: {
-                  ...request,
+                  ...discoveryRequest,
                   city: discoveryLocation.label,
-                  count: Math.max(request.count, 100),
+                  count: Math.max(discoveryRequest.count, 100),
                 },
                 location: discoveryLocation,
                 deadlineMs: Date.now() + googleDiscoveryTimeoutMs,
@@ -526,7 +535,7 @@ const runRegionalDiscovery = async (
       try {
         const osmLeads = await withTimeout(
           discoverOsmLeads({
-            request,
+            request: discoveryRequest,
             location: discoveryLocation,
             profile,
           }),
@@ -549,21 +558,26 @@ const runRegionalDiscovery = async (
 
   let googleMapsUnavailable = false;
 
-  if (job.progress.foundCount < request.count && discoverGoogleMapsLeads) {
+  if (
+    job.leads.length < candidateTargetCount &&
+    !hasRequestedPhoneCandidates(job) &&
+    discoverGoogleMapsLeads
+  ) {
     try {
-      const remainingCount = request.count - job.progress.foundCount;
+      const remainingCount = candidateTargetCount - job.leads.length;
+      const googleMapsRequestCount = Math.min(Math.max(remainingCount, 15), 60);
       const googleMapsLeads = await withTimeout(
         discoverGoogleMapsLeads({
           request: {
-          ...request,
-          count: Math.min(Math.max(remainingCount, 15), 30),
-        },
-        location: discoveryLocation,
-        queryVariants,
-        maxResults: Math.min(Math.max(remainingCount, 15), 30),
-        queryLimit: getResearchDepthConfig(request.researchDepth).googleMapsQueryLimit,
-        deadlineMs: Date.now() + googleMapsDiscoveryTimeoutMs,
-      }),
+            ...request,
+            count: googleMapsRequestCount,
+          },
+          location: discoveryLocation,
+          queryVariants,
+          maxResults: googleMapsRequestCount,
+          queryLimit: getResearchDepthConfig(request.researchDepth).googleMapsQueryLimit,
+          deadlineMs: Date.now() + googleMapsDiscoveryTimeoutMs,
+        }),
         googleMapsDiscoveryTimeoutMs,
         'Google Maps discovery timed out before the batch completed',
       );
@@ -709,6 +723,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
 
     const profile = resolveCategoryProfile(job.request.companyType);
     job.providerWarnings.push(...profile.warnings);
+    const candidateTargetCount = getLeadDiscoveryCandidateTarget(job.request.count);
 
     const discoverySeeds = buildDiscoverySeeds(location);
 
@@ -730,12 +745,13 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
 
     for (const regionalLocation of discoveryLocations) {
       if (!isCurrentRun(job, executionToken)) return;
-      if (job.progress.foundCount >= job.request.count) {
+      if (job.leads.length >= candidateTargetCount || hasRequestedPhoneCandidates(job)) {
         break;
       }
 
       if (
-        job.progress.foundCount < job.request.count &&
+        job.leads.length < candidateTargetCount &&
+        !hasRequestedPhoneCandidates(job) &&
         now() - job.lastProgressAt >= getDiscoveryStallMs(job.request.count)
       ) {
         appendUniqueWarnings(job, [{
@@ -747,7 +763,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         break;
       }
 
-      const foundCountBeforeRegional = job.progress.foundCount;
+      const foundCountBeforeRegional = job.leads.length;
       const regionalResult = await runRegionalDiscovery(
         job,
         job.request,
@@ -768,7 +784,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
 
       if (
         job.googleMapsUnavailable &&
-        job.progress.foundCount === foundCountBeforeRegional
+        job.leads.length === foundCountBeforeRegional
       ) {
         appendUniqueWarnings(job, [{
           providerId: 'discovery-limit',
@@ -780,7 +796,8 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       }
 
       if (
-        job.progress.foundCount < job.request.count &&
+        job.leads.length < candidateTargetCount &&
+        !hasRequestedPhoneCandidates(job) &&
         now() - job.lastProgressAt >= getDiscoveryStallMs(job.request.count)
       ) {
         appendUniqueWarnings(job, [{

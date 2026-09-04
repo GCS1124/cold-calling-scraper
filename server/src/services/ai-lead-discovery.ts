@@ -26,6 +26,7 @@ import {
 import { enforcePhoneRequirement } from './phone-requirement';
 import { noUsableResultsWarning } from './search-finalization';
 import { mergeLinkedInWithPublicListings } from './public-entity-matching';
+import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 
 export type AiDiscoveryResult = {
   leads: Lead[];
@@ -241,7 +242,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
           discoverPublicListings({
             request: {
               companyType: request.companyType,
-              count: Math.min(Math.max(request.count * 2, 50), 180),
+              count: getLeadDiscoveryCandidateTarget(request.count),
             },
             location,
             profile: resolveCategoryProfile(request.companyType),
@@ -334,7 +335,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     }
 
     return {
-      leads: leads.slice(0, request.count),
+      leads: leads.slice(0, getLeadDiscoveryCandidateTarget(request.count)),
       warnings,
       coverage,
       aiAssistance,

@@ -21,7 +21,7 @@ import {
 } from '../providers/google-places';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
-import { enforcePhoneRequirement } from './phone-requirement';
+import { enforcePhoneRequirement, isPhoneQualifiedLead } from './phone-requirement';
 import {
   createSearchJobStore,
   CURRENT_SCHEMA_VERSION,
@@ -32,6 +32,7 @@ import { resolveCategoryProfile } from './us-category-mapping';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { buildDiscoverySeeds } from './discovery-seeds';
 import { getResearchDepthConfig } from './research-depth';
+import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 import { createResearchQueue, type ResearchQueue } from './research-queue';
 import { reverifyLeads } from './research-reverification';
 import { noUsableResultsWarning } from './search-finalization';
@@ -166,12 +167,15 @@ const rankDiscoveryCandidates = (leads: Lead[]) =>
 const refreshProgress = (job: SearchJobRecord) => {
   job.progress.discovered = job.leads.length;
   job.progress.totalCandidates = job.leads.length;
-  job.progress.foundCount = job.leads.length;
+  job.progress.foundCount = Math.min(job.leads.length, job.request.count);
   job.progress.publicContactsFound = job.leads.filter(
     (lead) => lead.hasEmail || lead.hasPhone,
   ).length;
   job.progress.estimatedRemaining = Math.max(0, job.request.count - job.leads.length);
 };
+
+const hasRequestedPhoneCandidates = (job: SearchJobRecord) =>
+  job.leads.filter(isPhoneQualifiedLead).length >= job.request.count;
 
 const getLastProgressAt = (job: SearchJobRecord) => job.lastProgressAt ?? job.createdAt;
 
@@ -394,7 +398,8 @@ const discoverRegionLeads = async (
   profile = resolveCategoryProfile(request.companyType),
   deadlineMs = Date.now() + getMaxTickDurationMs(request.count),
 ) => {
-  const perSeedCount = getPerSeedCount(request.count);
+  const candidateTargetCount = getLeadDiscoveryCandidateTarget(request.count);
+  const perSeedCount = getPerSeedCount(candidateTargetCount);
   const googleRequest: SearchRequest = {
     ...request,
     city: discoveryLocation.label,
@@ -477,10 +482,14 @@ const discoverRegionLeads = async (
   let googleMapsLeads: Lead[] = [];
   let googleMapsUnavailable = false;
 
-  if (acceptedDiscoveryLeads.length < request.count && discoverGoogleMapsLeads) {
+  if (
+    acceptedDiscoveryLeads.length < candidateTargetCount &&
+    acceptedDiscoveryLeads.filter(isPhoneQualifiedLead).length < request.count &&
+    discoverGoogleMapsLeads
+  ) {
     try {
-      const remainingCount = request.count - acceptedDiscoveryLeads.length;
-      const googleMapsRequestCount = Math.min(Math.max(remainingCount, 15), 30);
+      const remainingCount = candidateTargetCount - acceptedDiscoveryLeads.length;
+      const googleMapsRequestCount = Math.min(Math.max(remainingCount, 15), 60);
       const googleMapsDeadlineMs = Math.min(
         deadlineMs,
         now() + getGoogleMapsTimeoutMs(request.count),
@@ -558,6 +567,7 @@ const tickJob = async (
   }
 
   const sourceMode: LeadSourceMode = normalizeLeadSourceMode(job.request.sourceMode);
+  const candidateTargetCount = getLeadDiscoveryCandidateTarget(job.request.count);
   const discoverGoogleMapsForSearch = deps.discoverGoogleMapsLeads
     ? async (
         args: Parameters<NonNullable<VercelSearchServiceDeps['discoverGoogleMapsLeads']>>[0],
@@ -729,7 +739,7 @@ const tickJob = async (
         continue;
       }
 
-      const foundCountBeforeRegional = job.progress.foundCount;
+      const foundCountBeforeRegional = job.leads.length;
       const { leads, warnings, googleMapsUnavailable } = await discoverRegionLeads(
         job.request,
         targetLocation,
@@ -750,7 +760,7 @@ const tickJob = async (
 
       if (
         job.googleMapsUnavailable &&
-        job.progress.foundCount === foundCountBeforeRegional
+        job.leads.length === foundCountBeforeRegional
       ) {
         job.discoveryComplete = true;
         appendWarningOnce(job, {
@@ -767,7 +777,7 @@ const tickJob = async (
       processed += 1;
       job.expiresAt = withNow() + jobTtlMs;
 
-      if (job.progress.foundCount >= job.request.count) {
+      if (job.leads.length >= candidateTargetCount || hasRequestedPhoneCandidates(job)) {
         break;
       }
     }
@@ -775,7 +785,8 @@ const tickJob = async (
 
   job.discoveryComplete = job.nextSeedIndex >= job.searchSeeds.length;
   const stalledForTooLong =
-    job.progress.foundCount < job.request.count &&
+    job.leads.length < candidateTargetCount &&
+    !hasRequestedPhoneCandidates(job) &&
     deps.now() - getLastProgressAt(job) >= getDiscoveryStallMs(job.request.count);
 
   if (stalledForTooLong) {
@@ -788,7 +799,11 @@ const tickJob = async (
     });
   }
 
-  if (job.progress.foundCount >= job.request.count || job.discoveryComplete) {
+  if (
+    job.leads.length >= candidateTargetCount ||
+    hasRequestedPhoneCandidates(job) ||
+    job.discoveryComplete
+  ) {
     finalizeJobStatus(job);
   } else {
     job.status = 'discovering';

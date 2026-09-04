@@ -11,6 +11,7 @@ import { resolveCategoryProfile } from './us-category-mapping';
 import { buildQueryTermVariants } from './query-term-variants';
 import { isPublicHttpUrl } from '../utils/public-url';
 import { getResearchDepthConfig } from './research-depth';
+import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 
 type SearchResult = {
   title: string;
@@ -110,9 +111,9 @@ const readBoundedNumber = (
 
 const maxQueries = readBoundedNumber(
   process.env.LINKEDIN_SEARCH_MAX_QUERIES,
-  20,
+  24,
   1,
-  40,
+  48,
 );
 const searchTimeoutMs = readBoundedNumber(
   process.env.LINKEDIN_SEARCH_TIMEOUT_MS,
@@ -142,10 +143,12 @@ const getCandidateBudget = (
   researchDepth?: SearchRequest['researchDepth'],
 ) => {
   const { queryMultiplier } = getResearchDepthConfig(researchDepth);
+  const baselineTarget = getLeadDiscoveryCandidateTarget(requestedCount);
+  const depthHeadroom = requestedCount + Math.ceil(requestedCount * 0.75 * queryMultiplier);
 
   return Math.min(
-    600,
-    requestedCount + Math.max(18, Math.ceil(requestedCount * 0.35 * queryMultiplier)),
+    1_200,
+    Math.max(baselineTarget, depthHeadroom),
   );
 };
 
@@ -2691,7 +2694,7 @@ export const discoverUsLeadsFromLinkedinSearch = async ({
         right.relevanceScore - left.relevanceScore ||
         left.name.localeCompare(right.name),
     )
-    .slice(0, request.count)
+    .slice(0, maxResults)
     .map((candidate) => buildLeadFromCandidate(candidate, request, location));
 
   const blocked =
