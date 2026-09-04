@@ -45,7 +45,7 @@ type AiDiscoveryDeps = {
 };
 
 const discoveryWindowMs = 24_000;
-const contactEnrichmentWindowMs = 12_000;
+const contactEnrichmentWindowMs = 18_000;
 const queryAssistanceWindowMs = 8_000;
 
 const withTimeout = async <T>(promise: Promise<T>, deadlineMs: number, message: string) => {
@@ -242,7 +242,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
           discoverPublicListings({
             request: {
               companyType: request.companyType,
-              count: getLeadDiscoveryCandidateTarget(request.count),
+              count: getLeadDiscoveryCandidateTarget(request.count, 3),
             },
             location,
             profile: resolveCategoryProfile(request.companyType),
@@ -335,7 +335,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     }
 
     return {
-      leads: leads.slice(0, getLeadDiscoveryCandidateTarget(request.count)),
+      leads: leads.slice(0, getLeadDiscoveryCandidateTarget(request.count, 3)),
       warnings,
       coverage,
       aiAssistance,

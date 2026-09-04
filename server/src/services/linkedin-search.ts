@@ -143,7 +143,7 @@ const getCandidateBudget = (
   researchDepth?: SearchRequest['researchDepth'],
 ) => {
   const { queryMultiplier } = getResearchDepthConfig(researchDepth);
-  const baselineTarget = getLeadDiscoveryCandidateTarget(requestedCount);
+  const baselineTarget = getLeadDiscoveryCandidateTarget(requestedCount, 3);
   const depthHeadroom = requestedCount + Math.ceil(requestedCount * 0.75 * queryMultiplier);
 
   return Math.min(

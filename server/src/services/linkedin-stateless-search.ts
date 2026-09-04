@@ -16,7 +16,7 @@ import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 // Keep the no-database path within the Vercel function budget. It returns a
 // completed public-only response, so the client does not need a durable poll.
 const discoveryWindowMs = 25_000;
-const contactEnrichmentWindowMs = 12_000;
+const contactEnrichmentWindowMs = 18_000;
 
 const addWarnings = (target: ProviderWarning[], incoming: ProviderWarning[]) => {
   for (const warning of incoming) {
