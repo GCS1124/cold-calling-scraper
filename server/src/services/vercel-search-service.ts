@@ -8,6 +8,7 @@ import type {
   SearchRequest,
   SearchResponse,
   SearchAccessContext,
+  SearchFeedbackRequest,
   SearchStartContext,
   SearchStatus,
 } from '../types/search';
@@ -53,6 +54,11 @@ import {
   createSearchRequestFingerprint,
   normalizeIdempotencyKey,
 } from './search-idempotency';
+import { createLeadFeedbackStore, type LeadFeedbackStore } from './lead-feedback-store';
+import {
+  getLeadFeedbackEntityKey,
+  getLeadFeedbackSuppressionKeys,
+} from '../../../shared/lead-feedback';
 import {
   leadSourceModeLabels,
   normalizeLeadSourceMode,
@@ -72,7 +78,7 @@ type VercelSearchService = {
     searchId: string,
     context?: SearchAccessContext,
   ) => Promise<SearchResponse | null>;
-  advanceSearch: (searchId: string) => Promise<SearchResponse | null>;
+  advanceSearch: (searchId: string, ownerId?: string) => Promise<SearchResponse | null>;
   cancelSearch: (
     searchId: string,
     context?: SearchAccessContext,
@@ -83,6 +89,11 @@ type VercelSearchService = {
   ) => Promise<SearchResponse | null>;
   reverifySearch: (
     searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  recordFeedback: (
+    searchId: string,
+    feedback: SearchFeedbackRequest,
     context?: SearchAccessContext,
   ) => Promise<SearchResponse | null>;
 };
@@ -121,6 +132,7 @@ type VercelSearchServiceDeps = {
   enrichWebsiteLead?: WebsiteLeadEnricher;
   now?: () => number;
   idFactory?: () => string;
+  feedbackStore?: LeadFeedbackStore;
 };
 
 const discoverGoogleMapsLeadsOnDemand: NonNullable<
@@ -1089,6 +1101,7 @@ export const createVercelSearchServiceWithDeps = (
   deps: VercelSearchServiceDeps,
 ): VercelSearchService => {
   const store = deps.store ?? createSearchJobStore();
+  const feedbackStore = deps.feedbackStore ?? createLeadFeedbackStore();
   const queue = deps.queue ?? createResearchQueue();
   const inFlightTicks = new Map<string, Promise<SearchJobRecord>>();
   const googlePlaces = deps.googlePlaces ?? googlePlacesProvider;
@@ -1114,14 +1127,20 @@ export const createVercelSearchServiceWithDeps = (
     (process.env.NODE_ENV === 'test' ? undefined : discoverOsm);
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
+  const renderResponse = async (job: SearchJobRecord, ownerId?: string) => {
+    const suppressionKeys = ownerId
+      ? await feedbackStore.getSuppressionKeys(ownerId)
+      : new Set<string>();
+    return toSearchResponse(job, suppressionKeys);
+  };
   const getStoredSearch = async (searchId: string, context?: SearchAccessContext) => {
     await store.ensureSchema();
 
     const job = await store.get(searchId, context?.ownerId);
-    return job ? toSearchResponse(job) : null;
+    return job ? renderResponse(job, context?.ownerId) : null;
   };
 
-  const advanceSearch = async (searchId: string) => {
+  const advanceSearch = async (searchId: string, ownerId?: string) => {
     await store.ensureSchema();
 
     const job = await store.get(searchId);
@@ -1133,7 +1152,7 @@ export const createVercelSearchServiceWithDeps = (
     // remains the source of truth when another request overlaps this work.
     const existingTick = inFlightTicks.get(searchId);
     if (existingTick) {
-      return toSearchResponse(job);
+      return renderResponse(job, ownerId);
     }
 
     const processingToken = randomUUID();
@@ -1146,7 +1165,7 @@ export const createVercelSearchServiceWithDeps = (
 
     if (!claimedJob) {
       const latestJob = await store.get(searchId);
-      return latestJob ? toSearchResponse(latestJob) : null;
+      return latestJob ? renderResponse(latestJob, ownerId) : null;
     }
 
     const tick = tickJob(claimedJob, store, {
@@ -1164,7 +1183,7 @@ export const createVercelSearchServiceWithDeps = (
     inFlightTicks.set(searchId, tick);
 
     try {
-      return toSearchResponse(await tick);
+      return renderResponse(await tick, ownerId);
     } finally {
       if (inFlightTicks.get(searchId) === tick) {
         inFlightTicks.delete(searchId);
@@ -1206,7 +1225,7 @@ export const createVercelSearchServiceWithDeps = (
           context?.ownerId,
         );
         if (existingJob) {
-          return toSearchResponse(existingJob);
+          return renderResponse(existingJob, context?.ownerId);
         }
       }
 
@@ -1237,18 +1256,18 @@ export const createVercelSearchServiceWithDeps = (
 
       const created = await store.create(job);
       if (!created.created) {
-        return toSearchResponse(created.job);
+        return renderResponse(created.job, context?.ownerId);
       }
 
       await queue.enqueue(searchId, createdAt);
 
-      return toSearchResponse(job);
+      return renderResponse(job, context?.ownerId);
     },
 
     async cancelSearch(searchId, context) {
       await store.ensureSchema();
       const cancelled = await store.requestCancel(searchId, now(), context?.ownerId);
-      return cancelled ? toSearchResponse(cancelled) : null;
+      return cancelled ? renderResponse(cancelled, context?.ownerId) : null;
     },
 
     async resumeSearch(searchId, context) {
@@ -1270,7 +1289,7 @@ export const createVercelSearchServiceWithDeps = (
         await queue.enqueue(searchId, now());
       }
 
-      return toSearchResponse(job);
+      return renderResponse(job, context?.ownerId);
     },
 
     async reverifySearch(searchId, context) {
@@ -1293,7 +1312,7 @@ export const createVercelSearchServiceWithDeps = (
       job.updatedAt = now();
       await store.upsert(job);
 
-      return toSearchResponse(job);
+      return renderResponse(job, context?.ownerId);
     },
 
     async getSearch(searchId, context) {
@@ -1302,7 +1321,38 @@ export const createVercelSearchServiceWithDeps = (
         return null;
       }
 
-      return advanceSearch(searchId);
+      return context?.ownerId
+        ? advanceSearch(searchId, context.ownerId)
+        : advanceSearch(searchId);
+    },
+
+    async recordFeedback(searchId, feedback, context) {
+      if (!context?.ownerId) {
+        return null;
+      }
+
+      await store.ensureSchema();
+      const job = await store.get(searchId, context.ownerId);
+      if (!job) return null;
+
+      const qualifiedLead = enforcePhoneRequirement(
+        deduplicateLeads(job.leads),
+        job.request,
+      ).leads.find((lead) => lead.id === feedback.leadId);
+      if (!qualifiedLead) return null;
+
+      await feedbackStore.recordFeedback({
+        searchId,
+        ownerId: context.ownerId,
+        leadId: feedback.leadId,
+        eventType: feedback.eventType,
+        reason: feedback.reason,
+        entityKey: getLeadFeedbackEntityKey(qualifiedLead, feedback.eventType),
+        suppressionKeys: getLeadFeedbackSuppressionKeys(qualifiedLead, feedback.eventType),
+      });
+
+      const latest = await store.get(searchId, context.ownerId);
+      return latest ? renderResponse(latest, context.ownerId) : null;
     },
 
     getSearchSnapshot: getStoredSearch,

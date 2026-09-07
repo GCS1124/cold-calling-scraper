@@ -2,6 +2,7 @@ import type {
   SearchAccessContext,
   SearchRequest,
   SearchResponse,
+  SearchFeedbackRequest,
   SearchStartContext,
 } from '../../server/src/types/search.js';
 
@@ -10,7 +11,7 @@ type VercelSearchService = {
     request: SearchRequest,
     context?: SearchStartContext,
   ) => Promise<SearchResponse>;
-  advanceSearch: (searchId: string) => Promise<SearchResponse | null>;
+  advanceSearch: (searchId: string, ownerId?: string) => Promise<SearchResponse | null>;
   cancelSearch: (
     searchId: string,
     context?: SearchAccessContext,
@@ -21,6 +22,11 @@ type VercelSearchService = {
   ) => Promise<SearchResponse | null>;
   reverifySearch: (
     searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  recordFeedback: (
+    searchId: string,
+    feedback: SearchFeedbackRequest,
     context?: SearchAccessContext,
   ) => Promise<SearchResponse | null>;
 };

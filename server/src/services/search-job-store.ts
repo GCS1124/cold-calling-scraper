@@ -20,6 +20,7 @@ import {
 } from '../../../shared/search-contract';
 import { buildLeadQualitySummary } from './quality-summary';
 import { SearchIdempotencyConflictError } from './search-idempotency';
+import { filterSuppressedLeads } from '../../../shared/lead-feedback';
 
 export type SearchLocationMode =
   | 'local'
@@ -186,6 +187,12 @@ const getPool = () => {
 
   return pool;
 };
+
+// Feedback and suppression use the same bounded pool as durable search jobs.
+// Keeping one pool avoids an extra serverless connection budget per request.
+export const getSearchDatabasePool = () => getPool();
+export const hasSearchDatabase = () => Boolean(connectionString);
+export const isSearchJobVercelRuntime = () => isVercelRuntime;
 
 const nowMs = () => Date.now();
 
@@ -1130,10 +1137,14 @@ const countLeadTotals = (leads: Lead[]) => {
   };
 };
 
-export const toSearchResponse = (job: SearchJobRecord): SearchResponse => {
+export const toSearchResponse = (
+  job: SearchJobRecord,
+  suppressionKeys: ReadonlySet<string> = new Set(),
+): SearchResponse => {
   const qualification = enforcePhoneRequirement(deduplicateLeads(job.leads), job.request);
-  const leads = qualification.leads.slice(0, job.request.count);
-  const emptyCompletion = job.status === 'complete' && !leads.length;
+  const suppression = filterSuppressedLeads(qualification.leads, suppressionKeys);
+  const leads = suppression.leads.slice(0, job.request.count);
+  const emptyCompletion = job.status === 'complete' && !leads.length && !suppression.suppressedCount;
   const contract = buildSearchResponseContract(normalizeLeadSourceMode(job.request.sourceMode));
   const status = emptyCompletion ? 'failed' : job.status;
   const lastProgressAt = new Date(job.lastProgressAt).toISOString();
@@ -1143,6 +1154,14 @@ export const toSearchResponse = (job: SearchJobRecord): SearchResponse => {
   const providerWarnings = dedupeWarnings([
     ...job.providerWarnings,
     ...(qualification.warning ? [qualification.warning] : []),
+    ...(suppression.suppressedCount
+      ? [{
+          providerId: 'workspace-suppression',
+          providerName: 'Workspace feedback',
+          message: `${suppression.suppressedCount} lead(s) were hidden from this workspace after operator feedback.`,
+          severity: 'info' as const,
+        }]
+      : []),
     ...(emptyCompletion ? [noUsableResultsWarning()] : []),
   ]).filter(
     (warning) => !isHiddenWarning(warning),
@@ -1151,6 +1170,7 @@ export const toSearchResponse = (job: SearchJobRecord): SearchResponse => {
     ...job.progress,
     foundCount: leads.length,
     phoneExcludedCount: Math.max(job.progress.phoneExcludedCount ?? 0, qualification.excludedCount),
+    suppressedCount: Math.max(job.progress.suppressedCount ?? 0, suppression.suppressedCount),
     currentSource: emptyCompletion ? 'Failed' : job.progress.currentSource,
     estimatedRemaining: Math.max(0, job.request.count - leads.length),
   };

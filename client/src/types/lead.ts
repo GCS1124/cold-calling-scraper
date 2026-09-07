@@ -219,6 +219,7 @@ export type SearchResponse = {
       enriched: number;
       publicContactsFound?: number;
       phoneExcludedCount?: number;
+      suppressedCount?: number;
       publicQueriesAttempted?: number;
       publicProvidersChecked?: number;
       publicQueryFamilies?: string[];

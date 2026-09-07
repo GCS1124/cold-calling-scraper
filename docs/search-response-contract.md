@@ -103,6 +103,29 @@ the deployment does not provide tenant isolation. Stateless LinkedIn and AI
 fallbacks still verify the caller before returning a response but cannot offer
 cross-instance replay or later owner-scoped polling without durable storage.
 
+## Feedback and suppression
+
+The existing internal application transport accepts a correction event at
+`POST /api/search/:searchId/feedback`. This is not a new public API product or
+provider endpoint. The browser sends only `leadId`, a bounded `eventType`, and
+an optional reason; the server derives suppression keys from the stored,
+phone-qualified lead. Supported events are `wrong_phone`, `wrong_business`,
+`wrong_person`, `former_employee`, `duplicate`, `do_not_contact`, and `useful`.
+
+Feedback requires an authenticated owner even when anonymous search compatibility
+is enabled. Suppression is owner-scoped and is applied to all three modes after
+the mandatory phone gate and before response totals, quality summaries, evidence
+dossiers, and export rows. Responses expose `meta.progress.suppressedCount` and
+a `workspace-suppression` provider notice when a result is intentionally hidden.
+`useful` records learning data without suppressing the lead. A workspace
+correction never modifies public source data and is not treated as global.
+
+Durable feedback requires the Postgres connection used by the durable search
+store. Local development can use a process-memory fallback; Vercel returns a
+structured persistence error instead of silently losing a correction. Team or
+shared-workspace authorization and reviewed correction labels are not implied
+by the owner id and remain separate product work.
+
 ## Coverage semantics
 
 `leadCount` is the number of candidates observed from that provider before the

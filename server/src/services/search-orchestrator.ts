@@ -7,6 +7,7 @@ import type {
   SearchRequest,
   SearchResponse,
   SearchAccessContext,
+  SearchFeedbackRequest,
   SearchStartContext,
   SearchStatus,
 } from '../types/search';
@@ -59,6 +60,12 @@ import {
   normalizeIdempotencyKey,
   SearchIdempotencyConflictError,
 } from './search-idempotency';
+import { createLeadFeedbackStore, type LeadFeedbackStore } from './lead-feedback-store';
+import {
+  filterSuppressedLeads,
+  getLeadFeedbackEntityKey,
+  getLeadFeedbackSuppressionKeys,
+} from '../../../shared/lead-feedback';
 
 type SearchJob = {
   searchId: string;
@@ -101,6 +108,11 @@ type SearchService = {
     searchId: string,
     context?: SearchAccessContext,
   ) => Promise<SearchResponse | null>;
+  recordFeedback: (
+    searchId: string,
+    feedback: SearchFeedbackRequest,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
 };
 
 type SearchDeps = {
@@ -141,6 +153,7 @@ type SearchDeps = {
   schedule?: (task: () => Promise<void>) => void;
   now?: () => number;
   idFactory?: () => string;
+  feedbackStore?: LeadFeedbackStore;
 };
 
 const jobTtlMs = 15 * 60 * 1000;
@@ -236,10 +249,14 @@ const createProgress = (requestedCount: number): SearchProgress => ({
   estimatedRemaining: requestedCount,
 });
 
-const toResponse = (job: SearchJob): SearchResponse => {
+const toResponse = (
+  job: SearchJob,
+  suppressionKeys: ReadonlySet<string> = new Set(),
+): SearchResponse => {
   const qualification = enforcePhoneRequirement(deduplicateLeads(job.leads), job.request);
-  const leads = qualification.leads.slice(0, job.request.count);
-  const emptyCompletion = job.status === 'complete' && !leads.length;
+  const suppression = filterSuppressedLeads(qualification.leads, suppressionKeys);
+  const leads = suppression.leads.slice(0, job.request.count);
+  const emptyCompletion = job.status === 'complete' && !leads.length && !suppression.suppressedCount;
   const contract = buildSearchResponseContract(normalizeLeadSourceMode(job.request.sourceMode));
   const status = emptyCompletion ? 'failed' : job.status;
   const lastProgressAt = new Date(job.lastProgressAt).toISOString();
@@ -268,6 +285,7 @@ const toResponse = (job: SearchJob): SearchResponse => {
         ...job.progress,
         foundCount: leads.length,
         phoneExcludedCount: Math.max(job.progress.phoneExcludedCount ?? 0, qualification.excludedCount),
+        suppressedCount: Math.max(job.progress.suppressedCount ?? 0, suppression.suppressedCount),
         currentSource: emptyCompletion ? 'Failed' : job.progress.currentSource,
         estimatedRemaining: Math.max(0, job.request.count - leads.length),
       },
@@ -275,6 +293,14 @@ const toResponse = (job: SearchJob): SearchResponse => {
       providerWarnings: [
         ...job.providerWarnings,
         ...(qualification.warning ? [qualification.warning] : []),
+        ...(suppression.suppressedCount
+          ? [{
+              providerId: 'workspace-suppression',
+              providerName: 'Workspace feedback',
+              message: `${suppression.suppressedCount} lead(s) were hidden from this workspace after operator feedback.`,
+              severity: 'info' as const,
+            }]
+          : []),
         ...(emptyCompletion ? [noUsableResultsWarning()] : []),
       ],
     },
@@ -912,6 +938,7 @@ const runRegionalDiscovery = async (
 
 export const createSearchService = (deps: SearchDeps = {}): SearchService => {
   const jobs = new Map<string, SearchJob>();
+  const feedbackStore = deps.feedbackStore ?? createLeadFeedbackStore();
   const normalizeLocation = deps.normalizeLocation ?? normalizeUsLocation;
   const discoverGoogleLeads = deps.discoverGoogleLeads ?? googlePlacesProvider;
   const discoverGoogleMapsLeads =
@@ -942,6 +969,13 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         void task();
       }, 0);
     });
+
+  const renderResponse = async (job: SearchJob, ownerId?: string) => {
+    const suppressionKeys = ownerId
+      ? await feedbackStore.getSuppressionKeys(ownerId)
+      : new Set<string>();
+    return toResponse(job, suppressionKeys);
+  };
 
   const markFailed = (job: SearchJob, warning: ProviderWarning) => {
     job.status = 'failed';
@@ -1161,7 +1195,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
             throw new SearchIdempotencyConflictError();
           }
 
-          return toResponse(existingJob);
+          return renderResponse(existingJob, context?.ownerId);
         }
       }
 
@@ -1190,13 +1224,15 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         await processJob(job, executionToken);
       });
 
-      return toResponse(job);
+      return renderResponse(job, context?.ownerId);
     },
 
     async getSearch(searchId, context) {
       cleanupExpiredJobs(jobs, now);
       const job = jobs.get(searchId);
-      return job && canAccessJob(job, context) ? toResponse(job) : null;
+      return job && canAccessJob(job, context)
+        ? renderResponse(job, context?.ownerId)
+        : null;
     },
 
     async cancelSearch(searchId, context) {
@@ -1212,7 +1248,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         job.executionToken = randomUUID();
       }
 
-      return toResponse(job);
+      return renderResponse(job, context?.ownerId);
     },
 
     async resumeSearch(searchId, context) {
@@ -1232,7 +1268,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         });
       }
 
-      return toResponse(job);
+      return renderResponse(job, context?.ownerId);
     },
 
     async reverifySearch(searchId, context) {
@@ -1252,7 +1288,35 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       ]);
       refreshProgress(job);
       job.lastProgressAt = now();
-      return toResponse(job);
+      return renderResponse(job, context?.ownerId);
+    },
+
+    async recordFeedback(searchId, feedback, context) {
+      if (!context?.ownerId) {
+        return null;
+      }
+
+      cleanupExpiredJobs(jobs, now);
+      const job = jobs.get(searchId);
+      if (!job || !canAccessJob(job, context)) return null;
+
+      const qualifiedLead = enforcePhoneRequirement(
+        deduplicateLeads(job.leads),
+        job.request,
+      ).leads.find((lead) => lead.id === feedback.leadId);
+      if (!qualifiedLead) return null;
+
+      await feedbackStore.recordFeedback({
+        searchId,
+        ownerId: context.ownerId,
+        leadId: feedback.leadId,
+        eventType: feedback.eventType,
+        reason: feedback.reason,
+        entityKey: getLeadFeedbackEntityKey(qualifiedLead, feedback.eventType),
+        suppressionKeys: getLeadFeedbackSuppressionKeys(qualifiedLead, feedback.eventType),
+      });
+
+      return renderResponse(job, context.ownerId);
     },
   };
 };

@@ -2,7 +2,11 @@ import cors from 'cors';
 import express from 'express';
 
 import { createSearchRouter, type SearchService } from './routes/search';
-import type { SearchAccessContext, SearchStartContext } from './types/search';
+import type {
+  SearchAccessContext,
+  SearchFeedbackRequest,
+  SearchStartContext,
+} from './types/search';
 
 type AppDeps = {
   search?: SearchService;
@@ -35,6 +39,16 @@ const createLazySearchService = (): SearchService => {
     reverifySearch: async (searchId, context?: SearchAccessContext) => {
       const service = await getService();
       return service.reverifySearch ? service.reverifySearch(searchId, context) : null;
+    },
+    recordFeedback: async (
+      searchId: string,
+      feedback: SearchFeedbackRequest,
+      context?: SearchAccessContext,
+    ) => {
+      const service = await getService();
+      return service.recordFeedback
+        ? service.recordFeedback(searchId, feedback, context)
+        : null;
     },
   };
 };

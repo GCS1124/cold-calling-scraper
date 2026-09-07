@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import { Fragment, useState } from 'react';
 
 import type { Lead } from '../../types/lead';
+import type { LeadFeedbackEventType } from '../../../../shared/lead-feedback';
 import { LeadQualityBadge, LeadQualityDetails } from './lead-quality-details';
 import {
   getLinkedInQualityTier,
@@ -18,6 +19,7 @@ type ResultsTableProps = {
   onToggleSelect: (leadId: string) => void;
   onSelectAll: () => void;
   onCopyRow: (lead: Lead) => void;
+  onFeedback: (lead: Lead, eventType: LeadFeedbackEventType) => void;
 };
 
 type ContactCellProps = {
@@ -74,6 +76,7 @@ export function ResultsTable({
   onToggleSelect,
   onSelectAll,
   onCopyRow,
+  onFeedback,
 }: ResultsTableProps) {
   const allSelected = leads.length > 0 && leads.every((lead) => selectedIds.includes(lead.id));
   const [expandedLeadId, setExpandedLeadId] = useState<string | null>(null);
@@ -375,6 +378,45 @@ export function ResultsTable({
                       <td className="px-4 py-5" colSpan={8}>
                         <div className="sticky left-4 w-[calc(100cqw-2rem)]">
                         <LeadQualityDetails lead={lead} />
+                        <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700">
+                                Improve this workspace
+                              </p>
+                              <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-600">
+                                Flag a bad match or mark a useful lead. Feedback is saved only to your
+                                signed-in workspace and never changes public source data.
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {(
+                                [
+                                  ['wrong_phone', 'Wrong phone'],
+                                  ['wrong_business', 'Wrong business'],
+                                  ['wrong_person', 'Wrong person'],
+                                  ['former_employee', 'Former person'],
+                                  ['duplicate', 'Duplicate'],
+                                  ['do_not_contact', 'Do not contact'],
+                                  ['useful', 'Useful'],
+                                ] as const
+                              ).map(([eventType, label]) => (
+                                <button
+                                  className={`rounded-full border px-3 py-1.5 text-[11px] font-bold transition ${
+                                    eventType === 'useful'
+                                      ? 'border-emerald-200 bg-white text-emerald-700 hover:border-emerald-300'
+                                      : 'border-amber-200 bg-white text-amber-800 hover:border-amber-300'
+                                  }`}
+                                  key={eventType}
+                                  onClick={() => onFeedback(lead, eventType)}
+                                  type="button"
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
                         <div className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
                           <div>
                             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">

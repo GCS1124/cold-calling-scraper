@@ -396,4 +396,23 @@ describe('searchApi', () => {
       }),
     ).rejects.toThrow('Unable to reach the lead search service. Please try again.');
   });
+
+  it('posts workspace feedback without sending contact values from the browser', async () => {
+    const json = vi.fn().mockResolvedValue(successfulPayload);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json,
+    } as unknown as Response);
+
+    await searchApi.recordFeedback?.('search-1', {
+      leadId: 'lead-1',
+      eventType: 'wrong_phone',
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith('/api/search/search-1/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leadId: 'lead-1', eventType: 'wrong_phone' }),
+    });
+  });
 });

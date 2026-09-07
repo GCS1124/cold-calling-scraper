@@ -3,6 +3,7 @@ import { ZodError } from 'zod';
 
 import type {
   SearchAccessContext,
+  SearchFeedbackRequest,
   SearchRequest,
   SearchResponse,
   SearchStartContext,
@@ -17,6 +18,8 @@ import {
   getIdempotencyKey,
 } from '../http/search-http-contract';
 import { SearchIdempotencyConflictError } from '../services/search-idempotency';
+import { isSearchPersistenceError } from '../services/search-job-store';
+import { searchFeedbackSchema } from '../http/search-feedback-contract';
 import {
   authenticateSearchRequest,
   isSearchAuthorizationError,
@@ -42,6 +45,11 @@ export type SearchService = {
   ) => Promise<SearchResponse | null>;
   reverifySearch?: (
     searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  recordFeedback?: (
+    searchId: string,
+    feedback: SearchFeedbackRequest,
     context?: SearchAccessContext,
   ) => Promise<SearchResponse | null>;
 };
@@ -376,6 +384,95 @@ export const handleReverifySearch = async (
   }
 };
 
+export const handleRecordFeedback = async (
+  search: SearchService,
+  req: Pick<SearchRouteRequest, 'headers' | 'params' | 'body'>,
+  res: SearchResponder,
+) => {
+  const requestId = getRequestId(req);
+  setRequestIdHeader(res, requestId);
+
+  try {
+    const auth = await authenticateSearchRequest(req);
+    if (!auth.ownerId) {
+      sendSearchError(res, 401, {
+        code: 'FEEDBACK_AUTH_REQUIRED',
+        message: 'Sign in to save lead feedback to your workspace.',
+        retryable: false,
+        requestId,
+      });
+      return;
+    }
+
+    const searchId = req.params.searchId;
+    if (!searchId) {
+      sendSearchError(res, 400, {
+        code: 'MISSING_SEARCH_ID',
+        message: 'Missing search id',
+        retryable: false,
+        requestId,
+      });
+      return;
+    }
+
+    if (!search.recordFeedback) {
+      sendSearchError(res, 501, {
+        code: 'FEEDBACK_UNAVAILABLE',
+        message: 'Lead feedback is not available',
+        retryable: false,
+        requestId,
+      });
+      return;
+    }
+
+    const feedback = searchFeedbackSchema.parse(req.body);
+    const response = await search.recordFeedback(searchId, feedback, {
+      ownerId: auth.ownerId,
+    });
+    if (!response) {
+      sendSearchError(res, 404, {
+        code: 'LEAD_NOT_FOUND',
+        message: 'Lead not found in this workspace search',
+        retryable: false,
+        requestId,
+      });
+      return;
+    }
+
+    res.status(200).json(withSearchRequestId(response, requestId));
+  } catch (error) {
+    if (sendAuthorizationError(error, res, requestId)) return;
+
+    if (error instanceof ZodError) {
+      sendSearchError(res, 400, {
+        code: 'INVALID_FEEDBACK',
+        message: 'Invalid lead feedback',
+        retryable: false,
+        requestId,
+        details: error.flatten(),
+      });
+      return;
+    }
+
+    if (isSearchPersistenceError(error)) {
+      sendSearchError(res, 503, {
+        code: error.code,
+        message: error.message,
+        retryable: true,
+        requestId,
+      });
+      return;
+    }
+
+    sendSearchError(res, 500, {
+      code: 'FEEDBACK_FAILED',
+      message: 'Unable to save lead feedback',
+      retryable: true,
+      requestId,
+    });
+  }
+};
+
 export const handleGetEvidence = async (
   search: SearchService,
   req: Pick<SearchRouteRequest, 'headers' | 'params' | 'query'>,
@@ -462,6 +559,10 @@ export const createSearchRouter = (search: SearchService) => {
 
   router.post('/:searchId/reverify', (req, res) => {
     void handleReverifySearch(search, req, res);
+  });
+
+  router.post('/:searchId/feedback', (req, res) => {
+    void handleRecordFeedback(search, req, res);
   });
 
   return router;

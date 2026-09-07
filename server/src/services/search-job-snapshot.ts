@@ -3,8 +3,10 @@ import {
   createSearchJobStore,
   toSearchResponse,
 } from './search-job-store';
+import { createLeadFeedbackStore } from './lead-feedback-store';
 
 const store = createSearchJobStore();
+const feedbackStore = createLeadFeedbackStore();
 
 export const getSearchJobSnapshot = async (
   searchId: string,
@@ -13,5 +15,10 @@ export const getSearchJobSnapshot = async (
   await store.ensureSchema();
 
   const job = await store.get(searchId, context?.ownerId);
-  return job ? toSearchResponse(job) : null;
+  if (!job) return null;
+
+  const suppressionKeys = context?.ownerId
+    ? await feedbackStore.getSuppressionKeys(context.ownerId)
+    : new Set<string>();
+  return toSearchResponse(job, suppressionKeys);
 };

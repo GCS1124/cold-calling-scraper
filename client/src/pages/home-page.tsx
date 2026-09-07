@@ -37,7 +37,11 @@ import { compareLeadQuality, matchesQualityFilter, type QualityFilter } from '..
 import { SearchForm } from '../components/search/search-form';
 import { useAuth } from '../hooks/use-auth';
 import { useSearchHistory } from '../hooks/use-search-history';
-import { isRetryableSearchError, type SearchApi } from '../services/search-service';
+import {
+  isRetryableSearchError,
+  type SearchApi,
+  type SearchFeedbackRequest,
+} from '../services/search-service';
 import {
   buildSearchRequestFromDraft,
   createSearchDraft,
@@ -560,6 +564,36 @@ export function HomePage({ searchApi }: HomePageProps) {
       toast.error(error instanceof Error ? error.message : 'Unable to reverify this search');
     } finally {
       setReverifying(false);
+    }
+  };
+
+  const recordLeadFeedback = async (
+    lead: Lead,
+    eventType: SearchFeedbackRequest['eventType'],
+  ) => {
+    if (!result?.searchId || !searchApi.recordFeedback) {
+      toast.error('Lead feedback is not available in this build.');
+      return;
+    }
+
+    try {
+      const response = await searchApi.recordFeedback(result.searchId, {
+        leadId: lead.id,
+        eventType,
+      });
+      if (!response) return;
+
+      setResult(response);
+      setSelectedIds((current) =>
+        current.filter((id) => response.leads.some((candidate) => candidate.id === id)),
+      );
+      toast.success(
+        eventType === 'useful'
+          ? 'Marked useful for this workspace.'
+          : 'Saved. This workspace will hide matching leads in future searches.',
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to save lead feedback');
     }
   };
 
@@ -1143,6 +1177,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                   emptyStateMessage={emptyStateMessage}
                   leads={tableLeads}
                   onCopyRow={(lead) => void handleCopyRow(lead)}
+                  onFeedback={(lead, eventType) => void recordLeadFeedback(lead, eventType)}
                   onSelectAll={toggleSelectAll}
                   onToggleSelect={toggleSelected}
                   selectedIds={selectedIds}

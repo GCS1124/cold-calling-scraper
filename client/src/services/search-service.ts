@@ -1,5 +1,6 @@
 import type { SearchRequest, SearchResponse } from '../types/lead';
 import { getSupabaseClient } from '../lib/supabase';
+import type { LeadFeedbackEventType } from '../../../shared/lead-feedback';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() ?? '';
 const minimumRequestedCount = 50;
@@ -300,6 +301,16 @@ export type SearchApi = {
   cancelSearch?: (searchId: string) => Promise<SearchResponse | null>;
   resumeSearch?: (searchId: string) => Promise<SearchResponse | null>;
   reverifySearch?: (searchId: string) => Promise<SearchResponse | null>;
+  recordFeedback?: (
+    searchId: string,
+    feedback: SearchFeedbackRequest,
+  ) => Promise<SearchResponse | null>;
+};
+
+export type SearchFeedbackRequest = {
+  leadId: string;
+  eventType: LeadFeedbackEventType;
+  reason?: string;
 };
 
 export type SearchStartOptions = {
@@ -370,6 +381,20 @@ export const searchApi: SearchApi = {
       `/api/search/${searchId}/reverify`,
       { method: 'POST' },
       'Unable to reverify this search. Please try again.',
+    );
+
+    return response.json() as Promise<SearchResponse>;
+  },
+
+  async recordFeedback(searchId, feedback) {
+    const response = await fetchFromApi(
+      `/api/search/${searchId}/feedback`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(feedback),
+      },
+      'Unable to save lead feedback. Please sign in and try again.',
     );
 
     return response.json() as Promise<SearchResponse>;

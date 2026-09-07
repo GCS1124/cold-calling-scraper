@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { Lead } from './lead';
+import type { LeadFeedbackEventType } from '../../../shared/lead-feedback';
 import type { LeadQualitySummary } from '../../../shared/lead-quality';
 import type {
   SearchExecutionContract,
@@ -40,6 +41,12 @@ export type SearchStartContext = {
   ownerId?: string;
 };
 
+export type SearchFeedbackRequest = {
+  leadId: string;
+  eventType: LeadFeedbackEventType;
+  reason?: string;
+};
+
 export type SearchAccessContext = {
   /** Supabase auth user id used to authorize durable search reads and writes. */
   ownerId?: string;
@@ -75,6 +82,8 @@ export type SearchProgress = {
   publicContactsFound?: number;
   /** Number of discovered candidates removed by the mandatory phone gate. */
   phoneExcludedCount?: number;
+  /** Number of owner-suppressed leads removed after phone qualification. */
+  suppressedCount?: number;
   /** Number of public LinkedIn query paths attempted during discovery. */
   publicQueriesAttempted?: number;
   /** Number of free public search sources contacted during discovery. */
