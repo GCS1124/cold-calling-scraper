@@ -19,6 +19,7 @@ import {
   buildSearchResponseContract,
 } from '../../../shared/search-contract';
 import { buildLeadQualitySummary } from './quality-summary';
+import { SearchIdempotencyConflictError } from './search-idempotency';
 
 export type SearchLocationMode =
   | 'local'
@@ -30,6 +31,8 @@ export type SearchLocationMode =
 export type SearchJobRecord = {
   schemaVersion: number;
   searchId: string;
+  idempotencyKey?: string;
+  requestFingerprint?: string;
   request: SearchRequest;
   query: string;
   locationLabel: string;
@@ -58,6 +61,15 @@ export type SearchJobRecord = {
 export type SearchJobStore = {
   ensureSchema: () => Promise<void>;
   get: (searchId: string) => Promise<SearchJobRecord | null>;
+  create: (job: SearchJobRecord) => Promise<{
+    job: SearchJobRecord;
+    created: boolean;
+  }>;
+  getByIdempotencyKey: (
+    idempotencyKey: string,
+    requestFingerprint: string,
+    now: number,
+  ) => Promise<SearchJobRecord | null>;
   claim: (
     searchId: string,
     now: number,
@@ -86,7 +98,7 @@ export const isSearchPersistenceError = (
   (error instanceof Error &&
     (error as Error & { code?: unknown }).code === 'SEARCH_PERSISTENCE_UNAVAILABLE');
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 const DEFAULT_JOB_TTL_MS = 1000 * 60 * 60 * 6;
 const MEMORY_MAX_JOBS = Number(process.env.SEARCH_JOB_MEMORY_MAX_JOBS ?? 500);
@@ -249,6 +261,14 @@ const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
     ...job,
     schemaVersion: CURRENT_SCHEMA_VERSION,
     searchId: normalizeSearchId(job.searchId),
+    idempotencyKey:
+      typeof job.idempotencyKey === 'string' && job.idempotencyKey.trim()
+        ? job.idempotencyKey.trim()
+        : undefined,
+    requestFingerprint:
+      typeof job.requestFingerprint === 'string' && job.requestFingerprint.trim()
+        ? job.requestFingerprint.trim()
+        : undefined,
     query: job.query?.trim() ?? '',
     locationLabel: job.locationLabel?.trim() ?? '',
     locationMode: normalizeLocationMode(job.locationMode),
@@ -305,6 +325,10 @@ const migrateJobPayload = (payload: unknown): SearchJobRecord | null => {
   return sanitizeJob({
     schemaVersion: Number(raw.schemaVersion ?? 1),
     searchId: String(raw.searchId),
+    idempotencyKey:
+      typeof raw.idempotencyKey === 'string' ? raw.idempotencyKey : undefined,
+    requestFingerprint:
+      typeof raw.requestFingerprint === 'string' ? raw.requestFingerprint : undefined,
     request: raw.request,
     query: String(raw.query ?? ''),
     locationLabel: String(raw.locationLabel ?? ''),
@@ -356,6 +380,8 @@ const unavailableStore = (message: string): SearchJobStore => {
   return {
     ensureSchema: fail,
     get: fail,
+    create: fail,
+    getByIdempotencyKey: fail,
     claim: fail,
     upsert: fail,
     requestCancel: fail,
@@ -398,6 +424,60 @@ const memoryStore = (): SearchJobStore => {
 
       const job = jobs.get(normalized);
       if (!job) return null;
+
+      return job;
+    },
+
+    create: async (job: SearchJobRecord) => {
+      const sanitized = sanitizeJob(job);
+      const existing = sanitized.idempotencyKey
+        ? [...jobs.values()].find(
+            (candidate) => candidate.idempotencyKey === sanitized.idempotencyKey,
+          )
+        : jobs.get(sanitized.searchId);
+
+      if (existing) {
+        if (
+          sanitized.idempotencyKey &&
+          existing.requestFingerprint !== sanitized.requestFingerprint
+        ) {
+          throw new SearchIdempotencyConflictError();
+        }
+
+        return { job: existing, created: false };
+      }
+
+      jobs.set(sanitized.searchId, sanitized);
+      if (jobs.size > MEMORY_MAX_JOBS) {
+        const oldest = [...jobs.entries()]
+          .sort(([, a], [, b]) => a.updatedAt - b.updatedAt)
+          .slice(0, jobs.size - MEMORY_MAX_JOBS);
+
+        for (const [searchId] of oldest) {
+          jobs.delete(searchId);
+        }
+      }
+
+      return { job: sanitized, created: true };
+    },
+
+    getByIdempotencyKey: async (
+      idempotencyKey: string,
+      requestFingerprint: string,
+      now: number,
+    ) => {
+      prune(now);
+      const job = [...jobs.values()].find(
+        (candidate) =>
+          candidate.idempotencyKey === idempotencyKey && candidate.expiresAt > now,
+      );
+      if (!job) {
+        return null;
+      }
+
+      if (job.requestFingerprint !== requestFingerprint) {
+        throw new SearchIdempotencyConflictError();
+      }
 
       return job;
     },
@@ -522,6 +602,9 @@ const postgresStore = (): SearchJobStore => {
           on lead_finder_jobs (expires_at);
         create index if not exists lead_finder_jobs_updated_at_idx
           on lead_finder_jobs (updated_at);
+        create unique index if not exists lead_finder_jobs_idempotency_unique_idx
+          on lead_finder_jobs ((payload->>'idempotencyKey'))
+          where payload ? 'idempotencyKey';
       `);
 
       schemaReady = true;
@@ -572,6 +655,123 @@ const postgresStore = (): SearchJobStore => {
       }
 
       return parsePayload(payload);
+    },
+
+    create: async (job: SearchJobRecord) => {
+      const sanitized = sanitizeJob(job);
+
+      await ensureSchema();
+
+      const client = getPool();
+
+      if (!client) {
+        throw new Error('Missing Postgres connection string');
+      }
+
+      const inserted = await client.query<{
+        payload: SearchJobRecord | string;
+      }>(
+        `
+          insert into lead_finder_jobs (
+            search_id,
+            payload,
+            expires_at,
+            created_at,
+            updated_at
+          ) values (
+            $1,
+            $2::jsonb,
+            $3,
+            $4,
+            $5
+          )
+          on conflict do nothing
+          returning payload
+        `,
+        [
+          sanitized.searchId,
+          JSON.stringify(sanitized),
+          sanitized.expiresAt,
+          sanitized.createdAt,
+          sanitized.updatedAt,
+        ],
+      );
+
+      const insertedJob = parsePayload(inserted.rows[0]?.payload);
+      if (insertedJob) {
+        return { job: insertedJob, created: true };
+      }
+
+      const existingResult = await client.query<{
+        payload: SearchJobRecord | string;
+      }>(
+        `
+          select payload
+          from lead_finder_jobs
+          where search_id = $1
+             or (
+               payload->>'idempotencyKey' = $2
+               and expires_at > $3
+             )
+          order by case when search_id = $1 then 0 else 1 end, updated_at desc
+          limit 1
+        `,
+        [sanitized.searchId, sanitized.idempotencyKey ?? '', nowMs()],
+      );
+      const existingJob = parsePayload(existingResult.rows[0]?.payload);
+
+      if (!existingJob) {
+        throw new Error('Search job could not be created or recovered.');
+      }
+
+      if (
+        sanitized.idempotencyKey &&
+        existingJob.idempotencyKey === sanitized.idempotencyKey &&
+        existingJob.requestFingerprint !== sanitized.requestFingerprint
+      ) {
+        throw new SearchIdempotencyConflictError();
+      }
+
+      return { job: existingJob, created: false };
+    },
+
+    getByIdempotencyKey: async (
+      idempotencyKey: string,
+      requestFingerprint: string,
+      now: number,
+    ) => {
+      await ensureSchema();
+
+      const client = getPool();
+
+      if (!client) {
+        throw new Error('Missing Postgres connection string');
+      }
+
+      const result = await client.query<{
+        payload: SearchJobRecord | string;
+      }>(
+        `
+          select payload
+          from lead_finder_jobs
+          where payload->>'idempotencyKey' = $1
+            and expires_at > $2
+          order by updated_at desc
+          limit 1
+        `,
+        [idempotencyKey, now],
+      );
+
+      const job = parsePayload(result.rows[0]?.payload);
+      if (!job) {
+        return null;
+      }
+
+      if (job.requestFingerprint !== requestFingerprint) {
+        throw new SearchIdempotencyConflictError();
+      }
+
+      return job;
     },
 
     claim: async (searchId: string, now: number, leaseMs: number, token: string) => {
@@ -772,6 +972,10 @@ export const createSearchJobStore = (): SearchJobStore => {
     try {
       return await operation();
     } catch (error) {
+      if (error instanceof SearchIdempotencyConflictError) {
+        throw error;
+      }
+
       if (isVercelRuntime) {
         console.error(`[search-job-store] postgres ${label} failed`, error);
         throw new SearchPersistenceError(
@@ -798,6 +1002,26 @@ export const createSearchJobStore = (): SearchJobStore => {
         () => postgres.get(searchId),
         () => fallback.get(searchId),
         'get',
+      );
+    },
+
+    create: async (job: SearchJobRecord) => {
+      return withFallback(
+        () => postgres.create(job),
+        () => fallback.create(job),
+        'create',
+      );
+    },
+
+    getByIdempotencyKey: async (
+      idempotencyKey: string,
+      requestFingerprint: string,
+      now: number,
+    ) => {
+      return withFallback(
+        () => postgres.getByIdempotencyKey(idempotencyKey, requestFingerprint, now),
+        () => fallback.getByIdempotencyKey(idempotencyKey, requestFingerprint, now),
+        'getByIdempotencyKey',
       );
     },
 
@@ -907,8 +1131,16 @@ export const createSearchJobRecord = (
   > &
     Partial<
       Pick<
-    SearchJobRecord,
-    'status' | 'leads' | 'providerWarnings' | 'searchSeeds' | 'nextSeedIndex' | 'discoveryComplete' | 'expiresAt'
+        SearchJobRecord,
+        | 'idempotencyKey'
+        | 'requestFingerprint'
+        | 'status'
+        | 'leads'
+        | 'providerWarnings'
+        | 'searchSeeds'
+        | 'nextSeedIndex'
+        | 'discoveryComplete'
+        | 'expiresAt'
       >
     >,
 ): SearchJobRecord => {
@@ -917,6 +1149,8 @@ export const createSearchJobRecord = (
   return sanitizeJob({
     schemaVersion: CURRENT_SCHEMA_VERSION,
     searchId: params.searchId,
+    idempotencyKey: params.idempotencyKey,
+    requestFingerprint: params.requestFingerprint,
     request: params.request,
     query: params.query,
     locationLabel: params.locationLabel,

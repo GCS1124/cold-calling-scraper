@@ -34,6 +34,10 @@ export const searchRequestSchema = z.object({
 
 export type SearchRequest = z.infer<typeof searchRequestSchema>;
 
+export type SearchStartContext = {
+  idempotencyKey?: string;
+};
+
 export type ProviderWarning = {
   providerId: string;
   providerName: string;

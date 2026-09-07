@@ -105,9 +105,9 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 | Deliverable | State | Evidence required |
 | --- | --- | --- |
 | Detailed implementation roadmap | Written | This document and source audit |
-| Trust foundation | Local regression and browser checks pass | 261 server tests, 53 client tests, both builds, runtime boot, lint, and mocked browser flow |
+| Trust foundation | Local regression and browser checks pass | 270 server tests, 53 client tests, both builds, runtime boot, lint, and mocked browser flow |
 | Crawler/domain checks | Partial: unrelated redirects and robots/parked pages rejected locally | Official-domain validation and bounded live checks still pending; unchanged-document reuse is not yet persistent |
-| Discovery reliability across three modes | Partial: GMB free-source merge, bounded public-phone recovery, and shared provider-coverage contract implemented locally | Recovery, retention reuse, and real-source smoke matrix still pending |
+| Discovery reliability across three modes | Partial: GMB free-source merge, bounded public-phone recovery, shared provider-coverage contract, and durable replay-safe starts implemented locally | Recovery, retention reuse, and real-source smoke matrix still pending; stateless fallback cannot guarantee cross-instance replay |
 | Typed qualification / role and signal research | Partial: source-family trust, authority tiers, role normalization, organization hints and relationship persistence implemented | Opportunity taxonomy, calibrated weights, contradiction scoring and multi-industry acceptance tests |
 | Dossiers / feedback / suppression | Partial: search responses and evidence dossiers expose lifecycle, contract, coverage, and quality summaries; source-family metadata, person-to-organization links, role fields and idempotent observation persistence added | Feedback, suppression, user correction, workspace isolation and live export checks still pending |
 | Commercial quality benchmark | Pending | Reviewed dataset and measured results |
@@ -128,18 +128,24 @@ The three-mode UI now includes common quality filters, evidence explanations, so
 
 All three modes now render a shared provider-coverage panel. `configured`, `not_configured`, `returned`, `failed`, and `partial` are distinguished in the UI; provider observation counts are explicitly not treated as unique final leads. The internal response contract is documented in `docs/search-response-contract.md` and is covered by server contract/merge tests.
 
-The normalized evidence graph now distinguishes source families and authority tiers, so repeated search providers or repeated URLs cannot inflate corroboration. Public profile leads retain organization and role metadata, and persisted research links a person to the publicly inferred organization with an observed relationship status and source document. Contact observations retain their source observation date, and phone/email verification writes are idempotent. Search responses now expose the same lifecycle and quality rollup used by dossiers, so an integration can decide whether to poll, resume, review, or export without a second quality request. Search and evidence errors now carry stable codes, retryability, request IDs, and a versioned error contract. These changes improve downstream integration reliability but do not prove mobile line type, reachability, personal ownership, email deliverability, or commercial lead quality.
+The normalized evidence graph now distinguishes source families and authority tiers, so repeated search providers or repeated URLs cannot inflate corroboration. Public profile leads retain organization and role metadata, and persisted research links a person to the publicly inferred organization with an observed relationship status and source document. Contact observations retain their source observation date, and phone/email verification writes are idempotent. Search responses now expose the same lifecycle and quality rollup used by dossiers, so an integration can decide whether to poll, resume, review, or export without a second quality request. Search and evidence errors now carry stable codes, retryability, request IDs, and a versioned error contract; durable search starts also deduplicate retries with a request fingerprint and bounded `Idempotency-Key`. These changes improve downstream integration reliability but do not prove mobile line type, reachability, personal ownership, email deliverability, or commercial lead quality.
 
 Verification commands:
 
 ```sh
-npm test
+(cd server && npx vitest run --pool=forks --maxWorkers=1 --reporter verbose)
+npm run test:runtime --workspace server
+npm test --workspace client
 npm run build
 npm run lint --workspace client
-E2E_BASE_URL=http://127.0.0.1:5188/search E2E_ARTIFACT_DIR=/tmp/lead-quality-browser-20260908 npm run test:e2e
+E2E_ARTIFACT_DIR=/tmp/lead-quality-browser-20260908 npm run test:e2e
 git diff --check
 ```
 
 Browser acceptance uses explicit synthetic search/health responses. It covers the three mode choices, source/evidence display, quality filters, Excel download, failure/retry, mobile selector/panel bounds and JavaScript page errors. Screenshots were also inspected. These are UI contract checks, not live-provider yield or commercial-quality measurements. No new provider calls, paid sources, public API endpoints, deployments or customer outreach were performed for this checkpoint. Vite still reports a main-bundle size warning; it was not hidden.
+
+The root `npm test` wrapper was not used for this checkpoint because it did not
+terminate in a bounded run; the server unit suite, server runtime boot check, and
+client suite completed separately using the commands above.
 
 The provider environment file is excluded from Git while its local copy is preserved. The checked sensitive fields in the tracked copy were empty; no claim is made that Git-history credentials were exposed. Keys pasted in chat should still be rotated by the account owner. Live credentials and database configuration were not changed.

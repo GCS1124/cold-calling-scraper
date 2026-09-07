@@ -7,6 +7,7 @@ import type {
   SearchProgress,
   SearchRequest,
   SearchResponse,
+  SearchStartContext,
   SearchStatus,
 } from '../types/search';
 import { deduplicateLeads } from './lead-deduplication';
@@ -48,13 +49,20 @@ import { noUsableResultsWarning } from './search-finalization';
 import { bridgeLinkedInWithPublicListings } from './public-entity-matching';
 import { recordProviderCoverage } from './provider-coverage';
 import {
+  createSearchRequestFingerprint,
+  normalizeIdempotencyKey,
+} from './search-idempotency';
+import {
   leadSourceModeLabels,
   normalizeLeadSourceMode,
   type LeadSourceMode,
 } from './search-source-mode';
 
 type VercelSearchService = {
-  startSearch: (request: SearchRequest) => Promise<SearchResponse>;
+  startSearch: (
+    request: SearchRequest,
+    context?: SearchStartContext,
+  ) => Promise<SearchResponse>;
   getSearch: (searchId: string) => Promise<SearchResponse | null>;
   getSearchSnapshot: (searchId: string) => Promise<SearchResponse | null>;
   advanceSearch: (searchId: string) => Promise<SearchResponse | null>;
@@ -1161,20 +1169,37 @@ export const createVercelSearchServiceWithDeps = (
   };
 
   return {
-    async startSearch(request) {
+    async startSearch(request, context) {
       await store.ensureSchema();
-      await store.deleteExpired(now());
+      const startedAt = now();
+      await store.deleteExpired(startedAt);
 
-      const searchId = idFactory();
-      const createdAt = now();
       const normalizedRequest: SearchRequest = {
         ...request,
         phoneRequired: true,
         researchDepth: request.researchDepth ?? 'verified',
       };
+      const idempotencyKey = normalizeIdempotencyKey(context?.idempotencyKey);
+      const requestFingerprint = createSearchRequestFingerprint(normalizedRequest);
+
+      if (idempotencyKey) {
+        const existingJob = await store.getByIdempotencyKey(
+          idempotencyKey,
+          requestFingerprint,
+          startedAt,
+        );
+        if (existingJob) {
+          return toSearchResponse(existingJob);
+        }
+      }
+
+      const searchId = idFactory();
+      const createdAt = startedAt;
       let job: SearchJobRecord = {
         schemaVersion: CURRENT_SCHEMA_VERSION,
         searchId,
+        idempotencyKey,
+        requestFingerprint,
         request: normalizedRequest,
         query: `${normalizedRequest.companyType} in ${normalizedRequest.city}`,
         locationLabel: normalizedRequest.city,
@@ -1192,7 +1217,11 @@ export const createVercelSearchServiceWithDeps = (
         updatedAt: createdAt,
       };
 
-      await store.upsert(job);
+      const created = await store.create(job);
+      if (!created.created) {
+        return toSearchResponse(created.job);
+      }
+
       await queue.enqueue(searchId, createdAt);
 
       return toSearchResponse(job);

@@ -9,6 +9,7 @@ import {
   handleStartSearch,
   type SearchService,
 } from '../search';
+import { SearchIdempotencyConflictError } from '../../services/search-idempotency';
 
 const sampleResponse = {
   searchId: 'search-1',
@@ -97,6 +98,63 @@ describe('/api/search handlers', () => {
     expect(search.startSearch).not.toHaveBeenCalled();
     expect(state.body).toMatchObject({
       error: 'Invalid search request',
+    });
+  });
+
+  it('rejects a malformed Idempotency-Key before starting discovery', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn(),
+    };
+    const { response, state } = createResponse();
+
+    await handleStartSearch(
+      search,
+      {
+        headers: { 'idempotency-key': 'contains spaces' },
+        body: {
+          companyType: 'Dental Clinics',
+          location: { mode: 'timezone', timeZone: 'EST' },
+          count: 50,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(400);
+    expect(search.startSearch).not.toHaveBeenCalled();
+    expect(state.body).toMatchObject({
+      error: 'Invalid Idempotency-Key header',
+      code: 'INVALID_IDEMPOTENCY_KEY',
+      retryable: false,
+    });
+  });
+
+  it('returns a stable conflict when a key is reused with different criteria', async () => {
+    const search: SearchService = {
+      startSearch: vi.fn().mockRejectedValue(new SearchIdempotencyConflictError()),
+      getSearch: vi.fn(),
+    };
+    const { response, state } = createResponse();
+
+    await handleStartSearch(
+      search,
+      {
+        headers: { 'idempotency-key': 'search-retry-1' },
+        body: {
+          companyType: 'Dental Clinics',
+          location: { mode: 'timezone', timeZone: 'EST' },
+          count: 50,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(409);
+    expect(state.body).toMatchObject({
+      code: 'IDEMPOTENCY_KEY_REUSED',
+      retryable: false,
+      requestId: expect.any(String),
     });
   });
 

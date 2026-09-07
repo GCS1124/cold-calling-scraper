@@ -5,10 +5,12 @@ import { getVercelSearchService } from '../_lib/vercel-search-service.js';
 import { flattenSearchRequest } from '../../server/src/utils/search-location.js';
 import {
   getRequestId,
+  getIdempotencyKey,
   sendSearchError,
   setRequestIdHeader,
   withSearchRequestId,
 } from '../../server/src/http/search-http-contract.js';
+import { SearchIdempotencyConflictError } from '../../server/src/services/search-idempotency.js';
 
 const isSearchPersistenceFailure = (error: unknown) =>
   error instanceof Error &&
@@ -50,7 +52,7 @@ export default async function handler(req: any, res: any) {
   const requestId = getRequestId(req);
   setRequestIdHeader(res, requestId);
 
-  if (req.method === 'GET') {
+  if (req.method !== 'POST') {
     sendSearchError(res, 405, {
       code: 'METHOD_NOT_ALLOWED',
       message: 'Method not allowed',
@@ -64,6 +66,17 @@ export default async function handler(req: any, res: any) {
 
   try {
     res.setHeader?.('Cache-Control', 'no-store, max-age=0');
+    const idempotencyKey = getIdempotencyKey(req);
+    if (idempotencyKey === null) {
+      sendSearchError(res, 400, {
+        code: 'INVALID_IDEMPOTENCY_KEY',
+        message: 'Invalid Idempotency-Key header',
+        retryable: false,
+        requestId,
+      });
+      return;
+    }
+
     const payload = searchRequestSchema.parse(req.body);
     flattenedRequest = flattenSearchRequest(payload);
 
@@ -108,7 +121,9 @@ export default async function handler(req: any, res: any) {
     }
 
     const service = await getVercelSearchService();
-    const response = await service.startSearch(flattenedRequest);
+    const response = idempotencyKey
+      ? await service.startSearch(flattenedRequest, { idempotencyKey })
+      : await service.startSearch(flattenedRequest);
 
     waitUntil(
       service.advanceSearch(response.searchId).catch((error) => {
@@ -125,6 +140,16 @@ export default async function handler(req: any, res: any) {
         retryable: false,
         requestId,
         details: error.flatten(),
+      });
+      return;
+    }
+
+    if (error instanceof SearchIdempotencyConflictError) {
+      sendSearchError(res, 409, {
+        code: error.code,
+        message: error.message,
+        retryable: false,
+        requestId,
       });
       return;
     }

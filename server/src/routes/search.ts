@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { ZodError } from 'zod';
 
-import type { SearchRequest, SearchResponse } from '../types/search';
+import type { SearchRequest, SearchResponse, SearchStartContext } from '../types/search';
 import { flattenSearchRequest, searchRequestSchema } from '../../../api/_lib/search-contract.js';
 import { buildResearchDossier } from '../services/research-dossier';
 import {
@@ -9,10 +9,15 @@ import {
   sendSearchError,
   setRequestIdHeader,
   withSearchRequestId,
+  getIdempotencyKey,
 } from '../http/search-http-contract';
+import { SearchIdempotencyConflictError } from '../services/search-idempotency';
 
 export type SearchService = {
-  startSearch: (request: SearchRequest) => Promise<SearchResponse>;
+  startSearch: (
+    request: SearchRequest,
+    context?: SearchStartContext,
+  ) => Promise<SearchResponse>;
   getSearch: (searchId: string) => Promise<SearchResponse | null>;
   cancelSearch?: (searchId: string) => Promise<SearchResponse | null>;
   resumeSearch?: (searchId: string) => Promise<SearchResponse | null>;
@@ -28,15 +33,32 @@ type SearchResponder = {
 
 export const handleStartSearch = async (
   search: SearchService,
-  req: { body: unknown },
+  req: {
+    body: unknown;
+    headers?: Record<string, string | string[] | undefined>;
+  },
   res: SearchResponder,
 ) => {
   const requestId = getRequestId(req);
   setRequestIdHeader(res, requestId);
 
   try {
+    const idempotencyKey = getIdempotencyKey(req);
+    if (idempotencyKey === null) {
+      sendSearchError(res, 400, {
+        code: 'INVALID_IDEMPOTENCY_KEY',
+        message: 'Invalid Idempotency-Key header',
+        retryable: false,
+        requestId,
+      });
+      return;
+    }
+
     const payload = searchRequestSchema.parse(req.body);
-    const response = await search.startSearch(flattenSearchRequest(payload));
+    const request = flattenSearchRequest(payload);
+    const response = idempotencyKey
+      ? await search.startSearch(request, { idempotencyKey })
+      : await search.startSearch(request);
 
     res.status(200).json(withSearchRequestId(response, requestId));
   } catch (error) {
@@ -47,6 +69,16 @@ export const handleStartSearch = async (
         retryable: false,
         requestId,
         details: error.flatten(),
+      });
+      return;
+    }
+
+    if (error instanceof SearchIdempotencyConflictError) {
+      sendSearchError(res, 409, {
+        code: error.code,
+        message: error.message,
+        retryable: false,
+        requestId,
       });
       return;
     }

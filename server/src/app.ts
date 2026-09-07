@@ -2,6 +2,7 @@ import cors from 'cors';
 import express from 'express';
 
 import { createSearchRouter, type SearchService } from './routes/search';
+import type { SearchStartContext } from './types/search';
 
 type AppDeps = {
   search?: SearchService;
@@ -19,7 +20,8 @@ const createLazySearchService = (): SearchService => {
   };
 
   return {
-    startSearch: async (request) => (await getService()).startSearch(request),
+    startSearch: async (request, context?: SearchStartContext) =>
+      (await getService()).startSearch(request, context),
     getSearch: async (searchId) => (await getService()).getSearch(searchId),
     cancelSearch: async (searchId) => {
       const service = await getService();

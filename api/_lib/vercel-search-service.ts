@@ -1,7 +1,14 @@
-import type { SearchRequest, SearchResponse } from '../../server/src/types/search.js';
+import type {
+  SearchRequest,
+  SearchResponse,
+  SearchStartContext,
+} from '../../server/src/types/search.js';
 
 type VercelSearchService = {
-  startSearch: (request: SearchRequest) => Promise<SearchResponse>;
+  startSearch: (
+    request: SearchRequest,
+    context?: SearchStartContext,
+  ) => Promise<SearchResponse>;
   advanceSearch: (searchId: string) => Promise<SearchResponse | null>;
   cancelSearch: (searchId: string) => Promise<SearchResponse | null>;
   resumeSearch: (searchId: string) => Promise<SearchResponse | null>;

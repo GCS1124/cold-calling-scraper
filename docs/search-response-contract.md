@@ -68,6 +68,16 @@ for the current client and add `code`, `retryable`, `requestId`, and
 value for log correlation. A request id identifies the transport attempt, not
 a user, workspace, or authorization grant.
 
+Durable search starts also accept a bounded `Idempotency-Key` header. The
+server stores the key with a normalized request fingerprint and returns the
+same search snapshot for a replay of the same request instead of starting a
+second discovery job. Reusing a key with different search criteria returns
+`409` with code `IDEMPOTENCY_KEY_REUSED`; clients should create a new key for
+the new request. Stateless LinkedIn or AI fallback responses cannot provide
+cross-instance replay guarantees because no durable job store is available;
+their `meta.execution.path` remains `stateless` and that limitation is not
+hidden.
+
 ## Coverage semantics
 
 `leadCount` is the number of candidates observed from that provider before the

@@ -140,6 +140,46 @@ describe('createSearchJobStore', () => {
     expect(emptyCompletion.meta.providerWarnings.some((warning) => warning.providerId === 'no-usable-results')).toBe(true);
   });
 
+  it('reuses a durable memory job for the same idempotency key and rejects changed criteria', async () => {
+    const { createSearchJobRecord, createSearchJobStore } = await import('../search-job-store');
+    const store = createSearchJobStore();
+    const job = createSearchJobRecord({
+      searchId: 'idempotency-job',
+      idempotencyKey: 'search-retry-42',
+      requestFingerprint: 'fingerprint-a',
+      request: {
+        companyType: 'Dentist',
+        sourceMode: 'gmb',
+        city: 'Austin, TX',
+        count: 50,
+      },
+      query: 'Dentist in Austin, TX',
+      locationLabel: 'Austin, TX',
+      locationMode: 'local',
+      status: 'queued',
+      progress: {
+        discovered: 0,
+        enriched: 0,
+        totalCandidates: 0,
+        requestedCount: 50,
+        foundCount: 0,
+        duplicatesRemoved: 0,
+        currentSource: 'Queued',
+        batchesCompleted: 0,
+        estimatedRemaining: 50,
+      },
+    });
+
+    await store.upsert(job);
+
+    await expect(
+      store.getByIdempotencyKey('search-retry-42', 'fingerprint-a', Date.now()),
+    ).resolves.toMatchObject({ searchId: 'idempotency-job' });
+    await expect(
+      store.getByIdempotencyKey('search-retry-42', 'fingerprint-b', Date.now()),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+
   it('allows only one active processing claim for a job', async () => {
     const { createSearchJobRecord, createSearchJobStore } = await import('../search-job-store');
     const store = createSearchJobStore();

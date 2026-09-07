@@ -59,6 +59,21 @@ describe('/api/search', () => {
     vi.unstubAllEnvs();
   });
 
+  it('rejects every non-POST method without starting discovery', async () => {
+    const { response, state } = createResponse();
+
+    await handler({ method: 'DELETE', body: {} }, response);
+
+    expect(state.statusCode).toBe(405);
+    expect(state.body).toMatchObject({
+      error: 'Method not allowed',
+      code: 'METHOD_NOT_ALLOWED',
+      retryable: false,
+      requestId: expect.any(String),
+    });
+    expect(vercelSearchService.startSearch).not.toHaveBeenCalled();
+  });
+
   it('returns the queued job immediately and schedules background advancement', async () => {
     vi.mocked(vercelSearchService.startSearch).mockResolvedValue({
       searchId: 'search-1',

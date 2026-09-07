@@ -161,6 +161,33 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.leads.length).toBeGreaterThan(0);
   });
 
+  it('replays a durable start for the same key without creating a second job', async () => {
+    const idFactory = vi.fn()
+      .mockReturnValueOnce('idempotent-search-1')
+      .mockReturnValueOnce('idempotent-search-2');
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory,
+      now: () => 1000,
+    });
+    const request = {
+      companyType: 'Dental Clinics',
+      city: 'Austin, TX',
+      count: 50,
+    } as const;
+
+    const first = await service.startSearch(request, { idempotencyKey: 'retry-1' });
+    const replay = await service.startSearch(request, { idempotencyKey: 'retry-1' });
+
+    expect(replay.searchId).toBe(first.searchId);
+    expect(idFactory).toHaveBeenCalledOnce();
+    await expect(
+      service.startSearch({ ...request, count: 100 }, { idempotencyKey: 'retry-1' }),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+
   it('caps the persisted completed result at the requested count', async () => {
     const candidates = Array.from({ length: 75 }, (_, index) =>
       makeLead({

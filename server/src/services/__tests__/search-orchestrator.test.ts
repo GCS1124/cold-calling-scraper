@@ -78,6 +78,31 @@ const timezoneLocation = {
 };
 
 describe('createSearchService', () => {
+  it('reuses a local queued search for the same idempotency key', async () => {
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    let id = 0;
+    const service = createSearchService({
+      idFactory: () => `local-idempotency-${++id}`,
+      schedule: (task) => {
+        scheduledTasks.push(task);
+      },
+    });
+    const request = {
+      companyType: 'Dentist',
+      city: 'Austin, TX',
+      count: 50,
+    } as const;
+
+    const first = await service.startSearch(request, { idempotencyKey: 'local-retry-1' });
+    const replay = await service.startSearch(request, { idempotencyKey: 'local-retry-1' });
+
+    expect(replay.searchId).toBe(first.searchId);
+    expect(scheduledTasks).toHaveLength(1);
+    await expect(
+      service.startSearch({ ...request, count: 100 }, { idempotencyKey: 'local-retry-1' }),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+
   it('starts queued and becomes failed when US normalization fails', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 

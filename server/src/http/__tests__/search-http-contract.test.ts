@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getIdempotencyKey,
   getRequestId,
   sendSearchError,
   withSearchRequestId,
@@ -8,6 +9,17 @@ import {
 import type { SearchResponse } from '../../types/search';
 
 describe('search HTTP contract', () => {
+  it('accepts bounded idempotency keys and rejects malformed values', () => {
+    expect(getIdempotencyKey({ headers: { 'idempotency-key': 'search-retry-42' } })).toBe(
+      'search-retry-42',
+    );
+    expect(getIdempotencyKey({ headers: { 'Idempotency-Key': 'search-retry-43' } })).toBe(
+      'search-retry-43',
+    );
+    expect(getIdempotencyKey({ headers: {} })).toBeUndefined();
+    expect(getIdempotencyKey({ headers: { 'idempotency-key': 'contains spaces' } })).toBeNull();
+  });
+
   it('preserves a bounded caller request id and rejects unsafe values', () => {
     expect(getRequestId({ headers: { 'x-request-id': 'client-search-42' } })).toBe(
       'client-search-42',

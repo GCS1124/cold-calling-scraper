@@ -6,6 +6,7 @@ import type {
   SearchProgress,
   SearchRequest,
   SearchResponse,
+  SearchStartContext,
   SearchStatus,
 } from '../types/search';
 import { deduplicateLeads } from './lead-deduplication';
@@ -52,9 +53,16 @@ import {
 } from '../../../shared/search-contract';
 import { recordProviderCoverage } from './provider-coverage';
 import { buildLeadQualitySummary } from './quality-summary';
+import {
+  createSearchRequestFingerprint,
+  normalizeIdempotencyKey,
+  SearchIdempotencyConflictError,
+} from './search-idempotency';
 
 type SearchJob = {
   searchId: string;
+  idempotencyKey?: string;
+  requestFingerprint?: string;
   request: SearchRequest;
   leads: Lead[];
   locationLabel: string;
@@ -71,7 +79,10 @@ type SearchJob = {
 };
 
 type SearchService = {
-  startSearch: (request: SearchRequest) => Promise<SearchResponse>;
+  startSearch: (
+    request: SearchRequest,
+    context?: SearchStartContext,
+  ) => Promise<SearchResponse>;
   getSearch: (searchId: string) => Promise<SearchResponse | null>;
   cancelSearch: (searchId: string) => Promise<SearchResponse | null>;
   resumeSearch: (searchId: string) => Promise<SearchResponse | null>;
@@ -1109,18 +1120,37 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
   };
 
   return {
-    async startSearch(request) {
+    async startSearch(request, context) {
       const startedAt = now();
       cleanupExpiredJobs(jobs, () => startedAt);
+
+      const normalizedRequest: SearchRequest = {
+        ...request,
+        phoneRequired: true,
+        researchDepth: request.researchDepth ?? 'verified',
+      };
+      const idempotencyKey = normalizeIdempotencyKey(context?.idempotencyKey);
+      const requestFingerprint = createSearchRequestFingerprint(normalizedRequest);
+
+      if (idempotencyKey) {
+        const existingJob = [...jobs.values()].find(
+          (candidate) => candidate.idempotencyKey === idempotencyKey,
+        );
+        if (existingJob) {
+          if (existingJob.requestFingerprint !== requestFingerprint) {
+            throw new SearchIdempotencyConflictError();
+          }
+
+          return toResponse(existingJob);
+        }
+      }
 
       const searchId = idFactory();
       const job: SearchJob = {
         searchId,
-        request: {
-          ...request,
-          phoneRequired: true,
-          researchDepth: request.researchDepth ?? 'verified',
-        },
+        idempotencyKey,
+        requestFingerprint,
+        request: normalizedRequest,
         leads: [],
         locationLabel: request.city.trim(),
         query: `${request.companyType} in ${request.city.trim()}`,
