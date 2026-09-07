@@ -21,7 +21,10 @@ import { noUsableResultsWarning } from './search-finalization';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
-import { buildSearchResponseContract } from '../../../shared/search-contract';
+import {
+  buildSearchExecutionContract,
+  buildSearchResponseContract,
+} from '../../../shared/search-contract';
 import { normalizeLeadSourceMode } from './search-source-mode';
 import { mergeProviderCoverage } from './provider-coverage';
 
@@ -54,6 +57,7 @@ const addWarnings = (target: ProviderWarning[], incoming: ProviderWarning[]) => 
 
 const buildResponse = ({
   searchId,
+  startedAt,
   request,
   locationLabel,
   leads,
@@ -64,6 +68,7 @@ const buildResponse = ({
   providerCoverage,
 }: {
   searchId: string;
+  startedAt: string;
   request: SearchRequest;
   locationLabel: string;
   leads: Lead[];
@@ -86,6 +91,7 @@ const buildResponse = ({
   }
 
   const contract = buildSearchResponseContract(normalizeLeadSourceMode(request.sourceMode ?? 'linkedin'));
+  const completedAt = new Date().toISOString();
 
   return {
     ...contract,
@@ -98,6 +104,12 @@ const buildResponse = ({
       researchDepth: request.researchDepth ?? 'verified',
       researchBrief: request.researchBrief,
       status,
+      execution: buildSearchExecutionContract({
+        path: 'stateless',
+        startedAt,
+        lastProgressAt: completedAt,
+        completedAt,
+      }),
       progress: {
         discovered,
         enriched,
@@ -131,11 +143,13 @@ const buildResponse = ({
 
 const buildLocationFailureResponse = (
   searchId: string,
+  startedAt: string,
   request: SearchRequest,
   error: unknown,
 ) =>
   buildResponse({
     searchId,
+    startedAt,
     request,
     locationLabel: request.city,
     leads: [],
@@ -172,13 +186,14 @@ export const createStatelessLinkedinSearch = (
   const normalizeLocation = deps.normalizeLocation ?? normalizeUsLocation;
 
   return async (request: SearchRequest): Promise<SearchResponse> => {
+    const startedAt = new Date().toISOString();
     const searchId = `linkedin-stateless-${randomUUID()}`;
     let location: NormalizedUsLocation;
 
     try {
       location = await normalizeLocation(request.city);
     } catch (error) {
-      return buildLocationFailureResponse(searchId, request, error);
+      return buildLocationFailureResponse(searchId, startedAt, request, error);
     }
 
     const warnings: ProviderWarning[] = [];
@@ -399,6 +414,7 @@ export const createStatelessLinkedinSearch = (
 
     return buildResponse({
       searchId,
+      startedAt,
       request,
       locationLabel: location.label,
       leads,

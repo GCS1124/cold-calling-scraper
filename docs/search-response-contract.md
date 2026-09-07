@@ -16,6 +16,10 @@ Every runtime response includes:
   any of those claims.
 - `meta.limitations`: mode-specific limitations that must be shown or retained
   by downstream integrations.
+- `meta.execution`: lifecycle metadata. `durable` responses are pollable and
+  resumable; `stateless` LinkedIn and AI fallback responses are already
+  complete and must not be polled. `lastProgressAt` is the latest progress
+  timestamp, and `completedAt` is present for terminal responses.
 - `meta.progress.providerCoverage`: provider observations with `configured`,
   `not_configured`, `returned`, `failed`, or `partial` status.
 

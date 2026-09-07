@@ -11,6 +11,7 @@ import type {
 } from '../../../shared/source-evidence';
 import type {
   PhonePolicyContract,
+  SearchExecutionContract,
   SearchModeCode,
   SEARCH_RESPONSE_CONTRACT_VERSION,
 } from '../../../shared/search-contract';
@@ -198,6 +199,7 @@ export type SearchResponse = {
   leads: Lead[];
   meta: {
     sourceMode?: SearchModeCode;
+    execution?: SearchExecutionContract;
     phonePolicy?: PhonePolicyContract;
     limitations?: string[];
     query: string;

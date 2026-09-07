@@ -113,12 +113,26 @@ describe('createSearchJobStore', () => {
     expect(response.meta.totals.total).toBe(50);
     expect(response.meta.progress.foundCount).toBe(50);
     expect(response.meta.progress.totalCandidates).toBe(62);
+    expect(response.meta.execution).toMatchObject({
+      path: 'durable',
+      pollable: true,
+      resumable: true,
+      startedAt: expect.any(String),
+      lastProgressAt: expect.any(String),
+      completedAt: expect.any(String),
+    });
     const inProgress = toSearchResponse({ ...job, status: 'discovering', leads: [
       { ...leads[0]!, contactEvidence: [] }, leads[1]!,
     ] });
     expect(inProgress.leads).toHaveLength(1);
     expect(inProgress.meta.progress.foundCount).toBe(1);
     expect(inProgress.meta.progress.totalCandidates).toBe(62);
+    expect(inProgress.meta.execution).toMatchObject({
+      path: 'durable',
+      pollable: true,
+      resumable: true,
+    });
+    expect(inProgress.meta.execution).not.toHaveProperty('completedAt');
     expect(job.leads).toHaveLength(62);
     const emptyCompletion = toSearchResponse({ ...job, leads: [{ ...leads[0]!, contactEvidence: [] }] });
     expect(emptyCompletion.meta.status).toBe('failed');

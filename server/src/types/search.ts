@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type { Lead } from './lead';
 import type {
+  SearchExecutionContract,
   PhonePolicyContract,
   SearchModeCode,
   SEARCH_RESPONSE_CONTRACT_VERSION,
@@ -91,6 +92,8 @@ export type SearchResponse = {
   meta: {
     /** Optional for compatibility with legacy snapshots; runtime responses include it. */
     sourceMode?: SearchModeCode;
+    /** Optional for compatibility with legacy snapshots; runtime responses include it. */
+    execution?: SearchExecutionContract;
     phonePolicy?: PhonePolicyContract;
     limitations?: string[];
     query: string;

@@ -119,6 +119,12 @@ describe('runStatelessAiSearch', () => {
 
     expect(response.leads).toHaveLength(1);
     expect(response.leads[0]?.id).toBe('ai-phone');
+    expect(response.meta.execution).toMatchObject({
+      path: 'stateless',
+      pollable: false,
+      resumable: false,
+      completedAt: expect.any(String),
+    });
     expect(response.meta.progress.duplicatesRemoved).toBe(0);
     expect(response.meta.progress.totalCandidates).toBe(2);
     expect(response.meta.totals.withPhone).toBe(1);

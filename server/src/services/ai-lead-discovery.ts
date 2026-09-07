@@ -27,7 +27,10 @@ import { enforcePhoneRequirement } from './phone-requirement';
 import { noUsableResultsWarning } from './search-finalization';
 import { mergeLinkedInWithPublicListings } from './public-entity-matching';
 import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
-import { buildSearchResponseContract } from '../../../shared/search-contract';
+import {
+  buildSearchExecutionContract,
+  buildSearchResponseContract,
+} from '../../../shared/search-contract';
 import { normalizeLeadSourceMode } from './search-source-mode';
 
 export type AiDiscoveryResult = {
@@ -355,11 +358,13 @@ export const discoverUsLeadsFromAiMode = createAiLeadDiscovery(
 
 const buildResponse = ({
   searchId,
+  startedAt,
   request,
   locationLabel,
   result,
 }: {
   searchId: string;
+  startedAt: string;
   request: SearchRequest;
   locationLabel: string;
   result: AiDiscoveryResult;
@@ -377,6 +382,7 @@ const buildResponse = ({
   }
 
   const contract = buildSearchResponseContract(normalizeLeadSourceMode(request.sourceMode ?? 'ai'));
+  const completedAt = new Date().toISOString();
 
   return {
     ...contract,
@@ -389,6 +395,12 @@ const buildResponse = ({
       researchDepth: request.researchDepth ?? 'verified',
       researchBrief: request.researchBrief,
       status,
+      execution: buildSearchExecutionContract({
+        path: 'stateless',
+        startedAt,
+        lastProgressAt: completedAt,
+        completedAt,
+      }),
       progress: {
         discovered: deduplicatedLeads.length,
         enriched: result.enrichedCount,
@@ -420,6 +432,7 @@ const buildResponse = ({
 };
 
 export const runStatelessAiSearch = async (request: SearchRequest): Promise<SearchResponse> => {
+  const startedAt = new Date().toISOString();
   const searchId = `ai-stateless-${randomUUID()}`;
   let location: NormalizedUsLocation;
 
@@ -428,6 +441,7 @@ export const runStatelessAiSearch = async (request: SearchRequest): Promise<Sear
   } catch (error) {
     return buildResponse({
       searchId,
+      startedAt,
       request,
       locationLabel: request.city,
       result: {
@@ -455,6 +469,7 @@ export const runStatelessAiSearch = async (request: SearchRequest): Promise<Sear
 
   return buildResponse({
     searchId,
+    startedAt,
     request,
     locationLabel: location.label,
     result: {

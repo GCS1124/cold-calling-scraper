@@ -37,6 +37,14 @@ const response: SearchResponse = {
   ],
   meta: {
     sourceMode: 'linkedin',
+    execution: {
+      path: 'stateless',
+      pollable: false,
+      resumable: false,
+      startedAt: '2026-09-04T00:00:00.000Z',
+      lastProgressAt: '2026-09-04T00:00:02.000Z',
+      completedAt: '2026-09-04T00:00:02.000Z',
+    },
     phonePolicy: {
       required: true,
       evidence: 'public_phone_evidence',
@@ -79,6 +87,12 @@ describe('buildResearchDossier', () => {
     expect(dossier.leads[0]?.evidence?.[0]?.sourceUrl).toBe('https://publicdental.example');
     expect(dossier.contractVersion).toBe(2);
     expect(dossier.sourceMode).toBe('linkedin');
+    expect(dossier.execution).toMatchObject({
+      path: 'stateless',
+      pollable: false,
+      resumable: false,
+      completedAt: '2026-09-04T00:00:02.000Z',
+    });
     expect(dossier.phonePolicy.required).toBe(true);
     expect(dossier.providerCoverage[0]?.providerId).toBe('linkedin-public-search');
     expect(dossier.coverage).toMatchObject({ observed: 1, requested: 50, found: 1, excludedByPhone: 0, withPhone: 1 });

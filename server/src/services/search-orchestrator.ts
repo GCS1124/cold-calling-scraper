@@ -46,7 +46,10 @@ import { noUsableResultsWarning } from './search-finalization';
 import { bridgeLinkedInWithPublicListings } from './public-entity-matching';
 import { enrichLeadFromWebsite } from './website-enrichment';
 import { enrichWebsiteCandidates, type WebsiteLeadEnricher } from './business-website-enrichment';
-import { buildSearchResponseContract } from '../../../shared/search-contract';
+import {
+  buildSearchExecutionContract,
+  buildSearchResponseContract,
+} from '../../../shared/search-contract';
 import { recordProviderCoverage } from './provider-coverage';
 
 type SearchJob = {
@@ -59,6 +62,7 @@ type SearchJob = {
   progress: SearchProgress;
   providerWarnings: ProviderWarning[];
   expiresAt: number;
+  createdAt: number;
   lastProgressAt: number;
   googleMapsUnavailable?: boolean;
   cancelRequested?: boolean;
@@ -211,6 +215,11 @@ const toResponse = (job: SearchJob): SearchResponse => {
   const leads = qualification.leads.slice(0, job.request.count);
   const emptyCompletion = job.status === 'complete' && !leads.length;
   const contract = buildSearchResponseContract(normalizeLeadSourceMode(job.request.sourceMode));
+  const status = emptyCompletion ? 'failed' : job.status;
+  const lastProgressAt = new Date(job.lastProgressAt).toISOString();
+  const completedAt = ['complete', 'failed', 'cancelled'].includes(status)
+    ? lastProgressAt
+    : undefined;
   return {
     ...contract,
     searchId: job.searchId,
@@ -221,7 +230,13 @@ const toResponse = (job: SearchJob): SearchResponse => {
       locationLabel: job.locationLabel,
       researchDepth: job.request.researchDepth ?? 'verified',
       researchBrief: job.request.researchBrief,
-      status: emptyCompletion ? 'failed' : job.status,
+      status,
+      execution: buildSearchExecutionContract({
+        path: 'durable',
+        startedAt: new Date(job.createdAt).toISOString(),
+        lastProgressAt,
+        ...(completedAt ? { completedAt } : {}),
+      }),
       progress: {
         ...job.progress,
         foundCount: leads.length,
@@ -1111,6 +1126,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         progress: createProgress(request.count),
         providerWarnings: [],
         expiresAt: startedAt + jobTtlMs,
+        createdAt: startedAt,
         lastProgressAt: startedAt,
         executionToken: randomUUID(),
       };
@@ -1139,6 +1155,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         job.cancelRequested = true;
         job.status = 'cancelled';
         job.progress.currentSource = 'Cancelled';
+        job.lastProgressAt = now();
         job.executionToken = randomUUID();
       }
 
@@ -1181,6 +1198,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         },
       ]);
       refreshProgress(job);
+      job.lastProgressAt = now();
       return toResponse(job);
     },
   };

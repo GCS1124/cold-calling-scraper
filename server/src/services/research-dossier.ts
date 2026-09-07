@@ -6,6 +6,7 @@ import type { EvidenceSourceFamily } from '../../../shared/source-evidence';
 import {
   buildSearchResponseContract,
   type PhonePolicyContract,
+  type SearchExecutionContract,
   type SearchModeCode,
   type SEARCH_RESPONSE_CONTRACT_VERSION,
 } from '../../../shared/search-contract';
@@ -17,6 +18,7 @@ export type ResearchDossier = {
   searchId: string;
   sourceMode: SearchModeCode;
   phonePolicy: PhonePolicyContract;
+  execution?: SearchExecutionContract;
   status: SearchResponse['meta']['status'];
   query: string;
   locationLabel: string;
@@ -89,6 +91,7 @@ export const buildResearchDossier = (
     searchId: response.searchId,
     sourceMode,
     phonePolicy: contract.meta.phonePolicy,
+    ...(response.meta.execution ? { execution: response.meta.execution } : {}),
     status: response.meta.status,
     query: response.meta.query,
     locationLabel: response.meta.locationLabel,

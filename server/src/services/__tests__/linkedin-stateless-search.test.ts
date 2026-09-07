@@ -116,6 +116,14 @@ describe('runStatelessLinkedinSearch', () => {
     expect(response.meta).toMatchObject({
       sourceMode: 'linkedin',
       phonePolicy: { required: true, evidence: 'public_phone_evidence' },
+      execution: {
+        path: 'stateless',
+        pollable: false,
+        resumable: false,
+        startedAt: expect.any(String),
+        lastProgressAt: expect.any(String),
+        completedAt: expect.any(String),
+      },
     });
     expect(response.meta.progress.providerCoverage).toEqual(
       expect.arrayContaining([

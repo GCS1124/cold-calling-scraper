@@ -2,6 +2,58 @@ export const SEARCH_RESPONSE_CONTRACT_VERSION = 2 as const;
 
 export type SearchModeCode = 'gmb' | 'linkedin' | 'ai';
 
+export type SearchExecutionContract =
+  | {
+      path: 'durable';
+      pollable: true;
+      resumable: true;
+      startedAt: string;
+      lastProgressAt: string;
+      completedAt?: string;
+    }
+  | {
+      path: 'stateless';
+      pollable: false;
+      resumable: false;
+      startedAt: string;
+      lastProgressAt: string;
+      completedAt: string;
+    };
+
+type SearchExecutionInput = {
+  path: SearchExecutionContract['path'];
+  startedAt: string;
+  lastProgressAt: string;
+  completedAt?: string;
+};
+
+export const buildSearchExecutionContract = ({
+  path,
+  startedAt,
+  lastProgressAt,
+  completedAt,
+}: SearchExecutionInput): SearchExecutionContract => {
+  if (path === 'stateless') {
+    return {
+      path,
+      pollable: false,
+      resumable: false,
+      startedAt,
+      lastProgressAt,
+      completedAt: completedAt ?? lastProgressAt,
+    };
+  }
+
+  return {
+    path,
+    pollable: true,
+    resumable: true,
+    startedAt,
+    lastProgressAt,
+    ...(completedAt ? { completedAt } : {}),
+  };
+};
+
 export type PhonePolicyContract = {
   required: true;
   evidence: 'public_phone_evidence';
