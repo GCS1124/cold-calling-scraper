@@ -43,6 +43,14 @@ idempotent phone/email verification events. This makes the internal contract
 stable enough for an integration layer while remaining honest about missing
 line-type, reachability, ownership, and mailbox checks.
 
+The evidence dossier response adds the same contract metadata plus
+`providerCoverage`, `coverage.observed`, `coverage.excludedByPhone`, and a
+`qualitySummary` containing tier counts, fresh phone observations, and
+source-family lead counts. Export rows also preserve organization, published
+and normalized role, employment status, decision-maker signal, and independent
+source-family metadata. These are additive fields; consumers should continue
+to enforce `phonePolicy.required` and inspect each lead's source evidence.
+
 ## Coverage semantics
 
 `leadCount` is the number of candidates observed from that provider before the

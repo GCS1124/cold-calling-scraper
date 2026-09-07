@@ -36,6 +36,16 @@ const response: SearchResponse = {
     },
   ],
   meta: {
+    sourceMode: 'linkedin',
+    phonePolicy: {
+      required: true,
+      evidence: 'public_phone_evidence',
+      lineType: 'not_checked',
+      reachability: 'not_checked',
+      personalOwnership: 'not_checked',
+      emailDelivery: 'not_checked',
+    },
+    limitations: ['Provider coverage is execution-specific.'],
     query: 'Dentist in Austin, TX',
     locationLabel: 'Austin, TX',
     researchDepth: 'verified',
@@ -50,6 +60,12 @@ const response: SearchResponse = {
       currentSource: 'Complete',
       batchesCompleted: 1,
       estimatedRemaining: 49,
+      providerCoverage: [{
+        providerId: 'linkedin-public-search',
+        providerName: 'Public LinkedIn Search',
+        status: 'returned',
+        leadCount: 1,
+      }],
     },
     totals: { total: 1, withEmail: 1, withPhone: 1, withWebsite: 1 },
     providerWarnings: [],
@@ -61,7 +77,18 @@ describe('buildResearchDossier', () => {
     const dossier = buildResearchDossier(response);
 
     expect(dossier.leads[0]?.evidence?.[0]?.sourceUrl).toBe('https://publicdental.example');
-    expect(dossier.coverage).toMatchObject({ requested: 50, found: 1, withPhone: 1 });
+    expect(dossier.contractVersion).toBe(2);
+    expect(dossier.sourceMode).toBe('linkedin');
+    expect(dossier.phonePolicy.required).toBe(true);
+    expect(dossier.providerCoverage[0]?.providerId).toBe('linkedin-public-search');
+    expect(dossier.coverage).toMatchObject({ observed: 1, requested: 50, found: 1, excludedByPhone: 0, withPhone: 1 });
+    expect(dossier.qualitySummary).toMatchObject({
+      eligible: 1,
+      needsReview: 0,
+      freshPhoneObservations: 1,
+      tierCounts: { supported: 1 },
+    });
+    expect(dossier.limitations).toContain('Provider coverage is execution-specific.');
     expect(dossier.limitations.join(' ')).toContain('public');
   });
 

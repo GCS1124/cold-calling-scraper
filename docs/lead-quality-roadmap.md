@@ -84,7 +84,7 @@ Acceptance: unsupported owner, current-role, mobile, deliverability, growth, and
 
 Provide a compact research dossier for every mode: why it fits, phone source and scope, email check level, observed dates, contradictions, opportunity evidence, and next action. Add saved qualification presets, resumable search history, and evidence-bearing exports. Record user corrections (wrong number, wrong business, former employee, duplicate, do not contact) with timestamps and explanations. Enforce suppression before export and later searches. Keep corrections scoped to the proper user/workspace; verify authorization before sharing data.
 
-The normalized research path now persists source-family/authority metadata, public profile identity, organization identity, role, employment relationship status, contact observation dates, and idempotent phone/email verification events. Feedback events, suppression enforcement, workspace isolation, and user-facing correction workflows are still pending.
+The normalized research path now persists source-family/authority metadata, public profile identity, organization identity, role, employment relationship status, contact observation dates, and idempotent phone/email verification events. Evidence dossiers now carry contract metadata, provider coverage, excluded-by-phone counts, quality tier distributions, and source-family lead counts; exports preserve public role and organization fields. Feedback events, suppression enforcement, workspace isolation, and user-facing correction workflows are still pending.
 
 Acceptance: results and exports agree; changing filters cannot bypass phone eligibility or suppression; observations remain historically traceable; correcting one branch does not corrupt all businesses sharing a domain or call center. Existing UI search/auth/history flows continue to work.
 
@@ -109,7 +109,7 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 | Crawler/domain checks | Partial: unrelated redirects and robots/parked pages rejected locally | Official-domain validation and bounded live checks still pending; unchanged-document reuse is not yet persistent |
 | Discovery reliability across three modes | Partial: GMB free-source merge, bounded public-phone recovery, and shared provider-coverage contract implemented locally | Recovery, retention reuse, and real-source smoke matrix still pending |
 | Typed qualification / role and signal research | Partial: source-family trust, authority tiers, role normalization, organization hints and relationship persistence implemented | Opportunity taxonomy, calibrated weights, contradiction scoring and multi-industry acceptance tests |
-| Dossiers / feedback / suppression | Partial: evidence dossiers, source-family metadata, person-to-organization links and idempotent observation persistence added | Feedback, suppression, user correction, workspace isolation and live export checks still pending |
+| Dossiers / feedback / suppression | Partial: evidence dossiers now expose contract/coverage/quality summaries; source-family metadata, person-to-organization links, role fields and idempotent observation persistence added | Feedback, suppression, user correction, workspace isolation and live export checks still pending |
 | Commercial quality benchmark | Pending | Reviewed dataset and measured results |
 | Production release | Pending | Commit, remote SHA, deployment, live readback |
 | Customer willingness to pay | Unproven | Pilot usage and customer feedback |

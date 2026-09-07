@@ -6,6 +6,11 @@ import type { Lead } from '../types/lead';
 const lead: Lead = {
   id: 'linkedin-export-lead',
   name: 'Public LinkedIn Lead',
+  organizationName: 'Example Business',
+  originalRole: 'Owner at Example Business',
+  normalizedRole: 'Owner',
+  decisionMaker: true,
+  employmentStatus: 'current',
   mobile: '',
   email: '',
   website: 'https://example-business.com',
@@ -29,6 +34,11 @@ describe('lead export rows', () => {
     expect(
       buildExportRows([lead], [
         'name',
+        'organizationName',
+        'originalRole',
+        'normalizedRole',
+        'decisionMaker',
+        'employmentStatus',
         'website',
         'listingUrl',
         'contactSourceUrl',
@@ -38,6 +48,11 @@ describe('lead export rows', () => {
     ).toEqual([
       {
         name: 'Public LinkedIn Lead',
+        organizationName: 'Example Business',
+        originalRole: 'Owner at Example Business',
+        normalizedRole: 'Owner',
+        decisionMaker: 'Yes',
+        employmentStatus: 'current',
         website: 'https://example-business.com',
         listingUrl: 'https://www.linkedin.com/in/public-lead',
         contactSourceUrl: 'https://example-business.com/contact',

@@ -2,6 +2,11 @@ import type { Lead } from '../types/lead';
 
 export const exportColumns = [
   'name',
+  'organizationName',
+  'originalRole',
+  'normalizedRole',
+  'decisionMaker',
+  'employmentStatus',
   'mobile',
   'email',
   'website',
@@ -12,6 +17,8 @@ export const exportColumns = [
   'source',
   'qualityTier',
   'qualityScore',
+  'independentSourceCount',
+  'sourceFamilies',
   'phoneSources',
   'emailSources',
   'phoneAssociation',
@@ -29,6 +36,11 @@ export type ExportColumn = (typeof exportColumns)[number];
 
 export const exportColumnLabels: Record<ExportColumn, string> = {
   name: 'Name',
+  organizationName: 'Organization',
+  originalRole: 'Published role',
+  normalizedRole: 'Normalized role',
+  decisionMaker: 'Decision-maker signal',
+  employmentStatus: 'Employment status',
   mobile: 'Phone',
   email: 'Email',
   website: 'Business website',
@@ -39,6 +51,8 @@ export const exportColumnLabels: Record<ExportColumn, string> = {
   source: 'Source',
   qualityTier: 'Contact evidence tier',
   qualityScore: 'Evidence score (not probability)',
+  independentSourceCount: 'Independent source families',
+  sourceFamilies: 'Source families',
   phoneSources: 'Phone evidence URLs',
   emailSources: 'Email evidence URLs',
   phoneAssociation: 'Phone association',
@@ -54,6 +68,11 @@ export const exportColumnLabels: Record<ExportColumn, string> = {
 
 export const defaultExportColumns = [
   'name',
+  'organizationName',
+  'originalRole',
+  'normalizedRole',
+  'decisionMaker',
+  'employmentStatus',
   'mobile',
   'email',
   'website',
@@ -62,6 +81,8 @@ export const defaultExportColumns = [
   'confidence',
   'address',
   'qualityTier',
+  'independentSourceCount',
+  'sourceFamilies',
   'phoneSources',
   'phoneAssociation',
   'lastObservedAt',
@@ -78,8 +99,15 @@ export const buildExportRows = (leads: Lead[], columns: readonly ExportColumn[])
   leads.map((lead) => {
     const fields = {
       ...lead,
+      organizationName: lead.organizationName ?? '',
+      originalRole: lead.originalRole ?? lead.headline ?? '',
+      normalizedRole: lead.normalizedRole ?? '',
+      decisionMaker: lead.decisionMaker === true ? 'Yes' : lead.decisionMaker === false ? 'No' : '',
+      employmentStatus: lead.employmentStatus ?? 'unverified',
       qualityTier: lead.quality?.tier ?? 'review',
       qualityScore: lead.quality?.score ?? '',
+      independentSourceCount: lead.quality?.independentSourceCount ?? lead.scores?.independentSourceCount ?? '',
+      sourceFamilies: (lead.quality?.sourceFamilies ?? lead.scores?.sourceFamilies ?? []).join(' | '),
       phoneSources: lead.quality?.phone.sourceUrls.join(' | ') ?? '',
       emailSources: lead.quality?.email.sourceUrls.join(' | ') ?? '',
       phoneAssociation: lead.quality?.phone.association ?? 'unknown',
