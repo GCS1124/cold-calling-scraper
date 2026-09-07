@@ -8,12 +8,27 @@ const phonePattern = /\+?1?[\s.(\-]*\d{3}[\s.)\-]*\d{3}[\s.\-]*\d{4}/;
 const listingCoordinatePattern = /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/;
 const locationCoordinatePattern = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),/;
 
+const mapsUserAgent =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36';
+const nonEssentialResourceTypes = new Set(['font', 'image', 'media', 'stylesheet']);
+
 const normalizePhoneCandidate = (value: string) => value.trim();
 
 const toAbsoluteUrl = (value: string) =>
   value.startsWith('http') ? value : `https://www.google.com${value}`;
 
 const baseLaunchArgs = ['--disable-blink-features=AutomationControlled'];
+
+const configureLightweightPage = async (page: import('playwright').Page) => {
+  await page.route('**/*', async (route) => {
+    if (nonEssentialResourceTypes.has(route.request().resourceType())) {
+      await route.abort();
+      return;
+    }
+
+    await route.continue();
+  });
+};
 
 export const formatGoogleMapsFailure = (error: unknown) => {
   const message = error instanceof Error ? error.message : 'Google Maps discovery failed';
@@ -88,12 +103,51 @@ const scoreLead = (lead: Lead) => {
   return Math.min(score, 95);
 };
 
-type GoogleMapsCandidate = {
+export type GoogleMapsCandidate = {
   name: string;
   listingUrl: string;
   phone?: string;
   latitude?: number;
   longitude?: number;
+};
+
+export const shouldFetchListingDetails = (candidate: GoogleMapsCandidate) =>
+  !candidate.phone?.trim();
+
+const buildCandidateLead = (
+  candidate: GoogleMapsCandidate,
+  request: SearchRequest,
+  locationLabel: string,
+  overrides: Partial<Lead> = {},
+): Lead => {
+  const lead: Lead = {
+    id: `google-${Buffer.from(candidate.listingUrl).toString('base64').slice(0, 24)}`,
+    name: candidate.name,
+    mobile: candidate.phone ?? '',
+    email: '',
+    website: '',
+    address: '',
+    category: request.companyType,
+    city: locationLabel,
+    source: 'Google Maps',
+    confidence: 0,
+    sourceScore: 90,
+    listingUrl: candidate.listingUrl,
+    hasEmail: false,
+    hasPhone: false,
+    hasWebsite: false,
+    verifiedPhone: false,
+    verifiedEmail: false,
+    scrapedAt: new Date().toISOString(),
+    latitude: candidate.latitude,
+    longitude: candidate.longitude,
+    ...overrides,
+  };
+
+  if (overrides.confidence === undefined) {
+    lead.confidence = scoreLead(lead);
+  }
+  return lead;
 };
 
 const extractListingCandidates = async (page: import('playwright').Page) =>
@@ -149,9 +203,20 @@ const scrapeListingDetails = async (
   locationLabel: string,
   deadlineMs?: number,
 ): Promise<Lead> => {
+  // Result cards already expose a public business phone in many searches.
+  // Avoid opening a second Maps document when the compulsory contact field is
+  // already available; this is both faster and less likely to hit browser
+  // resource limits on larger requests.
+  if (!shouldFetchListingDetails(candidate)) {
+    return buildCandidateLead(candidate, request, locationLabel, {
+      mobile: normalizePhoneCandidate(candidate.phone ?? ''),
+    });
+  }
+
   const page = await browser.newPage();
 
   try {
+    await configureLightweightPage(page);
     const remainingNavigationMs = deadlineMs
       ? deadlineMs - Date.now()
       : 30_000;
@@ -166,31 +231,12 @@ const scrapeListingDetails = async (
     });
 
     const body = (await page.textContent('body')) ?? '';
-      if (blockedPattern.test(body)) {
-        return {
-          id: `google-${Buffer.from(candidate.listingUrl).toString('base64').slice(0, 24)}`,
-          name: candidate.name,
-          mobile: candidate.phone ?? '',
-        email: '',
-        website: '',
-        address: '',
-        category: request.companyType,
-        city: locationLabel,
-        source: 'Google Maps',
+    if (blockedPattern.test(body)) {
+      return buildCandidateLead(candidate, request, locationLabel, {
         confidence: 45,
-        sourceScore: 90,
-        listingUrl: candidate.listingUrl,
         rejectionReason: 'blocked_google',
-        hasEmail: false,
-        hasPhone: false,
-        hasWebsite: false,
-        verifiedPhone: false,
-          verifiedEmail: false,
-          scrapedAt: new Date().toISOString(),
-          latitude: candidate.latitude,
-          longitude: candidate.longitude,
-        };
-      }
+      });
+    }
 
     const scraped = await page.evaluate(() => {
       const name =
@@ -218,31 +264,11 @@ const scrapeListingDetails = async (
       };
     });
 
-    const lead: Lead = {
-      id: `google-${Buffer.from(candidate.listingUrl).toString('base64').slice(0, 24)}`,
+    return buildCandidateLead(candidate, request, locationLabel, {
       name: scraped.name || candidate.name,
       mobile: normalizePhoneCandidate(scraped.phone || candidate.phone || ''),
-      email: '',
       website: scraped.website || '',
-      address: '',
-      category: request.companyType,
-      city: locationLabel,
-      source: 'Google Maps',
-      confidence: 0,
-      sourceScore: 90,
-      listingUrl: candidate.listingUrl,
-      latitude: candidate.latitude,
-      longitude: candidate.longitude,
-      hasEmail: false,
-      hasPhone: false,
-      hasWebsite: false,
-      verifiedPhone: false,
-      verifiedEmail: false,
-      scrapedAt: new Date().toISOString(),
-    };
-
-    lead.confidence = scoreLead(lead);
-    return lead;
+    });
   } finally {
     await page.close();
   }
@@ -265,11 +291,11 @@ export const discoverUsLeadsFromGoogleMaps = async ({
 }): Promise<Lead[]> => {
   const browser = await launchBrowser();
   const page = await browser.newPage({
-    userAgent:
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+    userAgent: mapsUserAgent,
   });
 
   try {
+    await configureLightweightPage(page);
     const isCityStateLocal = Boolean(
       location.mode === 'local' &&
         location.label.includes(',') &&

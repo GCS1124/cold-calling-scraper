@@ -114,4 +114,17 @@ describe('lead research signals', () => {
     expect(enriched.evidence).toHaveLength(4);
     expect(enriched.scores?.priority).toBeGreaterThan(0);
   });
+
+  it('does not reward a missing booking link and penalizes conflicting employment', () => {
+    const scored = scoreLeadResearch({
+      ...lead,
+      opportunitySignals: ['No online booking link observed'],
+      employmentStatus: 'conflicting',
+    });
+
+    expect(scored.opportunity).toBe(0);
+    expect(scored.opportunityTypes).toContain('conversion_gap');
+    expect(scored.contradictionFlags).toContain('Conflicting employment signal');
+    expect(scored.contradictionPenalty).toBeGreaterThan(0);
+  });
 });

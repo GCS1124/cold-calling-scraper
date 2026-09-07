@@ -76,7 +76,7 @@ Acceptance: multi-industry fixtures (dentist, HVAC, plumbing, roofing, legal, so
 
 Implement independently adjustable company fit, role relevance, freshness, corroboration, and contact requirements under the compulsory phone rule. Score explicit facts, penalize contradictions, and expose reason codes. Keep business contact routes separate from verified personal contact routes. Use objective, dated opportunity signals such as observed hiring pages or published expansion announcements. Absence of an online-booking link in a limited crawl means 'not observed', not 'the business has no booking'.
 
-The current implementation now records independent source families and authority tiers instead of treating provider names or repeated search-engine URLs as independent corroboration. Public professional profiles preserve the published role, normalized decision-maker signal, and organization hint; normalized persistence materializes the person-to-organization relationship with the observed role, relationship status, source document, and observation timestamp. Verification events use stable idempotency keys and contact observations preserve the original observation date. Opportunity taxonomy, calibrated weights, and contradiction penalties beyond the current deterministic employment states remain to be completed.
+The current implementation now records independent source families and authority tiers instead of treating provider names or repeated search-engine URLs as independent corroboration. Public professional profiles preserve the published role, normalized decision-maker signal, and organization hint; normalized persistence materializes the person-to-organization relationship with the observed role, relationship status, source document, and observation timestamp. Verification events use stable idempotency keys and contact observations preserve the original observation date. Opportunity wording is now classified into hiring, growth, active-service, conversion-gap, and negative-status types; missing booking links are neutral rather than demand evidence, and former/conflicting employment or unrelated websites reduce research priority with visible reason codes. Calibrated weights and independently reviewed labels remain to be completed.
 
 Acceptance: unsupported owner, current-role, mobile, deliverability, growth, and technology claims never receive a positive verification label. Search engines repeating one profile cannot create multiple independent source families. Rankings change for documented reasons.
 
@@ -105,10 +105,10 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 | Deliverable | State | Evidence required |
 | --- | --- | --- |
 | Detailed implementation roadmap | Written | This document and source audit |
-| Trust foundation | Local regression and browser checks pass | 277 server tests, 55 client tests, both builds, runtime boot, lint, and mocked browser flow |
+| Trust foundation | Local regression and browser checks pass | 281 server tests, 55 client tests, 4 shared taxonomy tests, both builds, runtime boot, lint, and mocked browser flow |
 | Crawler/domain checks | Partial: unrelated redirects and robots/parked pages rejected locally | Official-domain validation and bounded live checks still pending; unchanged-document reuse is not yet persistent |
 | Discovery reliability across three modes | Partial: GMB free-source merge, bounded public-phone recovery, shared provider-coverage contract, and durable replay-safe starts implemented locally | Recovery, retention reuse, and real-source smoke matrix still pending; stateless fallback cannot guarantee cross-instance replay |
-| Typed qualification / role and signal research | Partial: source-family trust, authority tiers, role normalization, organization hints and relationship persistence implemented | Opportunity taxonomy, calibrated weights, contradiction scoring and multi-industry acceptance tests |
+| Typed qualification / role and signal research | Partial: source-family trust, authority tiers, role normalization, organization hints, relationship persistence, opportunity taxonomy, and contradiction penalties implemented | Calibrated weights and independently reviewed multi-industry acceptance labels |
 | Dossiers / feedback / suppression | Partial: search responses and evidence dossiers expose lifecycle, contract, coverage, and quality summaries; source-family metadata, person-to-organization links, role fields, idempotent observation persistence, and optional owner-scoped durable jobs added | Feedback, suppression, shared-workspace authorization, user correction and live export checks still pending |
 | Commercial quality benchmark | Pending | Reviewed dataset and measured results |
 | Production release | Pending | Commit, remote SHA, deployment, live readback |
@@ -130,10 +130,13 @@ All three modes now render a shared provider-coverage panel. `configured`, `not_
 
 The normalized evidence graph now distinguishes source families and authority tiers, so repeated search providers or repeated URLs cannot inflate corroboration. Public profile leads retain organization and role metadata, and persisted research links a person to the publicly inferred organization with an observed relationship status and source document. Contact observations retain their source observation date, and phone/email verification writes are idempotent. Search responses now expose the same lifecycle and quality rollup used by dossiers, so an integration can decide whether to poll, resume, review, or export without a second quality request. Search and evidence errors now carry stable codes, retryability, request IDs, and a versioned error contract; durable search starts also deduplicate retries with a request fingerprint and bounded `Idempotency-Key`. The browser client now sends an idempotency key for every start and propagates the active Supabase access token when one exists. When `LEAD_FINDER_AUTH_REQUIRED=true`, server verification and owner-scoped job access are enforced across all search routes. These changes improve downstream integration reliability but do not prove mobile line type, reachability, personal ownership, email deliverability, or commercial lead quality.
 
+The public Google Maps fallback now skips detail-page navigation when a result card already contains a public phone and blocks non-essential browser resources. This reduces the resource-limit failure mode without weakening the public-phone evidence gate. Research scoring now distinguishes positive opportunity signals from neutral conversion gaps and negative status signals, and exposes contradiction flags and penalties for review; these are deterministic prioritization aids, not accuracy probabilities.
+
 Verification commands:
 
 ```sh
 (cd server && npx vitest run --pool=forks --maxWorkers=1 --reporter verbose)
+(npx vitest run --pool=forks --maxWorkers=1 shared/__tests__/opportunity-signals.test.ts)
 npm run test:runtime --workspace server
 (cd client && npx vitest run --coverage --pool=forks --maxWorkers=1 --reporter verbose)
 npm run build

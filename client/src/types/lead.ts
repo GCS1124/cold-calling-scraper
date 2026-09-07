@@ -9,6 +9,7 @@ import type {
   EvidenceAuthorityTier,
   EvidenceSourceFamily,
 } from '../../../shared/source-evidence';
+import type { OpportunitySignalType } from '../../../shared/opportunity-signals';
 import type { LeadQualitySummary } from '../../../shared/lead-quality';
 import type {
   PhonePolicyContract,
@@ -56,6 +57,9 @@ export type LeadScores = {
   priority: number;
   independentSourceCount: number;
   sourceFamilies: EvidenceSourceFamily[];
+  opportunityTypes?: OpportunitySignalType[];
+  contradictionFlags?: string[];
+  contradictionPenalty?: number;
   reasons: string[];
 };
 

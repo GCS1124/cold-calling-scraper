@@ -8,6 +8,7 @@ import {
   samePublicHost,
   sourceFamilyForEvidence,
 } from './source-evidence';
+import { assessOpportunitySignals } from '../../../shared/opportunity-signals';
 
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 
@@ -28,6 +29,12 @@ const buildReasons = (lead: Lead, scores: Omit<LeadScores, 'reasons'>) => {
     reasons.push(`${scores.independentSourceCount} independent source families`);
   }
   if (scores.opportunity > 0) reasons.push('Public opportunity signal');
+  if (scores.opportunityTypes?.length) {
+    reasons.push(`Opportunity types: ${scores.opportunityTypes.join(', ')}`);
+  }
+  for (const contradiction of scores.contradictionFlags ?? []) {
+    reasons.push(`Review: ${contradiction}`);
+  }
 
   return reasons.length ? reasons : ['Public result requires manual review'];
 };
@@ -59,9 +66,21 @@ export const scoreLeadResearch = (lead: Lead): LeadScores => {
       (lead.verifiedEmail ? 10 : 0) +
       (lead.hasWebsite ? 5 : 0),
   );
-  const opportunity = clamp((lead.opportunitySignals?.length ?? 0) * 25);
+  const opportunityAnalysis = assessOpportunitySignals(lead.opportunitySignals ?? []);
+  const opportunity = clamp(
+    opportunityAnalysis.positiveCount * 25 - opportunityAnalysis.negativeCount * 40,
+  );
+  const contradictionFlags = [
+    ...(lead.employmentStatus === 'former' ? ['Former employment signal'] : []),
+    ...(lead.employmentStatus === 'conflicting' ? ['Conflicting employment signal'] : []),
+    ...((lead.evidence ?? []).some((item) => item.status === 'conflicting')
+      ? ['Conflicting public evidence']
+      : []),
+    ...(lead.websiteAssessment?.status === 'unrelated' ? ['Website identity is unrelated'] : []),
+  ];
+  const contradictionPenalty = Math.min(60, contradictionFlags.length * 25);
   const priority = clamp(
-    trust * 0.3 + fit * 0.3 + contactability * 0.25 + opportunity * 0.15,
+    trust * 0.3 + fit * 0.3 + contactability * 0.25 + opportunity * 0.15 - contradictionPenalty,
   );
   const scores = {
     trust,
@@ -71,6 +90,17 @@ export const scoreLeadResearch = (lead: Lead): LeadScores => {
     priority,
     independentSourceCount: sources,
     sourceFamilies,
+    opportunityTypes: [
+      ...new Set([
+        ...opportunityAnalysis.positiveTypes,
+        ...opportunityAnalysis.negativeTypes,
+        ...opportunityAnalysis.assessments
+          .filter((assessment) => assessment.type === 'conversion_gap')
+          .map((assessment) => assessment.type),
+      ]),
+    ],
+    contradictionFlags,
+    contradictionPenalty,
   };
 
   return {

@@ -7,6 +7,7 @@ import type {
   EvidenceAuthorityTier,
   EvidenceSourceFamily,
 } from '../../../shared/source-evidence';
+import type { OpportunitySignalType } from '../../../shared/opportunity-signals';
 
 export type PublicSocialLink = {
   platform:
@@ -48,6 +49,9 @@ export type LeadScores = {
   /** Independent source families, not a count of URLs or repeated search results. */
   independentSourceCount: number;
   sourceFamilies: EvidenceSourceFamily[];
+  opportunityTypes?: OpportunitySignalType[];
+  contradictionFlags?: string[];
+  contradictionPenalty?: number;
   reasons: string[];
 };
 
