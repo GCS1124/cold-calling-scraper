@@ -1077,7 +1077,7 @@ const enrichOneLead = async (
         });
         const hadContact = Boolean(candidateLead.email || candidateLead.mobile);
 
-        const crawled = await enrichLeadFromWebsite(candidateLead);
+        const crawled = await enrichLeadFromWebsite(candidateLead, { deadlineMs });
         warnings.push(...crawled.warnings);
         candidateLead = enrichLeadFromPublicSnippet(crawled.lead, candidate.snippet, candidate.website);
         candidateLead = attachContactProvenance(candidateLead, candidate.website, hadContact);
@@ -1104,7 +1104,7 @@ const enrichOneLead = async (
     const crawled = await enrichLeadFromWebsite({
       ...enrichedLead,
       website,
-    });
+    }, { deadlineMs });
     warnings.push(...crawled.warnings);
     enrichedLead = attachContactProvenance(enrichLead(crawled.lead), website, hadContact);
   }

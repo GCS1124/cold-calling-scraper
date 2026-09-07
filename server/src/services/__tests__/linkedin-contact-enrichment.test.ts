@@ -311,7 +311,7 @@ Jordan Lee is the owner of Stone Dental, a dentist in Austin, TX. Call (512) 555
     expect(result.leads[0]?.email).toBe('hello@stonedental.example');
     expect(result.leads[0]?.mobile).toBe('+1 512 555 0144');
     expect(result.leads[0]?.source).toContain('Website Crawl');
-    expect(httpClient.get).toHaveBeenCalledTimes(2);
+    expect(httpClient.get).toHaveBeenCalledTimes(4);
   });
 
   it('falls back to DuckDuckGo when the first free contact providers are blocked', async () => {
@@ -829,7 +829,52 @@ Restimulate Health is a dental practice in Austin, TX. Call (512) 555-0188.
       'https://public.example/',
       expect.objectContaining({ maxRedirects: 0 }),
     );
+    expect(httpClient.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not crawl a website path disallowed by robots.txt', async () => {
+    vi.mocked(httpClient.get).mockImplementation(async (url) => {
+      if (String(url).endsWith('/robots.txt')) {
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+          data: ['User-agent: *', 'Disallow: /'].join(String.fromCharCode(10)),
+        } as never;
+      }
+
+      throw new Error('HTML must not be requested when robots.txt disallows the root.');
+    });
+
+    const result = await enrichLeadFromWebsite(makeLead({ website: 'https://blocked.example' }));
+
+    expect(result.lead.mobile).toBe('');
+    expect(result.lead.websiteAssessment?.status).toBe('blocked');
+    expect(result.lead.websiteAssessment?.robots).toBe('blocked');
     expect(httpClient.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not accept contact values from a parked domain', async () => {
+    vi.mocked(httpClient.get).mockImplementation(async (url) => {
+      if (String(url).endsWith('/robots.txt')) {
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+          data: ['User-agent: *', 'Allow: /'].join(String.fromCharCode(10)),
+        } as never;
+      }
+
+      return {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+        data: '<title>This domain is for sale</title><a href="tel:+15125550177">Call</a>',
+      } as never;
+    });
+
+    const result = await enrichLeadFromWebsite(makeLead({ website: 'https://parked.example' }));
+
+    expect(result.lead.mobile).toBe('');
+    expect(result.lead.websiteAssessment?.status).toBe('parked');
+    expect(result.lead.contactEvidence ?? []).toEqual([]);
   });
 
   it('continues to the next public query after a low-confidence website result', async () => {

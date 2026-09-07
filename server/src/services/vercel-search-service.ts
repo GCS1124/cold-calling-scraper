@@ -11,6 +11,8 @@ import {
   type LinkedInDiscoveryResult,
 } from './linkedin-search';
 import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
+import { enrichLeadFromWebsite } from './website-enrichment';
+import { enrichWebsiteCandidates, type WebsiteLeadEnricher } from './business-website-enrichment';
 import {
   discoverUsLeadsFromAiMode,
   type AiDiscoveryResult,
@@ -84,7 +86,7 @@ type VercelSearchServiceDeps = {
     deadlineMs?: number;
   }) => Promise<Lead[]>;
   discoverLinkedinListings?: NonNullable<VercelSearchServiceDeps['discoverOsmLeads']>;
-  enrichWebsiteLead?: (lead: Lead) => Promise<unknown>;
+  enrichWebsiteLead?: WebsiteLeadEnricher;
   now?: () => number;
   idFactory?: () => string;
 };
@@ -468,10 +470,22 @@ const discoverRegionLeads = async (
   const googlePlacesAvailable =
     googlePlaces !== googlePlacesProvider || isGooglePlacesConfigured();
 
-  let googleLeads: Lead[] = [];
-  if (googlePlacesAvailable) {
+  // These sources are independent. Run them together so adding free coverage
+  // does not add another full network round trip to every search seed.
+  const googleLeadsPromise = (async () => {
+    if (!googlePlacesAvailable) {
+      warnings.push({
+        providerId: 'google-places',
+        providerName: 'Google Places',
+        message:
+          'Optional Google Places is not configured. Continuing with free OpenStreetMap and public map discovery.',
+        severity: 'info',
+      });
+      return [] as Lead[];
+    }
+
     try {
-      googleLeads = await googlePlaces.fetchLeads({
+      return await googlePlaces.fetchLeads({
         rawQuery: request.companyType,
         query,
         queryVariants,
@@ -488,35 +502,32 @@ const discoverRegionLeads = async (
             ? error.message
             : 'Google Places discovery failed',
       });
+      return [] as Lead[];
     }
-  } else {
-    warnings.push({
-      providerId: 'google-places',
-      providerName: 'Google Places',
-      message:
-        'Optional Google Places is not configured. Continuing with free OpenStreetMap and public map discovery.',
-      severity: 'info',
-    });
-  }
+  })();
 
-  let osmLeads: Lead[] = [];
-  try {
-    if (!googleLeads.length) {
-      osmLeads = await discoverOsmLeads({
+  const osmLeadsPromise = (async () => {
+    try {
+      // Keep the free listing source independent from Google Places. A non-empty
+      // Google response is not evidence that it covered the whole market.
+      return await discoverOsmLeads({
         request: googleRequest,
         location: discoveryLocation,
         profile,
         deadlineMs,
       });
+    } catch (error) {
+      warnings.push({
+        providerId: 'osm-discovery',
+        providerName: 'OpenStreetMap',
+        message:
+          error instanceof Error ? error.message : 'OpenStreetMap discovery failed',
+      });
+      return [] as Lead[];
     }
-  } catch (error) {
-    warnings.push({
-      providerId: 'osm-discovery',
-      providerName: 'OpenStreetMap',
-      message:
-        error instanceof Error ? error.message : 'OpenStreetMap discovery failed',
-    });
-  }
+  })();
+
+  const [googleLeads, osmLeads] = await Promise.all([googleLeadsPromise, osmLeadsPromise]);
 
   if (!googleLeads.length && !osmLeads.length) {
     warnings.push({
@@ -581,6 +592,7 @@ const tickJob = async (
       | 'discoverLinkedinListings'
       | 'discoverAiLeads'
       | 'enrichLinkedinLeads'
+      | 'enrichWebsiteLead'
     >,
 ): Promise<SearchJobRecord> => {
   if (job.cancelRequested || job.status === 'cancelled') {
@@ -804,6 +816,26 @@ const tickJob = async (
 
       job.providerWarnings.push(...warnings);
       mergeLeads(job, leads, deps.now);
+
+      if (
+        deps.enrichWebsiteLead &&
+        !hasRequestedPhoneCandidates(job)
+      ) {
+        const websiteResult = await enrichWebsiteCandidates({
+          leads: job.leads,
+          enrichLead: deps.enrichWebsiteLead,
+          deadlineMs: deps.now() + Math.min(12_000, maxTickDurationMs),
+          now: deps.now,
+        });
+        for (const warning of websiteResult.warnings) {
+          appendWarningOnce(job, warning);
+        }
+        if (websiteResult.leads.length) {
+          mergeLeads(job, websiteResult.leads, deps.now, false);
+          job.progress.enriched += websiteResult.attemptedCount;
+        }
+      }
+
       if (googleMapsUnavailable) {
         job.googleMapsUnavailable = true;
       }
@@ -890,6 +922,9 @@ export const createVercelSearchServiceWithDeps = (
   const enrichLinkedinLeads =
     deps.enrichLinkedinLeads ??
     (deps.discoverLinkedinLeads ? undefined : enrichLinkedinLeadsWithPublicContacts);
+  const enrichWebsiteLead =
+    deps.enrichWebsiteLead ??
+    (process.env.NODE_ENV === 'test' ? undefined : enrichLeadFromWebsite);
   const discoverOsm = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
   const discoverLinkedinListings =
     deps.discoverLinkedinListings ??
@@ -939,6 +974,7 @@ export const createVercelSearchServiceWithDeps = (
       discoverLinkedinListings,
       discoverAiLeads,
       enrichLinkedinLeads,
+      enrichWebsiteLead,
       discoverOsmLeads: discoverOsm,
       now,
     });

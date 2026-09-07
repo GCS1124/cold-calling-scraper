@@ -16,6 +16,18 @@ export function LeadQualityBadge({ lead }: { lead: Lead }) {
 export function LeadQualityDetails({ lead }: { lead: Lead }) {
   const quality = lead.quality;
   if (!quality) return <p className="mb-4 text-sm text-amber-800">Legacy result: contact evidence needs a fresh check.</p>;
+  const website = lead.websiteAssessment;
+  const websiteLabel = website?.status === 'confirmed'
+    ? 'Identity confirmed'
+    : website?.status === 'probable'
+      ? 'Identity probable'
+      : website?.status === 'parked'
+        ? 'Parked domain'
+        : website?.status === 'blocked'
+          ? 'Crawl blocked'
+          : website?.status === 'unrelated'
+            ? 'Identity not matched'
+            : 'Unavailable';
   return (
     <section aria-label={`Contact evidence for ${lead.name}`} className="mb-5 rounded-2xl border border-blue-100 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -32,6 +44,27 @@ export function LeadQualityDetails({ lead }: { lead: Lead }) {
         <div><dt className="text-slate-500">Last phone observation</dt><dd className="mt-1 font-semibold text-slate-900">{quality.lastObservedAt ? new Date(quality.lastObservedAt).toLocaleDateString() : 'Unknown'}{quality.freshness === 'stale' ? ' (needs refresh)' : ''}</dd></div>
         <div><dt className="text-slate-500">Checks still needed</dt><dd className="mt-1 font-semibold text-slate-900">Line type, reachability, email delivery</dd></div>
       </dl>
+      {website && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h4 className="text-xs font-bold text-slate-900">Website identity</h4>
+              <p className="mt-1 text-xs text-slate-600">{websiteLabel} <span className="text-slate-400">({website.score}/100 rule score)</span></p>
+            </div>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">robots: {website.robots}</span>
+          </div>
+          <p className="mt-2 break-all text-[11px] text-slate-500">{website.canonicalHost || 'Unknown host'} · observed {new Date(website.observedAt).toLocaleDateString()}</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <ul className="space-y-1 text-xs leading-5 text-slate-600">
+              {website.reasons.map((reason) => <li key={`website-reason-${reason}`}>{reason}</li>)}
+            </ul>
+            <ul className="space-y-1 text-xs leading-5 text-slate-600">
+              {website.gaps.map((gap) => <li key={`website-gap-${gap}`}>{gap}</li>)}
+            </ul>
+          </div>
+          <a className="mt-3 inline-block text-xs font-semibold text-blue-700 underline underline-offset-2" href={website.sourceUrl} rel="noreferrer" target="_blank">Open assessed page</a>
+        </div>
+      )}
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div><h4 className="text-xs font-bold text-emerald-800">Supporting evidence</h4><ul className="mt-2 space-y-1 text-xs leading-5 text-slate-600">{quality.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>
         <div><h4 className="text-xs font-bold text-amber-800">Review before outreach</h4><ul className="mt-2 space-y-1 text-xs leading-5 text-slate-600">{quality.gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul></div>

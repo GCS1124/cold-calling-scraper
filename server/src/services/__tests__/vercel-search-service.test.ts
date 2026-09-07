@@ -250,6 +250,7 @@ describe('createVercelSearchServiceWithDeps', () => {
   });
 
   it('returns phone and website data directly from the Google-first path', async () => {
+    const discoverOsmLeads = vi.fn().mockResolvedValue([]);
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
       normalizeLocation: vi.fn().mockResolvedValue(localLocation),
@@ -266,7 +267,7 @@ describe('createVercelSearchServiceWithDeps', () => {
           }),
         ]),
       } as never,
-      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      discoverOsmLeads,
       idFactory: () => 'search-2',
       now: () => 1000,
     });
@@ -283,6 +284,54 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.leads[0]?.website).toBe('https://northstarlabs.ai');
     expect(snapshot?.leads[0]?.hasPhone).toBe(true);
     expect(snapshot?.leads[0]?.hasWebsite).toBe(true);
+    expect(discoverOsmLeads).toHaveBeenCalled();
+  });
+
+  it('recovers a public phone from a business website before GMB finalization', async () => {
+    const enrichWebsiteLead = vi.fn().mockImplementation(async (lead: Lead) => ({
+      lead: {
+        ...lead,
+        mobile: '+1 512 555 0118',
+        hasPhone: true,
+        verifiedPhone: true,
+        contactEvidence: [{
+          field: 'phone' as const,
+          value: '+1 512 555 0118',
+          sourceUrl: 'https://northstarlabs.ai/contact',
+          sourceName: 'Public business website',
+          sourceKind: 'business_website' as const,
+          observedAt: new Date().toISOString(),
+          association: 'business' as const,
+        }],
+      },
+      warnings: [],
+    }));
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      googlePlaces: {
+        id: 'google-places',
+        name: 'Google Places',
+        fetchLeads: vi.fn().mockResolvedValue([
+          makeLead({ mobile: '', hasPhone: false, verifiedPhone: false }),
+        ]),
+      } as never,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      enrichWebsiteLead,
+      idFactory: () => 'search-website-recovery',
+      now: () => Date.now(),
+    });
+
+    const response = await service.startSearch({
+      companyType: 'Dental Clinics',
+      city: 'Austin, TX',
+      count: 1,
+    });
+    const snapshot = await pollJob(service, response.searchId, 20);
+
+    expect(enrichWebsiteLead).toHaveBeenCalledTimes(1);
+    expect(snapshot?.meta.status).toBe('complete');
+    expect(snapshot?.leads[0]?.mobile).toBe('+1 512 555 0118');
   });
 
   it('treats an unconfigured Google Places key as an informational free fallback', async () => {

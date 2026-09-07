@@ -176,6 +176,47 @@ describe('deduplicateLeads', () => {
     });
   });
 
+  it('keeps the strongest website identity assessment when enrichment records merge', () => {
+    const leads = deduplicateLeads([
+      makeLead({
+        id: 'website-discovery',
+        website: 'https://alpha-dental.com',
+        hasWebsite: true,
+        websiteAssessment: {
+          version: 1,
+          status: 'probable',
+          score: 25,
+          canonicalHost: 'alpha-dental.com',
+          sourceUrl: 'https://alpha-dental.com/contact',
+          observedAt: '2026-05-21T00:00:00.000Z',
+          robots: 'unknown',
+          reasons: ['Public contact value found.'],
+          gaps: ['Identity needs review.'],
+        },
+      }),
+      makeLead({
+        id: 'website-enrichment',
+        website: 'https://alpha-dental.com',
+        hasWebsite: true,
+        websiteAssessment: {
+          version: 1,
+          status: 'confirmed',
+          score: 88,
+          canonicalHost: 'alpha-dental.com',
+          sourceUrl: 'https://alpha-dental.com/about',
+          observedAt: '2026-05-22T00:00:00.000Z',
+          contentHash: 'abc123',
+          robots: 'allowed',
+          reasons: ['Business identity matched.'],
+          gaps: [],
+        },
+      }),
+    ]);
+
+    expect(leads[0]?.websiteAssessment?.status).toBe('confirmed');
+    expect(leads[0]?.websiteAssessment?.sourceUrl).toBe('https://alpha-dental.com/about');
+  });
+
   it('keeps different public LinkedIn profiles at the same employer separate', () => {
     const leads = deduplicateLeads([
       makeLead({

@@ -1,6 +1,10 @@
 import type { ResearchDepth, SearchSourceMode, TimeZoneCode } from '../data/search-options';
 import type { UsStateCode } from '../data/us-states';
-import type { ContactEvidence, LeadQualityAssessment } from '../../../shared/lead-quality';
+import type {
+  ContactEvidence,
+  LeadQualityAssessment,
+  WebsiteAssessment,
+} from '../../../shared/lead-quality';
 
 export type PublicSocialLink = {
   platform:
@@ -60,6 +64,7 @@ export type Lead = {
   contactSourceUrl?: string;
   contactEvidence?: ContactEvidence[];
   quality?: LeadQualityAssessment;
+  websiteAssessment?: WebsiteAssessment;
   /** Social links published by the lead's public business website. */
   publicSocialLinks?: PublicSocialLink[];
   /** Bounded public search-result evidence used for manual verification. */

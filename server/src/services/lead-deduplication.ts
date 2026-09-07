@@ -1,6 +1,7 @@
 import type { EmploymentStatus, Lead, PublicSocialLink } from '../types/lead';
 import { collectContactEvidence, getContactEvidence, mergeContactEvidence, normalizeContactPhone } from './contact-evidence';
 import { withLeadQuality } from './lead-quality';
+import { preferWebsiteAssessment } from './website-assessment';
 
 const companySuffixPattern =
   /\b(private limited|pvt ltd|pvt\. ltd\.|private ltd|ltd|limited|llc|inc|inc\.|incorporated|corp|corp\.|corporation|co|co\.)\b/gi;
@@ -337,6 +338,13 @@ const mergeGroup = (group: Lead[]) => {
     ?? sorted.find((lead) => normalizeContactPhone(lead.mobile));
   const emailLead = sorted.find((lead) => lead.hasEmail && getContactEvidence(lead, 'email').length)
     ?? sorted.find((lead) => lead.hasEmail && lead.email);
+  const websiteAssessment = group
+    .map((lead) => lead.websiteAssessment)
+    .filter((assessment): assessment is NonNullable<Lead['websiteAssessment']> => Boolean(assessment))
+    .reduce<NonNullable<Lead['websiteAssessment']> | undefined>(
+      (current, incoming) => preferWebsiteAssessment(current, incoming),
+      undefined,
+    );
 
   return withLeadQuality({
     ...sorted[0],
@@ -346,6 +354,7 @@ const mergeGroup = (group: Lead[]) => {
     mobile: phoneLead?.mobile ?? '',
     email: emailLead?.email ?? '',
     website: pickValue(...sorted.map((lead) => lead.website)),
+    ...(websiteAssessment ? { websiteAssessment } : {}),
     contactSourceUrl: phoneLead ? getContactEvidence(phoneLead, 'phone')[0]?.sourceUrl : undefined,
     contactEvidence: mergeContactEvidence(group.flatMap(collectContactEvidence)),
     publicSocialLinks: mergePublicSocialLinks(group),

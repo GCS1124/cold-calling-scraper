@@ -1,6 +1,6 @@
 # Lead quality roadmap
 
-Updated: 2026-09-07. Scope: improve GMB, LinkedIn public discovery, and AI mode in the existing React/Vite product. No new public API product or endpoints are planned.
+Updated: 2026-09-08. Scope: improve GMB, LinkedIn public discovery, and AI mode in the existing React/Vite product. No new public API product or endpoints are planned.
 
 ## Product outcome
 
@@ -50,7 +50,7 @@ Implement field-specific contact evidence, exact crawler provenance, person/loca
 
 Acceptance: unrelated/rejected evidence cannot qualify a phone; invalid raw numbers cannot inherit a valid flag; two people sharing a switchboard remain separate; branches sharing a domain remain separate; crawl contacts retain their actual source page; stale observations remain stale after validation; all response builders obey the same gate. Adversarial fixtures and browser checks must prove these cases.
 
-### 2. Research crawler and domain accuracy (pending)
+### 2. Research crawler and domain accuracy (local trust checks implemented; bounded live validation pending)
 
 Validate official domains against business name, address, phone, and public organization markup. Record whether a domain is confirmed, probable, parked, unrelated, or unavailable. Respect robots rules and site restrictions; bound pages, bytes, redirects, per-domain concurrency, and overall deadlines. Reject login/challenge pages. Capture document hashes and observation dates, and avoid re-reading unchanged documents within the allowed retention window.
 
@@ -58,17 +58,19 @@ Prioritize contact, about, team, leadership, location, services, and careers pag
 
 Acceptance: fixtures for parked sites, unrelated redirects, multiple offices, malformed markup, robots disallow, duplicate pages, and hung requests; bounded completion under provider failures; no private-network fetches; every accepted fact has an origin.
 
-### 3. Discovery coverage and execution reliability (pending)
+Current implementation records a deterministic website identity assessment, robots outcome, exact assessed page, observation timestamp, and SHA-256 document hash. Parked/challenge pages cannot contribute website contact evidence, robots-disallowed roots are not fetched, and weak contact-bearing pages remain usable but are labeled probable with explicit gaps. The remaining validation is a bounded live-provider/domain smoke matrix and retention-aware reuse of unchanged documents.
+
+### 3. Discovery coverage and execution reliability (partial: free-source merge and bounded recovery implemented)
 
 Share mode policy and scheduling across local, durable, and stateless execution. Allocate research time by candidate yield and evidence gaps, with per-provider concurrency and circuit breakers. Preserve partial qualified results on cancellation and time limits. Save enough checkpoints to recover after process loss without duplicate work. Verify storage and worker availability before promising resumable jobs.
 
-GMB: refine category synonyms and location seeds; keep exact city/state boundaries and independently research business contacts. Preserve separate branches and closed-business exclusions. Review current provider storage and attribution rules before changing retention.
+GMB: refine category synonyms and location seeds; keep exact city/state boundaries and independently research business contacts. Preserve separate branches and closed-business exclusions. Google Places and OpenStreetMap now run independently in the durable path, and a bounded public-website recovery pass can recover a published phone for phone-missing business candidates. Review current provider storage and attribution rules before changing retention.
 
 LinkedIn: expand public professional discovery through company leadership pages, associations, and public search references; corroborate current company and role. Reuse a proven company contact route for multiple relevant people while labeling it a business route. Quarantine former/conflicting employment for review.
 
 AI: compile the brief into typed supported criteria; show which requirements are enforced versus still unverified. Route company/people discovery according to intent. Honor exclusions. Recover with deterministic query expansion if Gemini is unavailable. Do not label an unsupported criterion as matched.
 
-Acceptance: multi-industry fixtures (dentist, HVAC, plumbing, roofing, legal, software); region boundary tests; query diversity checks; simulated 429/403/timeout/restart/cancellation; complete searches without continuous browser polling when a worker is configured.
+Acceptance: multi-industry fixtures (dentist, HVAC, plumbing, roofing, legal, software); region boundary tests; query diversity checks; simulated 429/403/timeout/restart/cancellation; complete searches without continuous browser polling when a worker is configured. Local tests now cover independent free-source execution and bounded website recovery; live multi-industry coverage and worker recovery remain pending.
 
 ### 4. Qualification and opportunity research (pending)
 
@@ -99,9 +101,9 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 | Deliverable | State | Evidence required |
 | --- | --- | --- |
 | Detailed implementation roadmap | Written | This document and source audit |
-| Trust foundation | Local regression and browser checks pass | 236 server tests, 52 client tests, both builds, runtime boot, lint, and mocked browser flow |
-| Crawler/domain checks | Partial: unrelated redirects rejected | Official-domain validation, robots policy, and bounded live checks still pending |
-| Discovery reliability across three modes | Pending | Recovery, coverage, real-source smoke matrix |
+| Trust foundation | Local regression and browser checks pass | 248 server tests, 52 client tests, both builds, runtime boot, lint, and mocked browser flow |
+| Crawler/domain checks | Partial: unrelated redirects and robots/parked pages rejected locally | Official-domain validation and bounded live checks still pending; unchanged-document reuse is not yet persistent |
+| Discovery reliability across three modes | Partial: GMB free-source merge and bounded public-phone recovery implemented locally | Recovery, coverage, and real-source smoke matrix still pending |
 | Typed qualification / role and signal research | Pending | Criteria and evidence tests |
 | Dossiers / feedback / suppression | Partial: evidence dossiers and export checks added | Feedback, suppression, persistence and isolation checks still pending |
 | Commercial quality benchmark | Pending | Reviewed dataset and measured results |
@@ -110,7 +112,7 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 
 The active objective remains open until the agreed product work and verification are complete. A passing synthetic test suite alone does not close the commercial-quality goal.
 
-## Verified checkpoint: 2026-09-07
+## Verified checkpoint: 2026-09-08
 
 The common public-phone gate now runs on local, durable, stateless and dossier responses. It matches the phone value to contact evidence, rejects malformed/rejected/mismatched evidence and private URLs, and cannot be disabled by an untyped false flag. Legacy completed jobs with zero eligible contacts return a failure with an explicit notice rather than a green success. Raw candidates remain available internally for enrichment.
 
@@ -126,7 +128,7 @@ Verification commands:
 npm test
 npm run build
 npm run lint --workspace client
-E2E_BASE_URL=http://127.0.0.1:5188/search E2E_ARTIFACT_DIR=/tmp/lead-quality-browser-20260907 npm run test:e2e
+E2E_BASE_URL=http://127.0.0.1:5188/search E2E_ARTIFACT_DIR=/tmp/lead-quality-browser-20260908 npm run test:e2e
 git diff --check
 ```
 

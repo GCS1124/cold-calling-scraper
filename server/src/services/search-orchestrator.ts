@@ -44,6 +44,8 @@ import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 import { reverifyLeads } from './research-reverification';
 import { noUsableResultsWarning } from './search-finalization';
 import { bridgeLinkedInWithPublicListings } from './public-entity-matching';
+import { enrichLeadFromWebsite } from './website-enrichment';
+import { enrichWebsiteCandidates, type WebsiteLeadEnricher } from './business-website-enrichment';
 
 type SearchJob = {
   searchId: string;
@@ -73,6 +75,7 @@ type SearchDeps = {
   normalizeLocation?: (rawLocation: string) => Promise<NormalizedUsLocation>;
   enrichLead?: (lead: Lead) => Lead | Promise<Lead>;
   enrichLinkedinLeads?: typeof enrichLinkedinLeadsWithPublicContacts;
+  enrichWebsiteLead?: WebsiteLeadEnricher;
   discoverGoogleLeads?: typeof googlePlacesProvider | ((args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
@@ -535,6 +538,7 @@ const runRegionalDiscovery = async (
   discoverGoogleLeads: NonNullable<SearchDeps['discoverGoogleLeads']>,
   discoverGoogleMapsLeads: SearchDeps['discoverGoogleMapsLeads'] | undefined,
   discoverOsmLeads: NonNullable<SearchDeps['discoverOsmLeads']>,
+  enrichWebsiteLead: SearchDeps['enrichWebsiteLead'],
   now: () => number,
 ) => {
   const candidateTargetCount = getLeadDiscoveryCandidateTarget(request.count);
@@ -667,6 +671,20 @@ const runRegionalDiscovery = async (
     }
   }
 
+  if (enrichWebsiteLead && !hasRequestedPhoneCandidates(job)) {
+    const websiteResult = await enrichWebsiteCandidates({
+      leads: job.leads,
+      enrichLead: enrichWebsiteLead,
+      deadlineMs: now() + 8_000,
+      now,
+    });
+    appendUniqueWarnings(job, websiteResult.warnings);
+    if (websiteResult.leads.length) {
+      upsertLeads(job, websiteResult.leads, now, false);
+      job.progress.enriched += websiteResult.attemptedCount;
+    }
+  }
+
   return {
     googleMapsUnavailable,
   };
@@ -686,6 +704,9 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
   const enrichLinkedinLeads =
     deps.enrichLinkedinLeads ??
     (deps.discoverLinkedinLeads ? undefined : enrichLinkedinLeadsWithPublicContacts);
+  const enrichWebsiteLead =
+    deps.enrichWebsiteLead ??
+    (process.env.NODE_ENV === 'test' ? undefined : enrichLeadFromWebsite);
   const discoverOsmLeads = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
   const discoverLinkedinListings =
     deps.discoverOsmLeads ??
@@ -849,6 +870,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         discoverGoogleLeads,
         guardedDiscoverGoogleMapsLeads,
         discoverOsmLeads,
+        enrichWebsiteLead,
         now,
       );
 

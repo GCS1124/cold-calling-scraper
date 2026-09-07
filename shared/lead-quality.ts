@@ -8,6 +8,21 @@ export type ContactEvidence = {
   association: 'business' | 'person' | 'unknown';
 };
 
+export type WebsiteAssessment = {
+  version: 1;
+  status: 'confirmed' | 'probable' | 'parked' | 'unrelated' | 'unavailable' | 'blocked';
+  /** Deterministic identity score, not a probability of correctness. */
+  score: number;
+  canonicalHost: string;
+  sourceUrl: string;
+  resolvedHost?: string;
+  observedAt: string;
+  contentHash?: string;
+  robots: 'allowed' | 'blocked' | 'unknown';
+  reasons: string[];
+  gaps: string[];
+};
+
 export type LeadQualityAssessment = {
   version: 1;
   tier: 'corroborated' | 'supported' | 'review' | 'excluded';

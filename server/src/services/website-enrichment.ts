@@ -6,6 +6,17 @@ import type { ProviderWarning } from '../types/search';
 import { httpClient } from '../utils/http-client';
 import { isPublicHttpUrl } from '../utils/public-url';
 import { collectContactEvidence, mergeContactEvidence, normalizeContactPhone } from './contact-evidence';
+import type { WebsiteAssessment } from '../../../shared/lead-quality';
+import {
+  assessWebsiteDocument,
+  blockedRobotsPolicy,
+  canUseWebsiteContactEvidence,
+  createUnavailableWebsiteAssessment,
+  parseRobotsTxt,
+  preferWebsiteAssessment,
+  unknownRobotsPolicy,
+  type RobotsPolicy,
+} from './website-assessment';
 
 export { isPublicHttpUrl } from '../utils/public-url';
 
@@ -42,6 +53,8 @@ const maxPages = Number(process.env.WEBSITE_CRAWL_MAX_PAGES ?? 14);
 const maxDepth = Number(process.env.WEBSITE_CRAWL_MAX_DEPTH ?? 2);
 const requestTimeoutMs = Number(process.env.WEBSITE_CRAWL_TIMEOUT_MS ?? 8_000);
 const maxHtmlBytes = Number(process.env.WEBSITE_CRAWL_MAX_HTML_BYTES ?? 1_500_000);
+const robotsCacheTtlMs = Number(process.env.WEBSITE_ROBOTS_CACHE_TTL_MS ?? 300_000);
+const robotsPolicyCache = new Map<string, { expiresAt: number; policy: RobotsPolicy }>();
 
 const socialHosts = new Set([
   'facebook.com',
@@ -865,8 +878,83 @@ const createWarning = (message: string): ProviderWarning => ({
   message,
 });
 
+export type WebsiteEnrichmentOptions = {
+  deadlineMs?: number;
+};
+
+const readRobotsPolicy = async (
+  origin: URL,
+  warnings: ProviderWarning[],
+  deadlineMs?: number,
+): Promise<RobotsPolicy> => {
+  const cacheKey = origin.origin.toLowerCase();
+  if (process.env.NODE_ENV !== 'test') {
+    const cached = robotsPolicyCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.policy;
+    }
+  }
+
+  const robotsUrl = new URL('/robots.txt', origin).toString();
+
+  if (deadlineMs !== undefined && Date.now() >= deadlineMs) {
+    return unknownRobotsPolicy();
+  }
+
+  const remember = (policy: RobotsPolicy) => {
+    if (process.env.NODE_ENV !== 'test') {
+      robotsPolicyCache.set(cacheKey, {
+        expiresAt: Date.now() + robotsCacheTtlMs,
+        policy,
+      });
+      if (robotsPolicyCache.size > 1_000) {
+        const oldestKey = robotsPolicyCache.keys().next().value;
+        if (oldestKey) robotsPolicyCache.delete(oldestKey);
+      }
+    }
+    return policy;
+  };
+
+  try {
+    const response = await httpClient.get<string>(robotsUrl, {
+      timeout: Math.min(
+        requestTimeoutMs,
+        5_000,
+        deadlineMs === undefined ? requestTimeoutMs : Math.max(250, deadlineMs - Date.now()),
+      ),
+      responseType: 'text',
+      maxContentLength: 128_000,
+      maxBodyLength: 128_000,
+      headers: {
+        'User-Agent': 'LeadFinderPro/1.0 (US-only enrichment)',
+        Accept: 'text/plain,text/*;q=0.9,*/*;q=0.1',
+      },
+      maxRedirects: 0,
+      validateStatus: () => true,
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      warnings.push(createWarning(`${robotsUrl} denied crawler access.`));
+      return remember(blockedRobotsPolicy());
+    }
+
+    if (response.status >= 200 && response.status < 300) {
+      return remember(parseRobotsTxt(String(response.data ?? '')));
+    }
+
+    if (response.status >= 500) {
+      warnings.push(createWarning(`${robotsUrl} returned HTTP ${response.status}; robots policy is unknown.`));
+    }
+
+    return remember(unknownRobotsPolicy());
+  } catch {
+    return remember(unknownRobotsPolicy());
+  }
+};
+
 export const enrichLeadFromWebsite = async (
   lead: Lead,
+  options: WebsiteEnrichmentOptions = {},
 ): Promise<{ lead: Lead; warnings: ProviderWarning[] }> => {
   if (lead.rejectionReason === 'blocked_website') {
     return { lead, warnings: [] };
@@ -893,9 +981,32 @@ export const enrichLeadFromWebsite = async (
     return { lead, warnings: [] };
   }
 
+  const warnings: ProviderWarning[] = [];
+  const robots = await readRobotsPolicy(origin, warnings, options.deadlineMs);
+  const rootUrl = canonicalizeUrl(website);
+
+  if (!robots.isAllowed(rootUrl)) {
+    return {
+      lead: {
+        ...lead,
+        website,
+        websiteAssessment: createUnavailableWebsiteAssessment({
+          sourceUrl: rootUrl,
+          robots: 'blocked',
+          status: 'blocked',
+          reason: 'robots.txt disallows crawling the supplied website.',
+        }),
+      },
+      warnings: [
+        ...warnings,
+        createWarning(`${new URL(rootUrl).origin}/robots.txt disallows crawling this website.`),
+      ],
+    };
+  }
+
   const queue: CrawlPage[] = [
     {
-      url: canonicalizeUrl(website),
+      url: rootUrl,
       depth: 0,
       score: 100,
       redirects: 0,
@@ -909,12 +1020,16 @@ export const enrichLeadFromWebsite = async (
   const addresses = new Set<string>();
   const socialUrls = new Set<string>();
   const opportunitySignals = new Set<string>();
-  const warnings: ProviderWarning[] = [];
+  let websiteAssessment: WebsiteAssessment | undefined;
 
   let blockedCount = 0;
   let timeoutCount = 0;
 
-  while (queue.length && visited.size < maxPages) {
+  while (
+    queue.length &&
+    visited.size < maxPages &&
+    (options.deadlineMs === undefined || Date.now() < options.deadlineMs)
+  ) {
     queue.sort((left, right) => right.score - left.score);
 
     const current = queue.shift();
@@ -929,11 +1044,22 @@ export const enrichLeadFromWebsite = async (
       continue;
     }
 
+    if (!robots.isAllowed(currentUrl)) {
+      continue;
+    }
+
     visited.add(currentUrl);
 
     try {
+      const remainingTimeMs = options.deadlineMs === undefined
+        ? requestTimeoutMs
+        : options.deadlineMs - Date.now();
+      if (options.deadlineMs !== undefined && remainingTimeMs <= 0) {
+        break;
+      }
+
       const response = await httpClient.get<string>(currentUrl, {
-        timeout: requestTimeoutMs,
+        timeout: Math.min(requestTimeoutMs, Math.max(250, remainingTimeMs)),
         responseType: 'text',
         maxContentLength: maxHtmlBytes,
         maxBodyLength: maxHtmlBytes,
@@ -997,18 +1123,36 @@ export const enrichLeadFromWebsite = async (
 
       const extracted = extractContactDetailsFromHtml(html, currentUrl);
       const observedAt = new Date().toISOString();
-      for (const [field, values] of [['phone', extracted.phones], ['email', extracted.emails]] as const) {
-        for (const value of values) contactEvidence.push({
-          field, value, sourceUrl: currentUrl, sourceName: 'Public business website',
-          sourceKind: 'business_website', observedAt, association: 'business',
-        });
+      const pageAssessment = assessWebsiteDocument({
+        lead,
+        sourceUrl: currentUrl,
+        html,
+        observedAt,
+        robots: robots.status,
+        phoneValues: extracted.phones,
+        emailValues: extracted.emails,
+        addressValues: extracted.addresses,
+      });
+      websiteAssessment = preferWebsiteAssessment(websiteAssessment, pageAssessment);
+
+      if (canUseWebsiteContactEvidence(pageAssessment)) {
+        for (const [field, values] of [['phone', extracted.phones], ['email', extracted.emails]] as const) {
+          for (const value of values) contactEvidence.push({
+            field, value, sourceUrl: currentUrl, sourceName: 'Public business website',
+            sourceKind: 'business_website', observedAt, association: 'business',
+          });
+        }
+
+        extracted.emails.forEach((email) => emails.add(email));
+        extracted.phones.forEach((phone) => phones.add(phone));
+        extracted.addresses.forEach((address) => addresses.add(address));
+        extracted.socialUrls.forEach((socialUrl) => socialUrls.add(socialUrl));
+        extracted.opportunitySignals.forEach((signal) => opportunitySignals.add(signal));
       }
 
-      extracted.emails.forEach((email) => emails.add(email));
-      extracted.phones.forEach((phone) => phones.add(phone));
-      extracted.addresses.forEach((address) => addresses.add(address));
-      extracted.socialUrls.forEach((socialUrl) => socialUrls.add(socialUrl));
-      extracted.opportunitySignals.forEach((signal) => opportunitySignals.add(signal));
+      if (pageAssessment.status === 'blocked' || pageAssessment.status === 'parked') {
+        continue;
+      }
 
       for (const link of getInternalLinks(html, new URL(currentUrl), origin)) {
         if (visited.has(link.url)) {
@@ -1073,6 +1217,16 @@ export const enrichLeadFromWebsite = async (
     addresses.size +
     socialUrls.size;
 
+  if (!websiteAssessment) {
+    websiteAssessment = createUnavailableWebsiteAssessment({
+      sourceUrl: website,
+      robots: robots.status,
+      reason: timeoutCount > 0
+        ? 'The website did not respond within the bounded crawl window.'
+        : 'No usable public website document was returned.',
+    });
+  }
+
   if (!totalExtracted && blockedCount > 0 && blockedCount >= visited.size) {
     return {
       lead: {
@@ -1081,6 +1235,7 @@ export const enrichLeadFromWebsite = async (
         publicSocialLinks,
         opportunitySignals: mergedOpportunitySignals,
         crawlAttempts: visited.size,
+        websiteAssessment,
         rejectionReason: lead.rejectionReason ?? 'blocked_website',
       },
       warnings: [],
@@ -1097,6 +1252,7 @@ export const enrichLeadFromWebsite = async (
       email,
       mobile: phone,
       contactEvidence: mergedContactEvidence,
+      websiteAssessment,
       contactSourceUrl: mergedContactEvidence.find((item) =>
         item.field === 'phone' && item.value === normalizeContactPhone(phone))?.sourceUrl,
       address,

@@ -159,7 +159,7 @@ describe('website contact provenance', () => {
   it('does not follow an unrelated-domain redirect and claim its contacts', async () => {
     const get = vi.spyOn(httpClient, 'get').mockResolvedValue({ status: 302, headers: { location: 'https://unrelated.example/contact' }, data: '' });
     const result = await enrichLeadFromWebsite(lead({ mobile: '', contactEvidence: [], listingUrl: undefined }));
-    expect(get).toHaveBeenCalledTimes(1);
+    expect(get).toHaveBeenCalledTimes(2);
     expect(getContactEvidence(result.lead, 'phone')).toEqual([]);
   });
 });
