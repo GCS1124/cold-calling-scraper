@@ -12,6 +12,7 @@ import { buildQueryTermVariants } from './query-term-variants';
 import { isPublicHttpUrl } from '../utils/public-url';
 import { getResearchDepthConfig } from './research-depth';
 import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
+import { extractOrganizationHint } from './public-entity-matching';
 
 type SearchResult = {
   title: string;
@@ -2324,11 +2325,18 @@ const buildLeadFromCandidate = (
   const publicProfileText = normalizeText(
     `${candidate.title} ${candidate.headline ?? ''} ${candidate.snippet}`,
   );
+  const normalizedRole = candidate.matchedRoleTerms.find((term) =>
+    /owner|founder|chief executive|ceo|president|principal|partner|director|manager|administrator|head|vice president|vp/i.test(term),
+  );
 
   return {
     id: createId(candidate.profileUrl || `${candidate.name}-${candidate.headline ?? ''}`),
     name: normalizeText(candidate.name || slugToName(candidate.profileUrl) || candidate.profileUrl),
     headline: candidate.headline,
+    organizationName: extractOrganizationHint(candidate.headline),
+    originalRole: candidate.headline,
+    normalizedRole,
+    decisionMaker: candidate.matchedRoleTerms.some(isOwnerRoleTerm),
     employmentStatus: inferPublicEmploymentStatus(publicProfileText),
     mobile: '',
     email: '',

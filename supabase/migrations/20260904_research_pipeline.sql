@@ -155,8 +155,16 @@ create table if not exists public.research_verification_events (
   result text not null,
   source_document_id uuid references public.research_source_documents (id) on delete set null,
   checked_at timestamptz not null default now(),
-  metadata jsonb not null default '{}'::jsonb
+  metadata jsonb not null default '{}'::jsonb,
+  idempotency_key text
 );
+
+alter table if exists public.research_verification_events
+  add column if not exists idempotency_key text;
+
+create unique index if not exists research_verification_events_idempotency_idx
+  on public.research_verification_events (search_id, idempotency_key)
+  where idempotency_key is not null;
 
 create table if not exists public.research_opportunity_signals (
   id uuid primary key default gen_random_uuid(),

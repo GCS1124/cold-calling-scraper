@@ -92,6 +92,7 @@ const makePool = (failOn?: RegExp) => {
     }
 
     if (text.includes('research_people')) return { rows: [{ id: 'person-1' }] };
+    if (text.includes('research_organizations')) return { rows: [{ id: 'organization-1' }] };
     if (text.includes('research_claims')) return { rows: [{ id: 'claim-1' }] };
     if (text.includes('research_opportunity_signals')) return { rows: [{ id: 'signal-1' }] };
 
@@ -122,6 +123,8 @@ describe('persistNormalizedResearch', () => {
     expect(statements).toContainEqual(expect.stringContaining('research_contact_points'));
     expect(statements).toContainEqual(expect.stringContaining('research_verification_events'));
     expect(statements).toContainEqual(expect.stringContaining('research_opportunity_signals'));
+    expect(statements).toContainEqual(expect.stringContaining('research_organization_people'));
+    expect(statements).toContainEqual(expect.stringContaining('idempotency_key'));
     expect(statements).toContainEqual(expect.stringContaining('research_lead_snapshots'));
     expect(statements.at(-1)).toBe('commit');
     expect(fake.release).toHaveBeenCalledOnce();

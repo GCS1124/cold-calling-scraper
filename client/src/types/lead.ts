@@ -6,6 +6,10 @@ import type {
   WebsiteAssessment,
 } from '../../../shared/lead-quality';
 import type {
+  EvidenceAuthorityTier,
+  EvidenceSourceFamily,
+} from '../../../shared/source-evidence';
+import type {
   PhonePolicyContract,
   SearchModeCode,
   SEARCH_RESPONSE_CONTRACT_VERSION,
@@ -28,6 +32,8 @@ export type PublicSocialLink = {
 export type LeadEvidence = {
   sourceUrl: string;
   sourceName: string;
+  sourceFamily?: EvidenceSourceFamily;
+  authorityTier?: EvidenceAuthorityTier;
   claim: string;
   status:
     | 'confirmed'
@@ -46,6 +52,8 @@ export type LeadScores = {
   contactability: number;
   opportunity: number;
   priority: number;
+  independentSourceCount: number;
+  sourceFamilies: EvidenceSourceFamily[];
   reasons: string[];
 };
 
@@ -62,6 +70,10 @@ export type Lead = {
   name: string;
   headline?: string;
   employmentStatus?: EmploymentStatus;
+  organizationName?: string;
+  originalRole?: string;
+  normalizedRole?: string;
+  decisionMaker?: boolean;
   mobile?: string;
   email?: string;
   website?: string;

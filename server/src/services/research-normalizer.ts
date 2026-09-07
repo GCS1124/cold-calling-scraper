@@ -2,6 +2,7 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 import type { Lead } from '../types/lead';
 import type { SearchJobRecord } from './search-job-store';
+import { samePublicHost, sourceFamilyForEvidence } from './source-evidence';
 
 type QueryRunner = {
   query: <T extends QueryResultRow = QueryResultRow>(
@@ -38,12 +39,23 @@ const isHttpUrl = (value: string | undefined): value is string => {
 const isLinkedInPerson = (lead: Lead) =>
   /linkedin\.com\/(?:in|pub)\//i.test(lead.listingUrl ?? '');
 
-const sourceFamilyFor = (name: string, url: string) => {
-  if (/linkedin/i.test(name) || /linkedin\.com/i.test(url)) return 'linkedin';
-  if (/google|gmb|maps/i.test(name) || /google\.com\/maps/i.test(url)) return 'business-listing';
-  if (/openstreetmap|osm/i.test(name) || /openstreetmap\.org/i.test(url)) return 'open-map';
-  if (/social|facebook|instagram|youtube|tiktok|twitter|x\.com/i.test(name)) return 'social';
-  return 'public-website';
+const sourceFamilyFor = (lead: Lead, name: string, url: string) => {
+  const isWebsiteDocument =
+    url === lead.website ||
+    url === lead.contactSourceUrl ||
+    samePublicHost(url, lead.website);
+  const officialWebsite =
+    isWebsiteDocument &&
+    ['confirmed', 'probable'].includes(lead.websiteAssessment?.status ?? '')
+      ? true
+      : undefined;
+
+  return sourceFamilyForEvidence({
+    sourceUrl: url,
+    sourceName: name,
+    sourceKind: isWebsiteDocument ? 'business_website' : undefined,
+    officialWebsite,
+  });
 };
 
 const sourceNameFor = (lead: Lead, url: string) => {
@@ -74,12 +86,36 @@ const organizationKeyFor = (lead: Lead) => {
     websiteHost = '';
   }
 
+  const organizationName = lead.organizationName?.trim() || lead.name;
+
   return `organization:${[
-    normalizeKeyPart(lead.name),
+    normalizeKeyPart(organizationName),
     normalizeKeyPart(lead.city),
     normalizeKeyPart(lead.stateCode || lead.state),
     normalizeKeyPart(websiteHost),
   ].join('|')}`.slice(0, 480);
+};
+
+const organizationNameFromHeadline = (headline?: string) => {
+  const normalized = headline?.replace(/\s+/g, ' ').trim() ?? '';
+  const match = normalized.match(
+    /\b(?:at|@|with|for|of|owner of|founder of|principal of)\s+(.+?)(?:\s*[|•·].*)?$/i,
+  );
+
+  return (match?.[1] ?? '')
+    .replace(/\s*[-|].*$/g, '')
+    .replace(/^(?:the|a|an)\s+/i, '')
+    .trim();
+};
+
+const organizationNameFor = (lead: Lead) => {
+  const explicit = lead.organizationName?.trim();
+  if (explicit && explicit.length >= 3) return explicit;
+
+  const inferred = organizationNameFromHeadline(lead.headline);
+  if (inferred && inferred.length >= 3) return inferred;
+
+  return '';
 };
 
 const personKeyFor = (lead: Lead) =>
@@ -94,6 +130,14 @@ const statusForEmployment = (status: Lead['employmentStatus']) => {
   if (status === 'former') return 'stale';
   if (status === 'conflicting') return 'conflicting';
   return 'unknown';
+};
+
+const relationshipStatusFor = (status: Lead['employmentStatus']) => {
+  if (status === 'current') return 'current';
+  if (status === 'probable') return 'probable';
+  if (status === 'former') return 'former';
+  if (status === 'conflicting') return 'conflicting';
+  return 'unverified';
 };
 
 const insertSourceDocument = async (
@@ -120,7 +164,7 @@ const insertSourceDocument = async (
       job.searchId,
       url,
       sourceNameFor(lead, url),
-      sourceFamilyFor(lead.source, url),
+      sourceFamilyFor(lead, sourceNameFor(lead, url), url),
       lead.scrapedAt,
       isLinkedInPerson(lead) ? 'public-search' : 'public-business-source',
       JSON.stringify({
@@ -134,7 +178,11 @@ const insertSourceDocument = async (
   return result.rows[0] ?? null;
 };
 
-const upsertOrganization = async (runner: QueryRunner, lead: Lead) => {
+const upsertOrganization = async (
+  runner: QueryRunner,
+  lead: Lead,
+  organizationName = lead.organizationName?.trim() || lead.name,
+) => {
   const result = await runner.query<{ id: string }>(
     `
       insert into research_organizations (
@@ -152,7 +200,7 @@ const upsertOrganization = async (runner: QueryRunner, lead: Lead) => {
     `,
     [
       organizationKeyFor(lead),
-      lead.name,
+      organizationName,
       lead.category,
       lead.city,
       lead.stateCode || null,
@@ -236,19 +284,20 @@ const insertContactPoint = async (
   value: string,
   status: 'public' | 'validated' | 'invalid' | 'unknown' | 'suppressed',
   document: SourceDocument | undefined,
+  observedAt?: string,
 ) => {
   if (!value.trim()) return;
 
   await runner.query(
     `
       insert into research_contact_points (
-        search_id, entity_key, kind, value, normalized_value, status, source_document_id
-      ) values ($1, $2, $3, $4, $5, $6, $7)
+        search_id, entity_key, kind, value, normalized_value, status, source_document_id, observed_at
+      ) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8::timestamptz, now()))
       on conflict (search_id, entity_key, kind, normalized_value) do update set
         value = excluded.value,
         status = excluded.status,
         source_document_id = coalesce(excluded.source_document_id, research_contact_points.source_document_id),
-        observed_at = now()
+        observed_at = greatest(research_contact_points.observed_at, excluded.observed_at)
     `,
     [
       job.searchId,
@@ -258,6 +307,7 @@ const insertContactPoint = async (
       normalizeKeyPart(value),
       status,
       document?.id ?? null,
+      observedAt || null,
     ],
   );
 };
@@ -270,14 +320,35 @@ const insertVerificationEvent = async (
   result: string,
   document: SourceDocument | undefined,
   metadata: Record<string, unknown> = {},
+  valueKey = '',
 ) => {
+  const idempotencyKey = [
+    entityKey,
+    fieldName,
+    result,
+    document?.id ?? '',
+    normalizeKeyPart(valueKey),
+  ].join('|').slice(0, 900);
+
   await runner.query(
     `
       insert into research_verification_events (
-        search_id, entity_key, field_name, result, source_document_id, metadata
-      ) values ($1, $2, $3, $4, $5, $6::jsonb)
+        search_id, entity_key, field_name, result, source_document_id, metadata, idempotency_key
+      ) values ($1, $2, $3, $4, $5, $6::jsonb, $7)
+      on conflict (search_id, idempotency_key) do update set
+        result = excluded.result,
+        source_document_id = coalesce(excluded.source_document_id, research_verification_events.source_document_id),
+        metadata = excluded.metadata
     `,
-    [job.searchId, entityKey, fieldName, result, document?.id ?? null, JSON.stringify(metadata)],
+    [
+      job.searchId,
+      entityKey,
+      fieldName,
+      result,
+      document?.id ?? null,
+      JSON.stringify(metadata),
+      idempotencyKey,
+    ],
   );
 };
 
@@ -292,7 +363,47 @@ const materializeLead = async (
   const primaryDocument = documents[0];
 
   if (person) {
-    await upsertPerson(runner, lead);
+    const personId = await upsertPerson(runner, lead);
+    const organizationName = organizationNameFor(lead);
+    let organizationId: string | null = null;
+
+    if (organizationName) {
+      organizationId = await upsertOrganization(
+        runner,
+        {
+          ...lead,
+          name: organizationName,
+          organizationName: undefined,
+          listingUrl: undefined,
+        },
+        organizationName,
+      );
+    }
+
+    if (organizationId && personId) {
+      await runner.query(
+        `
+          insert into research_organization_people (
+            organization_id, person_id, role_title, relationship_status,
+            source_document_id, observed_at
+          ) values ($1, $2, $3, $4, $5, $6::timestamptz)
+          on conflict (organization_id, person_id) do update set
+            role_title = coalesce(nullif(excluded.role_title, ''), research_organization_people.role_title),
+            relationship_status = excluded.relationship_status,
+            source_document_id = coalesce(excluded.source_document_id, research_organization_people.source_document_id),
+            observed_at = greatest(research_organization_people.observed_at, excluded.observed_at)
+        `,
+        [
+          organizationId,
+          personId,
+          lead.originalRole || lead.headline || '',
+          relationshipStatusFor(lead.employmentStatus),
+          primaryDocument?.id ?? null,
+          lead.scrapedAt || null,
+        ],
+      );
+    }
+
     await insertClaim(
       runner,
       job,
@@ -308,6 +419,23 @@ const materializeLead = async (
       'confirmed',
       documents,
     );
+
+    if (organizationName) {
+      await insertClaim(
+        runner,
+        job,
+        'person',
+        entityKey,
+        'organization_relationship',
+        {
+          organizationName,
+          role: lead.normalizedRole || lead.originalRole || lead.headline || null,
+          excerpt: lead.publicEvidence?.profileSnippet || null,
+        },
+        statusForEmployment(lead.employmentStatus),
+        documents,
+      );
+    }
 
     if (lead.employmentStatus) {
       await insertClaim(
@@ -350,6 +478,7 @@ const materializeLead = async (
       lead.mobile,
       lead.hasPhone && lead.verifiedPhone ? 'validated' : 'unknown',
       documents.find((document) => document.url === lead.contactSourceUrl) || primaryDocument,
+      lead.scrapedAt,
     );
   }
 
@@ -362,15 +491,34 @@ const materializeLead = async (
       lead.email,
       lead.hasEmail && lead.verifiedEmail ? 'validated' : 'public',
       documents.find((document) => document.url === lead.contactSourceUrl) || primaryDocument,
+      lead.scrapedAt,
     );
   }
 
   if (lead.website) {
-    await insertContactPoint(runner, job, entityKey, 'website', lead.website, 'public', primaryDocument);
+    await insertContactPoint(
+      runner,
+      job,
+      entityKey,
+      'website',
+      lead.website,
+      'public',
+      primaryDocument,
+      lead.scrapedAt,
+    );
   }
 
   for (const social of lead.publicSocialLinks ?? []) {
-    await insertContactPoint(runner, job, entityKey, 'social', social.url, 'public', primaryDocument);
+    await insertContactPoint(
+      runner,
+      job,
+      entityKey,
+      'social',
+      social.url,
+      'public',
+      primaryDocument,
+      lead.scrapedAt,
+    );
   }
 
   if (lead.mobile) {
@@ -382,6 +530,7 @@ const materializeLead = async (
       lead.hasPhone && lead.verifiedPhone ? 'validated_public_format' : 'not_validated',
       documents.find((document) => document.url === lead.contactSourceUrl) || primaryDocument,
       { carrierTypeChecked: false },
+      lead.mobile,
     );
   }
 
@@ -393,6 +542,8 @@ const materializeLead = async (
       'email',
       lead.hasEmail && lead.verifiedEmail ? 'validated_public_format' : 'not_validated',
       documents.find((document) => document.url === lead.contactSourceUrl) || primaryDocument,
+      {},
+      lead.email,
     );
   }
 

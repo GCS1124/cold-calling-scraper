@@ -72,15 +72,19 @@ AI: compile the brief into typed supported criteria; show which requirements are
 
 Acceptance: multi-industry fixtures (dentist, HVAC, plumbing, roofing, legal, software); region boundary tests; query diversity checks; simulated 429/403/timeout/restart/cancellation; complete searches without continuous browser polling when a worker is configured. Local tests now cover independent free-source execution and bounded website recovery; live multi-industry coverage and worker recovery remain pending.
 
-### 4. Qualification and opportunity research (pending)
+### 4. Qualification and opportunity research (partial: source-family trust and role/org qualification implemented)
 
 Implement independently adjustable company fit, role relevance, freshness, corroboration, and contact requirements under the compulsory phone rule. Score explicit facts, penalize contradictions, and expose reason codes. Keep business contact routes separate from verified personal contact routes. Use objective, dated opportunity signals such as observed hiring pages or published expansion announcements. Absence of an online-booking link in a limited crawl means 'not observed', not 'the business has no booking'.
 
+The current implementation now records independent source families and authority tiers instead of treating provider names or repeated search-engine URLs as independent corroboration. Public professional profiles preserve the published role, normalized decision-maker signal, and organization hint; normalized persistence materializes the person-to-organization relationship with the observed role, relationship status, source document, and observation timestamp. Verification events use stable idempotency keys and contact observations preserve the original observation date. Opportunity taxonomy, calibrated weights, and contradiction penalties beyond the current deterministic employment states remain to be completed.
+
 Acceptance: unsupported owner, current-role, mobile, deliverability, growth, and technology claims never receive a positive verification label. Search engines repeating one profile cannot create multiple independent source families. Rankings change for documented reasons.
 
-### 5. Dossiers, corrections, and customer workflow (pending)
+### 5. Dossiers, corrections, and customer workflow (partial: evidence dossiers and normalized identity links implemented)
 
 Provide a compact research dossier for every mode: why it fits, phone source and scope, email check level, observed dates, contradictions, opportunity evidence, and next action. Add saved qualification presets, resumable search history, and evidence-bearing exports. Record user corrections (wrong number, wrong business, former employee, duplicate, do not contact) with timestamps and explanations. Enforce suppression before export and later searches. Keep corrections scoped to the proper user/workspace; verify authorization before sharing data.
+
+The normalized research path now persists source-family/authority metadata, public profile identity, organization identity, role, employment relationship status, contact observation dates, and idempotent phone/email verification events. Feedback events, suppression enforcement, workspace isolation, and user-facing correction workflows are still pending.
 
 Acceptance: results and exports agree; changing filters cannot bypass phone eligibility or suppression; observations remain historically traceable; correcting one branch does not corrupt all businesses sharing a domain or call center. Existing UI search/auth/history flows continue to work.
 
@@ -101,11 +105,11 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 | Deliverable | State | Evidence required |
 | --- | --- | --- |
 | Detailed implementation roadmap | Written | This document and source audit |
-| Trust foundation | Local regression and browser checks pass | 248 server tests, 52 client tests, both builds, runtime boot, lint, and mocked browser flow |
+| Trust foundation | Local regression and browser checks pass | 256 server tests, 52 client tests, both builds, runtime boot, lint, and mocked browser flow |
 | Crawler/domain checks | Partial: unrelated redirects and robots/parked pages rejected locally | Official-domain validation and bounded live checks still pending; unchanged-document reuse is not yet persistent |
 | Discovery reliability across three modes | Partial: GMB free-source merge, bounded public-phone recovery, and shared provider-coverage contract implemented locally | Recovery, retention reuse, and real-source smoke matrix still pending |
-| Typed qualification / role and signal research | Pending | Criteria and evidence tests |
-| Dossiers / feedback / suppression | Partial: evidence dossiers and export checks added | Feedback, suppression, persistence and isolation checks still pending |
+| Typed qualification / role and signal research | Partial: source-family trust, authority tiers, role normalization, organization hints and relationship persistence implemented | Opportunity taxonomy, calibrated weights, contradiction scoring and multi-industry acceptance tests |
+| Dossiers / feedback / suppression | Partial: evidence dossiers, source-family metadata, person-to-organization links and idempotent observation persistence added | Feedback, suppression, user correction, workspace isolation and live export checks still pending |
 | Commercial quality benchmark | Pending | Reviewed dataset and measured results |
 | Production release | Pending | Commit, remote SHA, deployment, live readback |
 | Customer willingness to pay | Unproven | Pilot usage and customer feedback |
@@ -123,6 +127,8 @@ Website enrichment records exact contact-page URLs and observation times, recove
 The three-mode UI now includes common quality filters, evidence explanations, source links, observation dates and next actions. Legacy records need refreshed quality metadata before file export, and changing a phone invalidates its old export assessment. Mobile source controls and expanded evidence fit the viewport; the export bar stays in normal flow on mobile so it does not obscure evidence.
 
 All three modes now render a shared provider-coverage panel. `configured`, `not_configured`, `returned`, `failed`, and `partial` are distinguished in the UI; provider observation counts are explicitly not treated as unique final leads. The internal response contract is documented in `docs/search-response-contract.md` and is covered by server contract/merge tests.
+
+The normalized evidence graph now distinguishes source families and authority tiers, so repeated search providers or repeated URLs cannot inflate corroboration. Public profile leads retain organization and role metadata, and persisted research links a person to the publicly inferred organization with an observed relationship status and source document. Contact observations retain their source observation date, and phone/email verification writes are idempotent. These changes improve downstream integration reliability but do not prove mobile line type, reachability, personal ownership, email deliverability, or commercial lead quality.
 
 Verification commands:
 

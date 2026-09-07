@@ -19,6 +19,30 @@ Every runtime response includes:
 - `meta.progress.providerCoverage`: provider observations with `configured`,
   `not_configured`, `returned`, `failed`, or `partial` status.
 
+## Lead quality and identity fields
+
+Each lead may carry additive evidence and research fields that are safe for a
+downstream integration to preserve without interpreting provider-specific
+labels:
+
+- `scores.independentSourceCount` and `scores.sourceFamilies` count distinct
+  evidence families, not search providers, repeated URLs, or snippet copies.
+- Evidence items may include `sourceFamily` and `authorityTier` (`A` through
+  `D`) alongside the source URL, claim, status, and observation date.
+- Public professional profiles may include `organizationName`, `originalRole`,
+  `normalizedRole`, `decisionMaker`, and `employmentStatus`. These fields are
+  public-evidence signals, not proof of current employment, ownership, or a
+  personal phone number.
+- Public phone evidence remains compulsory for an eligible final lead. A
+  business phone can be retained as a business contact route for a person, but
+  it must not be labeled as that person's mobile or direct line.
+
+The normalized research store persists source documents, person/organization
+relationships, role and relationship status, observation timestamps, and
+idempotent phone/email verification events. This makes the internal contract
+stable enough for an integration layer while remaining honest about missing
+line-type, reachability, ownership, and mailbox checks.
+
 ## Coverage semantics
 
 `leadCount` is the number of candidates observed from that provider before the

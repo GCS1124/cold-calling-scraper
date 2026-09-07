@@ -31,7 +31,7 @@ const toTokens = (value?: string) =>
     .split(' ')
     .filter((token) => token.length >= 3);
 
-const extractOrganizationHint = (headline?: string) => {
+export const extractOrganizationHint = (headline?: string) => {
   const normalized = (headline ?? '').replace(/\s+/g, ' ').trim();
   const match = normalized.match(
     /\b(?:at|@|with|for|of|owner of|founder of|principal of)\s+(.+?)(?:\s*[|•·].*)?$/i,
@@ -101,6 +101,8 @@ const mergeSocialLinks = (person: Lead, listing: Lead): PublicSocialLink[] => {
 const mergePersonWithListing = (person: Lead, listing: Lead) =>
   enrichLead({
     ...person,
+    organizationName: listing.name,
+    originalRole: person.originalRole || person.headline,
     mobile: getContactEvidence(person, 'phone').length ? person.mobile : listing.mobile,
     email: person.email || listing.email,
     website: person.website || listing.website,

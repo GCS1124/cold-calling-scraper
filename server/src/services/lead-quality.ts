@@ -1,12 +1,25 @@
 import type { LeadQualityAssessment } from '../../../shared/lead-quality';
 import type { Lead } from '../types/lead';
-import { getContactEvidence, isProfessionalProfile, normalizeContactPhone } from './contact-evidence';
+import {
+  collectContactEvidence,
+  getContactEvidence,
+  isProfessionalProfile,
+  normalizeContactPhone,
+} from './contact-evidence';
+import {
+  collectLeadSourceObservations,
+  getIndependentSourceFamilies,
+} from './source-evidence';
 
 const freshnessWindowMs = 30 * 24 * 60 * 60 * 1_000;
 
 export const assessLeadQuality = (lead: Lead, now = Date.now()): LeadQualityAssessment => {
-  const phoneEvidence = getContactEvidence(lead, 'phone');
+  const allContactEvidence = collectContactEvidence(lead);
+  const phoneEvidence = allContactEvidence.filter((item) => item.field === 'phone');
   const emailEvidence = getContactEvidence(lead, 'email');
+  const sourceFamilies = getIndependentSourceFamilies(
+    collectLeadSourceObservations(lead, allContactEvidence),
+  );
   const formatValid = Boolean(normalizeContactPhone(lead.mobile));
   const phoneQualified = formatValid && lead.hasPhone && lead.verifiedPhone && phoneEvidence.length > 0;
   const sourceKinds = [...new Set(phoneEvidence.map((item) => item.sourceKind))];
@@ -61,6 +74,8 @@ export const assessLeadQuality = (lead: Lead, now = Date.now()): LeadQualityAsse
 
   return {
     version: 1, tier, score, reasons, gaps, sourceKinds, freshness,
+    independentSourceCount: sourceFamilies.length,
+    sourceFamilies,
     ...(lastObserved !== undefined ? { lastObservedAt: new Date(lastObserved).toISOString() } : {}),
     nextAction: !phoneQualified ? 'Find a public business phone source'
       : conflict || former ? 'Resolve the conflicting company or role evidence'

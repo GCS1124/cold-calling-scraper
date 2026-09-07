@@ -39,9 +39,10 @@ export function LeadQualityDetails({ lead }: { lead: Lead }) {
           Evidence score <strong className="text-slate-900">{quality.score}/100</strong>
         </p>
       </div>
-      <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-3">
+      <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-4">
         <div><dt className="text-slate-500">Phone association</dt><dd className="mt-1 font-semibold text-slate-900">{quality.phone.association === 'business' ? 'Business contact route' : quality.phone.association === 'person' ? 'Person-associated source' : 'Unconfirmed'}</dd></div>
         <div><dt className="text-slate-500">Last phone observation</dt><dd className="mt-1 font-semibold text-slate-900">{quality.lastObservedAt ? new Date(quality.lastObservedAt).toLocaleDateString() : 'Unknown'}{quality.freshness === 'stale' ? ' (needs refresh)' : ''}</dd></div>
+        <div><dt className="text-slate-500">Independent source families</dt><dd className="mt-1 font-semibold text-slate-900">{quality.independentSourceCount ?? 'Unknown'}{quality.sourceFamilies?.length ? ` · ${quality.sourceFamilies.join(', ')}` : ''}</dd></div>
         <div><dt className="text-slate-500">Checks still needed</dt><dd className="mt-1 font-semibold text-slate-900">Line type, reachability, email delivery</dd></div>
       </dl>
       {website && (

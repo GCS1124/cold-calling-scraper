@@ -1,3 +1,5 @@
+import type { EvidenceSourceFamily } from './source-evidence';
+
 export type ContactEvidence = {
   field: 'phone' | 'email';
   value: string;
@@ -31,6 +33,9 @@ export type LeadQualityAssessment = {
   gaps: string[];
   nextAction: string;
   sourceKinds: ContactEvidence['sourceKind'][];
+  /** Independent source families, not repeated URLs from one provider. */
+  independentSourceCount?: number;
+  sourceFamilies?: EvidenceSourceFamily[];
   lastObservedAt?: string;
   freshness: 'recent' | 'stale' | 'unknown';
   phone: {

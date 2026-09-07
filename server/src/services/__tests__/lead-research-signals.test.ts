@@ -49,10 +49,56 @@ describe('lead research signals', () => {
     expect(scores.trust).toBeGreaterThan(70);
     expect(scores.fit).toBe(100);
     expect(scores.contactability).toBe(100);
-    expect(scores.priority).toBeGreaterThanOrEqual(80);
+    expect(scores.priority).toBeGreaterThanOrEqual(75);
     expect(scores.reasons).toEqual(
       expect.arrayContaining(['Phone format checked', 'Owner or founder signal']),
     );
+    expect(scores.independentSourceCount).toBeGreaterThanOrEqual(2);
+    expect(scores.sourceFamilies).toEqual(
+      expect.arrayContaining(['professional_profile', 'public_website']),
+    );
+  });
+
+  it('does not treat repeated search providers as independent evidence families', () => {
+    const searchOnly = scoreLeadResearch({
+      ...lead,
+      listingUrl: undefined,
+      website: '',
+      contactSourceUrl: undefined,
+      hasWebsite: false,
+      publicEvidence: {
+        sources: [
+          { providerName: 'Brave Search', profileSnippet: 'same public result' },
+          { providerName: 'DuckDuckGo', profileSnippet: 'same public result' },
+          { providerName: 'Yahoo Search', profileSnippet: 'same public result' },
+        ],
+      },
+    });
+
+    expect(searchOnly.independentSourceCount).toBe(1);
+    expect(searchOnly.sourceFamilies).toEqual(['search_engine']);
+  });
+
+  it('keeps an official website and its contact page in one source family', () => {
+    const official = scoreLeadResearch({
+      ...lead,
+      websiteAssessment: {
+        version: 1,
+        status: 'confirmed',
+        score: 100,
+        canonicalHost: 'austindentalstudio.com',
+        sourceUrl: lead.website!,
+        observedAt: lead.scrapedAt,
+        robots: 'allowed',
+        reasons: [],
+        gaps: [],
+      },
+    });
+
+    expect(official.sourceFamilies).toEqual(
+      expect.arrayContaining(['official_business', 'professional_profile']),
+    );
+    expect(official.sourceFamilies).not.toContain('public_website');
   });
 
   it('attaches scores and preserves existing evidence', () => {

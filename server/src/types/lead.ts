@@ -3,6 +3,10 @@ import type {
   LeadQualityAssessment,
   WebsiteAssessment,
 } from '../../../shared/lead-quality';
+import type {
+  EvidenceAuthorityTier,
+  EvidenceSourceFamily,
+} from '../../../shared/source-evidence';
 
 export type PublicSocialLink = {
   platform:
@@ -21,6 +25,8 @@ export type PublicSocialLink = {
 export type LeadEvidence = {
   sourceUrl: string;
   sourceName: string;
+  sourceFamily?: EvidenceSourceFamily;
+  authorityTier?: EvidenceAuthorityTier;
   claim: string;
   status:
     | 'confirmed'
@@ -39,6 +45,9 @@ export type LeadScores = {
   contactability: number;
   opportunity: number;
   priority: number;
+  /** Independent source families, not a count of URLs or repeated search results. */
+  independentSourceCount: number;
+  sourceFamilies: EvidenceSourceFamily[];
   reasons: string[];
 };
 
@@ -54,6 +63,12 @@ export type Lead = {
   id: string;
   name: string;
   headline?: string;
+  /** Organization associated with a professional profile, when publicly evidenced. */
+  organizationName?: string;
+  /** Preserve the published title separately from the normalized role label. */
+  originalRole?: string;
+  normalizedRole?: string;
+  decisionMaker?: boolean;
   /** Public-result status only; never inferred from a private or authenticated profile. */
   employmentStatus?: EmploymentStatus;
   mobile?: string;
