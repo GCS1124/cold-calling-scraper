@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { Lead } from './lead';
+import type { LeadQualitySummary } from '../../../shared/lead-quality';
 import type {
   SearchExecutionContract,
   PhonePolicyContract,
@@ -94,6 +95,9 @@ export type SearchResponse = {
     sourceMode?: SearchModeCode;
     /** Optional for compatibility with legacy snapshots; runtime responses include it. */
     execution?: SearchExecutionContract;
+    /** HTTP request correlation id; omitted by non-HTTP service callers. */
+    requestId?: string;
+    qualitySummary?: LeadQualitySummary;
     phonePolicy?: PhonePolicyContract;
     limitations?: string[];
     query: string;

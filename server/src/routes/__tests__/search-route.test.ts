@@ -267,7 +267,13 @@ describe('/api/search handlers', () => {
     );
 
     expect(state.statusCode).toBe(400);
-    expect(state.body).toEqual({ error: 'Missing search id' });
+    expect(state.body).toMatchObject({
+      error: 'Missing search id',
+      code: 'MISSING_SEARCH_ID',
+      retryable: false,
+      contractVersion: 1,
+      requestId: expect.any(String),
+    });
   });
 
   it('cancels an active search through the route contract', async () => {
@@ -307,7 +313,13 @@ describe('/api/search handlers', () => {
     );
 
     expect(state.statusCode).toBe(404);
-    expect(state.body).toEqual({ error: 'Search not found' });
+    expect(state.body).toMatchObject({
+      error: 'Search not found',
+      code: 'SEARCH_NOT_FOUND',
+      retryable: false,
+      contractVersion: 1,
+      requestId: expect.any(String),
+    });
   });
 
   it('resumes a cancelled search through the route contract', async () => {

@@ -20,6 +20,10 @@ Every runtime response includes:
   resumable; `stateless` LinkedIn and AI fallback responses are already
   complete and must not be polled. `lastProgressAt` is the latest progress
   timestamp, and `completedAt` is present for terminal responses.
+- `meta.qualitySummary`: the same phone-qualified quality rollup used by the
+  evidence dossier, including eligible leads, review count, fresh phone
+  observations, quality tiers, and independent source-family counts. This is a
+  summary of returned leads, not a probability or deliverability guarantee.
 - `meta.progress.providerCoverage`: provider observations with `configured`,
   `not_configured`, `returned`, `failed`, or `partial` status.
 
@@ -54,6 +58,15 @@ source-family lead counts. Export rows also preserve organization, published
 and normalized role, employment status, decision-maker signal, and independent
 source-family metadata. These are additive fields; consumers should continue
 to enforce `phonePolicy.required` and inspect each lead's source evidence.
+
+## HTTP errors and tracing
+
+Vercel search and evidence routes preserve the human-readable `error` string
+for the current client and add `code`, `retryable`, `requestId`, and
+`contractVersion` to error responses. Every HTTP response also returns the
+`X-Request-Id` header; a caller may provide a bounded `X-Request-Id`
+value for log correlation. A request id identifies the transport attempt, not
+a user, workspace, or authorization grant.
 
 ## Coverage semantics
 

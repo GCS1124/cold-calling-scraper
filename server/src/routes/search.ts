@@ -4,6 +4,12 @@ import { ZodError } from 'zod';
 import type { SearchRequest, SearchResponse } from '../types/search';
 import { flattenSearchRequest, searchRequestSchema } from '../../../api/_lib/search-contract.js';
 import { buildResearchDossier } from '../services/research-dossier';
+import {
+  getRequestId,
+  sendSearchError,
+  setRequestIdHeader,
+  withSearchRequestId,
+} from '../http/search-http-contract';
 
 export type SearchService = {
   startSearch: (request: SearchRequest) => Promise<SearchResponse>;
@@ -14,6 +20,7 @@ export type SearchService = {
 };
 
 type SearchResponder = {
+  setHeader?: (name: string, value: string) => unknown;
   status: (code: number) => SearchResponder;
   json: (payload: unknown) => SearchResponder;
   end: () => SearchResponder;
@@ -24,22 +31,31 @@ export const handleStartSearch = async (
   req: { body: unknown },
   res: SearchResponder,
 ) => {
+  const requestId = getRequestId(req);
+  setRequestIdHeader(res, requestId);
+
   try {
     const payload = searchRequestSchema.parse(req.body);
     const response = await search.startSearch(flattenSearchRequest(payload));
 
-    res.status(200).json(response);
+    res.status(200).json(withSearchRequestId(response, requestId));
   } catch (error) {
     if (error instanceof ZodError) {
-      res.status(400).json({
-        error: 'Invalid search request',
+      sendSearchError(res, 400, {
+        code: 'INVALID_SEARCH_REQUEST',
+        message: 'Invalid search request',
+        retryable: false,
+        requestId,
         details: error.flatten(),
       });
       return;
     }
 
-    res.status(500).json({
-      error: 'Search failed',
+    sendSearchError(res, 500, {
+      code: 'SEARCH_FAILED',
+      message: 'Search failed',
+      retryable: true,
+      requestId,
     });
   }
 };
@@ -49,11 +65,17 @@ export const handleGetSearch = async (
   req: { params: { searchId?: string } },
   res: SearchResponder,
 ) => {
+  const requestId = getRequestId(req);
+  setRequestIdHeader(res, requestId);
+
   try {
     const searchId = req.params.searchId;
     if (!searchId) {
-      res.status(400).json({
-        error: 'Missing search id',
+      sendSearchError(res, 400, {
+        code: 'MISSING_SEARCH_ID',
+        message: 'Missing search id',
+        retryable: false,
+        requestId,
       });
       return;
     }
@@ -64,10 +86,13 @@ export const handleGetSearch = async (
       return;
     }
 
-    res.status(200).json(response);
+    res.status(200).json(withSearchRequestId(response, requestId));
   } catch {
-    res.status(500).json({
-      error: 'Search failed',
+    sendSearchError(res, 500, {
+      code: 'SEARCH_FAILED',
+      message: 'Search failed',
+      retryable: true,
+      requestId,
     });
   }
 };
@@ -77,27 +102,50 @@ export const handleCancelSearch = async (
   req: { params: { searchId?: string } },
   res: SearchResponder,
 ) => {
+  const requestId = getRequestId(req);
+  setRequestIdHeader(res, requestId);
+
   try {
     const searchId = req.params.searchId;
     if (!searchId) {
-      res.status(400).json({ error: 'Missing search id' });
+      sendSearchError(res, 400, {
+        code: 'MISSING_SEARCH_ID',
+        message: 'Missing search id',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
     if (!search.cancelSearch) {
-      res.status(501).json({ error: 'Search cancellation is not available' });
+      sendSearchError(res, 501, {
+        code: 'SEARCH_CANCEL_UNAVAILABLE',
+        message: 'Search cancellation is not available',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
     const response = await search.cancelSearch(searchId);
     if (!response) {
-      res.status(404).json({ error: 'Search not found' });
+      sendSearchError(res, 404, {
+        code: 'SEARCH_NOT_FOUND',
+        message: 'Search not found',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
-    res.status(200).json(response);
+    res.status(200).json(withSearchRequestId(response, requestId));
   } catch {
-    res.status(500).json({ error: 'Unable to cancel search' });
+    sendSearchError(res, 500, {
+      code: 'SEARCH_CANCEL_FAILED',
+      message: 'Unable to cancel search',
+      retryable: true,
+      requestId,
+    });
   }
 };
 
@@ -106,27 +154,50 @@ export const handleResumeSearch = async (
   req: { params: { searchId?: string } },
   res: SearchResponder,
 ) => {
+  const requestId = getRequestId(req);
+  setRequestIdHeader(res, requestId);
+
   try {
     const searchId = req.params.searchId;
     if (!searchId) {
-      res.status(400).json({ error: 'Missing search id' });
+      sendSearchError(res, 400, {
+        code: 'MISSING_SEARCH_ID',
+        message: 'Missing search id',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
     if (!search.resumeSearch) {
-      res.status(501).json({ error: 'Search resume is not available' });
+      sendSearchError(res, 501, {
+        code: 'SEARCH_RESUME_UNAVAILABLE',
+        message: 'Search resume is not available',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
     const response = await search.resumeSearch(searchId);
     if (!response) {
-      res.status(404).json({ error: 'Search not found' });
+      sendSearchError(res, 404, {
+        code: 'SEARCH_NOT_FOUND',
+        message: 'Search not found',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
-    res.status(200).json(response);
+    res.status(200).json(withSearchRequestId(response, requestId));
   } catch {
-    res.status(500).json({ error: 'Unable to resume search' });
+    sendSearchError(res, 500, {
+      code: 'SEARCH_RESUME_FAILED',
+      message: 'Unable to resume search',
+      retryable: true,
+      requestId,
+    });
   }
 };
 
@@ -135,27 +206,50 @@ export const handleReverifySearch = async (
   req: { params: { searchId?: string } },
   res: SearchResponder,
 ) => {
+  const requestId = getRequestId(req);
+  setRequestIdHeader(res, requestId);
+
   try {
     const searchId = req.params.searchId;
     if (!searchId) {
-      res.status(400).json({ error: 'Missing search id' });
+      sendSearchError(res, 400, {
+        code: 'MISSING_SEARCH_ID',
+        message: 'Missing search id',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
     if (!search.reverifySearch) {
-      res.status(501).json({ error: 'Search reverification is not available' });
+      sendSearchError(res, 501, {
+        code: 'SEARCH_REVERIFY_UNAVAILABLE',
+        message: 'Search reverification is not available',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
     const response = await search.reverifySearch(searchId);
     if (!response) {
-      res.status(404).json({ error: 'Search not found' });
+      sendSearchError(res, 404, {
+        code: 'SEARCH_NOT_FOUND',
+        message: 'Search not found',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
-    res.status(200).json(response);
+    res.status(200).json(withSearchRequestId(response, requestId));
   } catch {
-    res.status(500).json({ error: 'Unable to reverify search' });
+    sendSearchError(res, 500, {
+      code: 'SEARCH_REVERIFY_FAILED',
+      message: 'Unable to reverify search',
+      retryable: true,
+      requestId,
+    });
   }
 };
 
@@ -164,28 +258,51 @@ export const handleGetEvidence = async (
   req: { params: { searchId?: string }; query?: { leadId?: string } },
   res: SearchResponder,
 ) => {
+  const requestId = getRequestId(req);
+  setRequestIdHeader(res, requestId);
+
   try {
     const searchId = req.params.searchId;
     if (!searchId) {
-      res.status(400).json({ error: 'Missing search id' });
+      sendSearchError(res, 400, {
+        code: 'MISSING_SEARCH_ID',
+        message: 'Missing search id',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
     const response = await search.getSearch(searchId);
     if (!response) {
-      res.status(404).json({ error: 'Search not found' });
+      sendSearchError(res, 404, {
+        code: 'SEARCH_NOT_FOUND',
+        message: 'Search not found',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
     const dossier = buildResearchDossier(response, req.query?.leadId);
     if (req.query?.leadId && dossier.leads.length === 0) {
-      res.status(404).json({ error: 'Lead not found in this search' });
+      sendSearchError(res, 404, {
+        code: 'LEAD_NOT_FOUND',
+        message: 'Lead not found in this search',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
-    res.status(200).json(dossier);
+    res.status(200).json({ ...dossier, requestId });
   } catch {
-    res.status(500).json({ error: 'Unable to load research evidence' });
+    sendSearchError(res, 500, {
+      code: 'EVIDENCE_LOAD_FAILED',
+      message: 'Unable to load research evidence',
+      retryable: true,
+      requestId,
+    });
   }
 };
 

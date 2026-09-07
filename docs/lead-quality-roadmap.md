@@ -10,7 +10,7 @@ Willingness to pay must be measured with customers; an engineering score or pass
 
 ## Current baseline and verified gaps
 
-Baseline commit: `8231742`. The workspace audit found category expansion, bounded public discovery, website extraction, candidate headroom, job leases, cancellation, and source warnings already implemented. Local, durable, and stateless search paths exist separately. The database migration and worker deployment need fresh production verification.
+Baseline commit: `96df0c1`. The workspace audit found category expansion, bounded public discovery, website extraction, candidate headroom, job leases, cancellation, and source warnings already implemented. Local, durable, and stateless search paths exist separately. The response contract now also carries lifecycle state and a phone-qualified quality summary. Production database, worker, provider-yield, and customer-quality verification remain separate gates.
 
 Observed issues in the baseline:
 
@@ -38,7 +38,7 @@ Observed issues in the baseline:
 
 ## Architecture
 
-Existing UI -> validated search input -> bounded discovery by mode -> identity resolution -> public website research -> contact evidence -> qualification -> ranking -> result snapshot -> dossier/export. A versioned internal response contract now carries the source mode, mandatory public-phone policy, limitations, and per-provider coverage through local, durable, and stateless responses without creating a new public API product.
+Existing UI -> validated search input -> bounded discovery by mode -> identity resolution -> public website research -> contact evidence -> qualification -> ranking -> result snapshot -> dossier/export. A versioned internal response contract now carries the source mode, mandatory public-phone policy, limitations, provider coverage, execution lifecycle, and phone-qualified quality summary through local, durable, and stateless responses without creating a new public API product.
 
 Shared types describe evidence and quality. Server services own qualification and scoring. UI components render the assessment and offer filters; they do not reinterpret provider data or silently promote legacy records. Existing routes remain internal application transport.
 
@@ -84,7 +84,7 @@ Acceptance: unsupported owner, current-role, mobile, deliverability, growth, and
 
 Provide a compact research dossier for every mode: why it fits, phone source and scope, email check level, observed dates, contradictions, opportunity evidence, and next action. Add saved qualification presets, resumable search history, and evidence-bearing exports. Record user corrections (wrong number, wrong business, former employee, duplicate, do not contact) with timestamps and explanations. Enforce suppression before export and later searches. Keep corrections scoped to the proper user/workspace; verify authorization before sharing data.
 
-The normalized research path now persists source-family/authority metadata, public profile identity, organization identity, role, employment relationship status, contact observation dates, and idempotent phone/email verification events. Evidence dossiers now carry contract metadata, provider coverage, excluded-by-phone counts, quality tier distributions, and source-family lead counts; exports preserve public role and organization fields. Feedback events, suppression enforcement, workspace isolation, and user-facing correction workflows are still pending.
+The normalized research path now persists source-family/authority metadata, public profile identity, organization identity, role, employment relationship status, contact observation dates, and idempotent phone/email verification events. Search responses and evidence dossiers now carry lifecycle metadata plus the same phone-qualified quality rollup, including eligible/review counts, freshness, tier distribution, and source-family counts; exports preserve public role and organization fields. Feedback events, suppression enforcement, workspace isolation, and user-facing correction workflows are still pending.
 
 Acceptance: results and exports agree; changing filters cannot bypass phone eligibility or suppression; observations remain historically traceable; correcting one branch does not corrupt all businesses sharing a domain or call center. Existing UI search/auth/history flows continue to work.
 
@@ -105,11 +105,11 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 | Deliverable | State | Evidence required |
 | --- | --- | --- |
 | Detailed implementation roadmap | Written | This document and source audit |
-| Trust foundation | Local regression and browser checks pass | 256 server tests, 52 client tests, both builds, runtime boot, lint, and mocked browser flow |
+| Trust foundation | Local regression and browser checks pass | 261 server tests, 53 client tests, both builds, runtime boot, lint, and mocked browser flow |
 | Crawler/domain checks | Partial: unrelated redirects and robots/parked pages rejected locally | Official-domain validation and bounded live checks still pending; unchanged-document reuse is not yet persistent |
 | Discovery reliability across three modes | Partial: GMB free-source merge, bounded public-phone recovery, and shared provider-coverage contract implemented locally | Recovery, retention reuse, and real-source smoke matrix still pending |
 | Typed qualification / role and signal research | Partial: source-family trust, authority tiers, role normalization, organization hints and relationship persistence implemented | Opportunity taxonomy, calibrated weights, contradiction scoring and multi-industry acceptance tests |
-| Dossiers / feedback / suppression | Partial: evidence dossiers now expose contract/coverage/quality summaries; source-family metadata, person-to-organization links, role fields and idempotent observation persistence added | Feedback, suppression, user correction, workspace isolation and live export checks still pending |
+| Dossiers / feedback / suppression | Partial: search responses and evidence dossiers expose lifecycle, contract, coverage, and quality summaries; source-family metadata, person-to-organization links, role fields and idempotent observation persistence added | Feedback, suppression, user correction, workspace isolation and live export checks still pending |
 | Commercial quality benchmark | Pending | Reviewed dataset and measured results |
 | Production release | Pending | Commit, remote SHA, deployment, live readback |
 | Customer willingness to pay | Unproven | Pilot usage and customer feedback |
@@ -128,7 +128,7 @@ The three-mode UI now includes common quality filters, evidence explanations, so
 
 All three modes now render a shared provider-coverage panel. `configured`, `not_configured`, `returned`, `failed`, and `partial` are distinguished in the UI; provider observation counts are explicitly not treated as unique final leads. The internal response contract is documented in `docs/search-response-contract.md` and is covered by server contract/merge tests.
 
-The normalized evidence graph now distinguishes source families and authority tiers, so repeated search providers or repeated URLs cannot inflate corroboration. Public profile leads retain organization and role metadata, and persisted research links a person to the publicly inferred organization with an observed relationship status and source document. Contact observations retain their source observation date, and phone/email verification writes are idempotent. These changes improve downstream integration reliability but do not prove mobile line type, reachability, personal ownership, email deliverability, or commercial lead quality.
+The normalized evidence graph now distinguishes source families and authority tiers, so repeated search providers or repeated URLs cannot inflate corroboration. Public profile leads retain organization and role metadata, and persisted research links a person to the publicly inferred organization with an observed relationship status and source document. Contact observations retain their source observation date, and phone/email verification writes are idempotent. Search responses now expose the same lifecycle and quality rollup used by dossiers, so an integration can decide whether to poll, resume, review, or export without a second quality request. Search and evidence errors now carry stable codes, retryability, request IDs, and a versioned error contract. These changes improve downstream integration reliability but do not prove mobile line type, reachability, personal ownership, email deliverability, or commercial lead quality.
 
 Verification commands:
 

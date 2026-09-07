@@ -9,6 +9,7 @@ import type {
   EvidenceAuthorityTier,
   EvidenceSourceFamily,
 } from '../../../shared/source-evidence';
+import type { LeadQualitySummary } from '../../../shared/lead-quality';
 import type {
   PhonePolicyContract,
   SearchExecutionContract,
@@ -200,6 +201,8 @@ export type SearchResponse = {
   meta: {
     sourceMode?: SearchModeCode;
     execution?: SearchExecutionContract;
+    requestId?: string;
+    qualitySummary?: LeadQualitySummary;
     phonePolicy?: PhonePolicyContract;
     limitations?: string[];
     query: string;

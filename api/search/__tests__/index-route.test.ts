@@ -142,9 +142,12 @@ describe('/api/search', () => {
     );
 
     expect(state.statusCode).toBe(503);
-    expect(state.body).toEqual({
+    expect(state.body).toMatchObject({
       error: 'Search persistence is not configured.',
       code: 'SEARCH_PERSISTENCE_UNAVAILABLE',
+      retryable: false,
+      requestId: expect.any(String),
+      contractVersion: 1,
     });
   });
 
@@ -198,7 +201,12 @@ describe('/api/search', () => {
     );
 
     expect(state.statusCode).toBe(200);
-    expect(state.body).toEqual(statelessResponse);
+    expect(state.body).toMatchObject({
+      ...statelessResponse,
+      meta: {
+        requestId: expect.any(String),
+      },
+    });
     expect(runStatelessLinkedinSearch).toHaveBeenCalledWith({
       companyType: 'Dentist',
       sourceMode: 'linkedin',

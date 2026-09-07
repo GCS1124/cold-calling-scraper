@@ -1,6 +1,12 @@
 import { waitUntil } from '@vercel/functions';
 import { getSearchJobSnapshot } from '../../server/src/services/search-job-snapshot.js';
 import { getVercelSearchService } from '../_lib/vercel-search-service.js';
+import {
+  getRequestId,
+  sendSearchError,
+  setRequestIdHeader,
+  withSearchRequestId,
+} from '../../server/src/http/search-http-contract.js';
 
 const activeSearchStatuses = new Set(['queued', 'discovering', 'enriching']);
 
@@ -9,14 +15,27 @@ const isSearchPersistenceFailure = (error: unknown) =>
   (error as Error & { code?: unknown }).code === 'SEARCH_PERSISTENCE_UNAVAILABLE';
 
 export default async function handler(req: any, res: any) {
+  const requestId = getRequestId(req);
+  setRequestIdHeader(res, requestId);
+
   if (req.method !== 'GET') {
-    res.status(405).json({ error: 'Method not allowed' });
+    sendSearchError(res, 405, {
+      code: 'METHOD_NOT_ALLOWED',
+      message: 'Method not allowed',
+      retryable: false,
+      requestId,
+    });
     return;
   }
 
   const searchId = Array.isArray(req.query.id) ? req.query.id[0] : req.query.id;
   if (!searchId) {
-    res.status(400).json({ error: 'Missing search id' });
+    sendSearchError(res, 400, {
+      code: 'MISSING_SEARCH_ID',
+      message: 'Missing search id',
+      retryable: false,
+      requestId,
+    });
     return;
   }
 
@@ -38,18 +57,23 @@ export default async function handler(req: any, res: any) {
       );
     }
 
-    res.status(200).json(response);
+    res.status(200).json(withSearchRequestId(response, requestId));
   } catch (error) {
     if (isSearchPersistenceFailure(error)) {
-      res.status(503).json({
-        error: error instanceof Error ? error.message : 'Search persistence unavailable',
+      sendSearchError(res, 503, {
         code: 'SEARCH_PERSISTENCE_UNAVAILABLE',
+        message: error instanceof Error ? error.message : 'Search persistence unavailable',
+        retryable: false,
+        requestId,
       });
       return;
     }
 
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Search failed',
+    sendSearchError(res, 500, {
+      code: 'SEARCH_FAILED',
+      message: error instanceof Error ? error.message : 'Search failed',
+      retryable: true,
+      requestId,
     });
   }
 }

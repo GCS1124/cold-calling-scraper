@@ -3,6 +3,12 @@ import { waitUntil } from '@vercel/functions';
 import { searchRequestSchema } from '../_lib/search-contract.js';
 import { getVercelSearchService } from '../_lib/vercel-search-service.js';
 import { flattenSearchRequest } from '../../server/src/utils/search-location.js';
+import {
+  getRequestId,
+  sendSearchError,
+  setRequestIdHeader,
+  withSearchRequestId,
+} from '../../server/src/http/search-http-contract.js';
 
 const isSearchPersistenceFailure = (error: unknown) =>
   error instanceof Error &&
@@ -41,8 +47,16 @@ const runStatelessAiSearchOnDemand = async (
 };
 
 export default async function handler(req: any, res: any) {
+  const requestId = getRequestId(req);
+  setRequestIdHeader(res, requestId);
+
   if (req.method === 'GET') {
-    res.status(405).json({ error: 'Method not allowed' });
+    sendSearchError(res, 405, {
+      code: 'METHOD_NOT_ALLOWED',
+      message: 'Method not allowed',
+      retryable: false,
+      requestId,
+    });
     return;
   }
 
@@ -60,11 +74,14 @@ export default async function handler(req: any, res: any) {
     ) {
       try {
         const response = await runStatelessLinkedinSearchOnDemand(flattenedRequest);
-        res.status(200).json(response);
+        res.status(200).json(withSearchRequestId(response, requestId));
       } catch (error) {
         console.error('[api/search] stateless LinkedIn search failed', error);
-        res.status(502).json({
-          error: 'Public LinkedIn search could not be completed. Please try again.',
+        sendSearchError(res, 502, {
+          code: 'PUBLIC_LINKEDIN_SEARCH_UNAVAILABLE',
+          message: 'Public LinkedIn search could not be completed. Please try again.',
+          retryable: true,
+          requestId,
         });
       }
       return;
@@ -77,11 +94,14 @@ export default async function handler(req: any, res: any) {
     ) {
       try {
         const response = await runStatelessAiSearchOnDemand(flattenedRequest);
-        res.status(200).json(response);
+        res.status(200).json(withSearchRequestId(response, requestId));
       } catch (error) {
         console.error('[api/search] stateless AI search failed', error);
-        res.status(502).json({
-          error: 'Free AI search could not be completed. Please try again.',
+        sendSearchError(res, 502, {
+          code: 'FREE_AI_SEARCH_UNAVAILABLE',
+          message: 'Free AI search could not be completed. Please try again.',
+          retryable: true,
+          requestId,
         });
       }
       return;
@@ -96,11 +116,14 @@ export default async function handler(req: any, res: any) {
       }),
     );
 
-    res.status(200).json(response);
+    res.status(200).json(withSearchRequestId(response, requestId));
   } catch (error) {
     if (error instanceof ZodError) {
-      res.status(400).json({
-        error: 'Invalid search request',
+      sendSearchError(res, 400, {
+        code: 'INVALID_SEARCH_REQUEST',
+        message: 'Invalid search request',
+        retryable: false,
+        requestId,
         details: error.flatten(),
       });
       return;
@@ -115,30 +138,41 @@ export default async function handler(req: any, res: any) {
           flattenedRequest.sourceMode === 'ai'
             ? await runStatelessAiSearchOnDemand(flattenedRequest)
             : await runStatelessLinkedinSearchOnDemand(flattenedRequest);
-        res.status(200).json(response);
+        res.status(200).json(withSearchRequestId(response, requestId));
         return;
       } catch (fallbackError) {
         console.error('[api/search] stateless public fallback failed', fallbackError);
-        res.status(502).json({
-          error:
+        sendSearchError(res, 502, {
+          code:
+            flattenedRequest.sourceMode === 'ai'
+              ? 'FREE_AI_SEARCH_UNAVAILABLE'
+              : 'PUBLIC_LINKEDIN_SEARCH_UNAVAILABLE',
+          message:
             flattenedRequest.sourceMode === 'ai'
               ? 'Free AI search could not be completed. Please try again.'
               : 'Public LinkedIn search could not be completed. Please try again.',
+          retryable: true,
+          requestId,
         });
         return;
       }
     }
 
     if (isSearchPersistenceFailure(error)) {
-      res.status(503).json({
-        error: error instanceof Error ? error.message : 'Search persistence unavailable',
+      sendSearchError(res, 503, {
         code: 'SEARCH_PERSISTENCE_UNAVAILABLE',
+        message: error instanceof Error ? error.message : 'Search persistence unavailable',
+        retryable: false,
+        requestId,
       });
       return;
     }
 
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Search failed',
+    sendSearchError(res, 500, {
+      code: 'SEARCH_FAILED',
+      message: error instanceof Error ? error.message : 'Search failed',
+      retryable: true,
+      requestId,
     });
   }
 }

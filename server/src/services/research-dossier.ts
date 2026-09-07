@@ -1,8 +1,8 @@
 import type { Lead } from '../types/lead';
 import type { SearchResponse } from '../types/search';
+import type { LeadQualitySummary } from '../../../shared/lead-quality';
 import { isPhoneQualifiedLead } from './phone-requirement';
 import { rankQualifiedLeads } from './lead-quality';
-import type { EvidenceSourceFamily } from '../../../shared/source-evidence';
 import {
   buildSearchResponseContract,
   type PhonePolicyContract,
@@ -10,8 +10,7 @@ import {
   type SearchModeCode,
   type SEARCH_RESPONSE_CONTRACT_VERSION,
 } from '../../../shared/search-contract';
-
-type QualityTier = NonNullable<NonNullable<Lead['quality']>['tier']>;
+import { buildLeadQualitySummary } from './quality-summary';
 
 export type ResearchDossier = {
   contractVersion: typeof SEARCH_RESPONSE_CONTRACT_VERSION;
@@ -19,6 +18,7 @@ export type ResearchDossier = {
   sourceMode: SearchModeCode;
   phonePolicy: PhonePolicyContract;
   execution?: SearchExecutionContract;
+  requestId?: string;
   status: SearchResponse['meta']['status'];
   query: string;
   locationLabel: string;
@@ -37,13 +37,7 @@ export type ResearchDossier = {
     withEmail: number;
     withWebsite: number;
   };
-  qualitySummary: {
-    eligible: number;
-    needsReview: number;
-    freshPhoneObservations: number;
-    tierCounts: Record<QualityTier, number>;
-    sourceFamilyLeadCounts: Partial<Record<EvidenceSourceFamily, number>>;
-  };
+  qualitySummary: LeadQualitySummary;
   leads: Lead[];
 };
 
@@ -62,24 +56,6 @@ export const buildResearchDossier = (
     (!leadId || lead.id === leadId) && isPhoneQualifiedLead(lead)));
   const sourceMode = response.meta.sourceMode ?? 'gmb';
   const contract = buildSearchResponseContract(sourceMode);
-  const tierCounts: Record<QualityTier, number> = {
-    corroborated: 0,
-    supported: 0,
-    review: 0,
-    excluded: 0,
-  };
-  const sourceFamilyLeadCounts: Partial<Record<EvidenceSourceFamily, number>> = {};
-
-  for (const lead of leads) {
-    const tier = lead.quality?.tier ?? 'review';
-    tierCounts[tier] += 1;
-    const sourceFamilies = new Set(
-      lead.quality?.sourceFamilies ?? lead.scores?.sourceFamilies ?? [],
-    );
-    for (const sourceFamily of sourceFamilies) {
-      sourceFamilyLeadCounts[sourceFamily] = (sourceFamilyLeadCounts[sourceFamily] ?? 0) + 1;
-    }
-  }
 
   const limitations = [...new Set([
     ...dossierLimitations,
@@ -110,13 +86,7 @@ export const buildResearchDossier = (
       withEmail: leads.filter((lead) => lead.hasEmail).length,
       withWebsite: leads.filter((lead) => lead.hasWebsite).length,
     },
-    qualitySummary: {
-      eligible: leads.length,
-      needsReview: leads.filter((lead) => lead.quality?.tier === 'review').length,
-      freshPhoneObservations: leads.filter((lead) => lead.quality?.freshness === 'recent').length,
-      tierCounts,
-      sourceFamilyLeadCounts,
-    },
+    qualitySummary: buildLeadQualitySummary(leads),
     leads,
   };
 };

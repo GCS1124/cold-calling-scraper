@@ -51,6 +51,7 @@ import {
   buildSearchResponseContract,
 } from '../../../shared/search-contract';
 import { recordProviderCoverage } from './provider-coverage';
+import { buildLeadQualitySummary } from './quality-summary';
 
 type SearchJob = {
   searchId: string;
@@ -237,6 +238,7 @@ const toResponse = (job: SearchJob): SearchResponse => {
         lastProgressAt,
         ...(completedAt ? { completedAt } : {}),
       }),
+      qualitySummary: buildLeadQualitySummary(leads),
       progress: {
         ...job.progress,
         foundCount: leads.length,

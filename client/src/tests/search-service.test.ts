@@ -231,6 +231,35 @@ describe('searchApi', () => {
     });
   });
 
+  it('honors a retryable error envelope from the search API', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: vi.fn().mockResolvedValue({
+        error: 'Public LinkedIn search could not be completed. Please try again.',
+        code: 'PUBLIC_LINKEDIN_SEARCH_UNAVAILABLE',
+        retryable: true,
+        requestId: 'request-42',
+        contractVersion: 1,
+      }),
+    } as unknown as Response);
+
+    const failure = searchApi.startSearch({
+      companyType: 'Dentist',
+      sourceMode: 'linkedin',
+      location: {
+        mode: 'timezone',
+        timeZone: 'EST',
+      },
+      count: 50,
+    });
+
+    await expect(failure).rejects.toMatchObject({
+      retryable: true,
+      message: 'Public LinkedIn search could not be completed. Please try again.',
+    });
+  });
+
   it('surfaces a helpful error when the API is unreachable', async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
 

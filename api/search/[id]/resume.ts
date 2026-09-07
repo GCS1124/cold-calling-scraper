@@ -1,17 +1,36 @@
 import { waitUntil } from '@vercel/functions';
 import { getVercelSearchService } from '../../_lib/vercel-search-service.js';
+import {
+  getRequestId,
+  sendSearchError,
+  setRequestIdHeader,
+  withSearchRequestId,
+} from '../../../server/src/http/search-http-contract.js';
 
 const activeStatuses = new Set(['queued', 'discovering', 'enriching']);
 
 export default async function handler(req: any, res: any) {
+  const requestId = getRequestId(req);
+  setRequestIdHeader(res, requestId);
+
   if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
+    sendSearchError(res, 405, {
+      code: 'METHOD_NOT_ALLOWED',
+      message: 'Method not allowed',
+      retryable: false,
+      requestId,
+    });
     return;
   }
 
   const searchId = Array.isArray(req.query.id) ? req.query.id[0] : req.query.id;
   if (!searchId) {
-    res.status(400).json({ error: 'Missing search id' });
+    sendSearchError(res, 400, {
+      code: 'MISSING_SEARCH_ID',
+      message: 'Missing search id',
+      retryable: false,
+      requestId,
+    });
     return;
   }
 
@@ -20,7 +39,12 @@ export default async function handler(req: any, res: any) {
     const response = await service.resumeSearch(searchId);
 
     if (!response) {
-      res.status(404).json({ error: 'Search not found or already expired' });
+      sendSearchError(res, 404, {
+        code: 'SEARCH_NOT_FOUND',
+        message: 'Search not found or already expired',
+        retryable: false,
+        requestId,
+      });
       return;
     }
 
@@ -33,10 +57,13 @@ export default async function handler(req: any, res: any) {
     }
 
     res.setHeader?.('Cache-Control', 'no-store, max-age=0');
-    res.status(200).json(response);
+    res.status(200).json(withSearchRequestId(response, requestId));
   } catch (error) {
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Search resume failed',
+    sendSearchError(res, 500, {
+      code: 'SEARCH_RESUME_FAILED',
+      message: error instanceof Error ? error.message : 'Search resume failed',
+      retryable: true,
+      requestId,
     });
   }
 }

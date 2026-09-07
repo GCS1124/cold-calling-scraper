@@ -27,6 +27,7 @@ import {
 } from '../../../shared/search-contract';
 import { normalizeLeadSourceMode } from './search-source-mode';
 import { mergeProviderCoverage } from './provider-coverage';
+import { buildLeadQualitySummary } from './quality-summary';
 
 // Keep the no-database path within the Vercel function budget. It returns a
 // completed public-only response, so the client does not need a durable poll.
@@ -110,6 +111,7 @@ const buildResponse = ({
         lastProgressAt: completedAt,
         completedAt,
       }),
+      qualitySummary: buildLeadQualitySummary(visibleLeads),
       progress: {
         discovered,
         enriched,

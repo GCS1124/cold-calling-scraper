@@ -1,5 +1,15 @@
 import type { EvidenceSourceFamily } from './source-evidence';
 
+export type LeadQualityTier = 'corroborated' | 'supported' | 'review' | 'excluded';
+
+export type LeadQualitySummary = {
+  eligible: number;
+  needsReview: number;
+  freshPhoneObservations: number;
+  tierCounts: Record<LeadQualityTier, number>;
+  sourceFamilyLeadCounts: Partial<Record<EvidenceSourceFamily, number>>;
+};
+
 export type ContactEvidence = {
   field: 'phone' | 'email';
   value: string;
@@ -27,7 +37,7 @@ export type WebsiteAssessment = {
 
 export type LeadQualityAssessment = {
   version: 1;
-  tier: 'corroborated' | 'supported' | 'review' | 'excluded';
+  tier: LeadQualityTier;
   score: number;
   reasons: string[];
   gaps: string[];

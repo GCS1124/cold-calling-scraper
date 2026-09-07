@@ -205,9 +205,12 @@ describe('/api/search/[id]', () => {
     );
 
     expect(state.statusCode).toBe(503);
-    expect(state.body).toEqual({
+    expect(state.body).toMatchObject({
       error: 'Search persistence is unavailable.',
       code: 'SEARCH_PERSISTENCE_UNAVAILABLE',
+      retryable: false,
+      requestId: expect.any(String),
+      contractVersion: 1,
     });
   });
 });

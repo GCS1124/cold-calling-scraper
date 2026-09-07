@@ -1,4 +1,14 @@
 export const SEARCH_RESPONSE_CONTRACT_VERSION = 2 as const;
+export const SEARCH_ERROR_CONTRACT_VERSION = 1 as const;
+
+export type SearchApiErrorResponse = {
+  error: string;
+  code: string;
+  retryable: boolean;
+  requestId: string;
+  contractVersion: typeof SEARCH_ERROR_CONTRACT_VERSION;
+  details?: unknown;
+};
 
 export type SearchModeCode = 'gmb' | 'linkedin' | 'ai';
 

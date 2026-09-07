@@ -32,6 +32,7 @@ import {
   buildSearchResponseContract,
 } from '../../../shared/search-contract';
 import { normalizeLeadSourceMode } from './search-source-mode';
+import { buildLeadQualitySummary } from './quality-summary';
 
 export type AiDiscoveryResult = {
   leads: Lead[];
@@ -401,6 +402,7 @@ const buildResponse = ({
         lastProgressAt: completedAt,
         completedAt,
       }),
+      qualitySummary: buildLeadQualitySummary(visibleLeads),
       progress: {
         discovered: deduplicatedLeads.length,
         enriched: result.enrichedCount,

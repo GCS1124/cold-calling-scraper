@@ -66,13 +66,22 @@ const getSearchServiceError = (sourceMode?: SearchRequest['sourceMode']) =>
 const isLegacyGenericError = (message: string) =>
   /^(?:Failed to fetch US lead results|Search failed)$/i.test(message.trim());
 
-const parseError = async (response: Response, fallbackMessage: string) => {
+const parseError = async (
+  response: Response,
+  fallbackMessage: string,
+): Promise<{ message: string; retryable?: boolean }> => {
   try {
-    const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json()) as {
+      error?: string;
+      retryable?: boolean;
+    };
     const message = payload.error?.trim();
-    return message && !isLegacyGenericError(message) ? message : fallbackMessage;
+    return {
+      message: message && !isLegacyGenericError(message) ? message : fallbackMessage,
+      ...(typeof payload.retryable === 'boolean' ? { retryable: payload.retryable } : {}),
+    };
   } catch {
-    return fallbackMessage;
+    return { message: fallbackMessage };
   }
 };
 
@@ -90,7 +99,8 @@ const fetchFromApi = async (
   }
 
   if (!response.ok) {
-    throw new SearchApiError(await parseError(response, fallbackMessage), false);
+    const error = await parseError(response, fallbackMessage);
+    throw new SearchApiError(error.message, error.retryable ?? false);
   }
 
   return response;
@@ -132,15 +142,20 @@ const fetchSearchSnapshot = async (searchId: string) => {
       }
 
       if (!isRetryableSearchSnapshotStatus(response.status)) {
+        const error = await parseError(response, genericSearchServiceError);
         throw new SearchApiError(
-          await parseError(response, genericSearchServiceError),
-          false,
+          error.message,
+          error.retryable ?? false,
         );
       }
 
+      const error = await parseError(
+        response,
+        'The search service is temporarily unavailable.',
+      );
       lastError = new SearchApiError(
-        await parseError(response, 'The search service is temporarily unavailable.'),
-        true,
+        error.message,
+        error.retryable ?? true,
       );
     }
 

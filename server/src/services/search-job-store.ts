@@ -18,6 +18,7 @@ import {
   buildSearchExecutionContract,
   buildSearchResponseContract,
 } from '../../../shared/search-contract';
+import { buildLeadQualitySummary } from './quality-summary';
 
 export type SearchLocationMode =
   | 'local'
@@ -891,6 +892,7 @@ export const toSearchResponse = (job: SearchJobRecord): SearchResponse => {
         lastProgressAt,
         ...(completedAt ? { completedAt } : {}),
       }),
+      qualitySummary: buildLeadQualitySummary(leads),
       progress,
       totals: countLeadTotals(leads),
       providerWarnings,
