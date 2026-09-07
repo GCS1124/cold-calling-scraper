@@ -78,6 +78,13 @@ cross-instance replay guarantees because no durable job store is available;
 their `meta.execution.path` remains `stateless` and that limitation is not
 hidden.
 
+The client transport sends an idempotency key for every search start. An
+integration should persist one key for the lifetime of a logical search and
+reuse it after a timeout or lost response; a new business search must use a new
+key. Client errors preserve the server `code`, `retryable`, `requestId`,
+`contractVersion`, `details`, and HTTP status so callers can retry transient
+failures without matching human-readable text.
+
 ## Coverage semantics
 
 `leadCount` is the number of candidates observed from that provider before the

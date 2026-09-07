@@ -11,11 +11,31 @@ const isLocalDevelopment = import.meta.env.MODE === 'development';
 
 export class SearchApiError extends Error {
   readonly retryable: boolean;
+  readonly code?: string;
+  readonly requestId?: string;
+  readonly contractVersion?: number;
+  readonly details?: unknown;
+  readonly status?: number;
 
-  constructor(message: string, retryable: boolean) {
+  constructor(
+    message: string,
+    retryable: boolean,
+    metadata: {
+      code?: string;
+      requestId?: string;
+      contractVersion?: number;
+      details?: unknown;
+      status?: number;
+    } = {},
+  ) {
     super(message);
     this.name = 'SearchApiError';
     this.retryable = retryable;
+    this.code = metadata.code;
+    this.requestId = metadata.requestId;
+    this.contractVersion = metadata.contractVersion;
+    this.details = metadata.details;
+    this.status = metadata.status;
   }
 }
 
@@ -66,19 +86,41 @@ const getSearchServiceError = (sourceMode?: SearchRequest['sourceMode']) =>
 const isLegacyGenericError = (message: string) =>
   /^(?:Failed to fetch US lead results|Search failed)$/i.test(message.trim());
 
+const isRetryableHttpStatus = (status: number) =>
+  status === 408 || status === 425 || status === 429 || status >= 500;
+
+type SearchErrorPayload = {
+  error?: string;
+  code?: string;
+  retryable?: boolean;
+  requestId?: string;
+  contractVersion?: number;
+  details?: unknown;
+};
+
 const parseError = async (
   response: Response,
   fallbackMessage: string,
-): Promise<{ message: string; retryable?: boolean }> => {
+): Promise<{
+  message: string;
+  retryable?: boolean;
+  code?: string;
+  requestId?: string;
+  contractVersion?: number;
+  details?: unknown;
+}> => {
   try {
-    const payload = (await response.json()) as {
-      error?: string;
-      retryable?: boolean;
-    };
+    const payload = (await response.json()) as SearchErrorPayload;
     const message = payload.error?.trim();
     return {
       message: message && !isLegacyGenericError(message) ? message : fallbackMessage,
       ...(typeof payload.retryable === 'boolean' ? { retryable: payload.retryable } : {}),
+      ...(payload.code ? { code: payload.code } : {}),
+      ...(payload.requestId ? { requestId: payload.requestId } : {}),
+      ...(typeof payload.contractVersion === 'number'
+        ? { contractVersion: payload.contractVersion }
+        : {}),
+      ...(payload.details === undefined ? {} : { details: payload.details }),
     };
   } catch {
     return { message: fallbackMessage };
@@ -95,12 +137,18 @@ const fetchFromApi = async (
   try {
     response = await fetch(`${getApiBase()}${path}`, init);
   } catch {
-    throw new SearchApiError(fallbackMessage, false);
+    throw new SearchApiError(fallbackMessage, true);
   }
 
   if (!response.ok) {
     const error = await parseError(response, fallbackMessage);
-    throw new SearchApiError(error.message, error.retryable ?? false);
+    throw new SearchApiError(error.message, error.retryable ?? isRetryableHttpStatus(response.status), {
+      code: error.code,
+      requestId: error.requestId ?? response.headers?.get('x-request-id') ?? undefined,
+      contractVersion: error.contractVersion,
+      details: error.details,
+      status: response.status,
+    });
   }
 
   return response;
@@ -146,6 +194,13 @@ const fetchSearchSnapshot = async (searchId: string) => {
         throw new SearchApiError(
           error.message,
           error.retryable ?? false,
+          {
+            code: error.code,
+            requestId: error.requestId,
+            contractVersion: error.contractVersion,
+            details: error.details,
+            status: response.status,
+          },
         );
       }
 
@@ -156,6 +211,13 @@ const fetchSearchSnapshot = async (searchId: string) => {
       lastError = new SearchApiError(
         error.message,
         error.retryable ?? true,
+        {
+          code: error.code,
+          requestId: error.requestId,
+          contractVersion: error.contractVersion,
+          details: error.details,
+          status: response.status,
+        },
       );
     }
 
@@ -171,15 +233,31 @@ const fetchSearchSnapshot = async (searchId: string) => {
 };
 
 export type SearchApi = {
-  startSearch: (request: SearchRequest) => Promise<SearchResponse>;
+  startSearch: (
+    request: SearchRequest,
+    options?: SearchStartOptions,
+  ) => Promise<SearchResponse>;
   getSearch: (searchId: string) => Promise<SearchResponse | null>;
   cancelSearch?: (searchId: string) => Promise<SearchResponse | null>;
   resumeSearch?: (searchId: string) => Promise<SearchResponse | null>;
   reverifySearch?: (searchId: string) => Promise<SearchResponse | null>;
 };
 
+export type SearchStartOptions = {
+  /** Reuse this key when retrying the same logical search request. */
+  idempotencyKey?: string;
+};
+
+const createIdempotencyKey = () => {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `search-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+};
+
 export const searchApi: SearchApi = {
-  async startSearch(request) {
+  async startSearch(request, options) {
     const normalized = normalizeRequest(request);
     await waitForLocalApi(getSearchServiceError(normalized.sourceMode));
     const response = await fetchFromApi(
@@ -188,6 +266,7 @@ export const searchApi: SearchApi = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': options?.idempotencyKey?.trim() || createIdempotencyKey(),
         },
         body: JSON.stringify(normalized),
       },

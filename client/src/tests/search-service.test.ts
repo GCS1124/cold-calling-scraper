@@ -57,9 +57,10 @@ describe('searchApi', () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith('/api/search', {
       method: 'POST',
-      headers: {
+      headers: expect.objectContaining({
         'Content-Type': 'application/json',
-      },
+        'Idempotency-Key': expect.any(String),
+      }),
       body: JSON.stringify({
         companyType: 'Dental Clinics',
         location: {
@@ -217,9 +218,10 @@ describe('searchApi', () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith('/api/search', {
       method: 'POST',
-      headers: {
+      headers: expect.objectContaining({
         'Content-Type': 'application/json',
-      },
+        'Idempotency-Key': expect.any(String),
+      }),
       body: JSON.stringify({
         companyType: 'Dental Clinics',
         location: {
@@ -257,6 +259,43 @@ describe('searchApi', () => {
     await expect(failure).rejects.toMatchObject({
       retryable: true,
       message: 'Public LinkedIn search could not be completed. Please try again.',
+      code: 'PUBLIC_LINKEDIN_SEARCH_UNAVAILABLE',
+      requestId: 'request-42',
+      contractVersion: 1,
+      status: 502,
+    });
+  });
+
+  it('reuses a caller-provided idempotency key for a logical retry', async () => {
+    const json = vi.fn().mockResolvedValue(successfulPayload);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json,
+    } as unknown as Response);
+
+    await searchApi.startSearch(
+      {
+        companyType: 'HVAC Contractors',
+        sourceMode: 'ai',
+        location: { mode: 'timezone', timeZone: 'EST' },
+        count: 50,
+      },
+      { idempotencyKey: 'logical-search-retry-1' },
+    );
+
+    expect(globalThis.fetch).toHaveBeenCalledWith('/api/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'logical-search-retry-1',
+      },
+      body: JSON.stringify({
+        companyType: 'HVAC Contractors',
+        sourceMode: 'ai',
+        location: { mode: 'timezone', timeZone: 'EST' },
+        count: 50,
+      }),
     });
   });
 
@@ -273,7 +312,10 @@ describe('searchApi', () => {
         },
         count: 50,
       }),
-    ).rejects.toThrow('Unable to reach LinkedIn public-profile search. Please try again.');
+    ).rejects.toMatchObject({
+      message: 'Unable to reach LinkedIn public-profile search. Please try again.',
+      retryable: true,
+    });
   });
 
   it('replaces legacy generic API errors with a source-aware message', async () => {
