@@ -6,6 +6,7 @@ import type {
   SearchProgress,
   SearchRequest,
   SearchResponse,
+  SearchAccessContext,
   SearchStartContext,
   SearchStatus,
 } from '../types/search';
@@ -61,6 +62,7 @@ import {
 
 type SearchJob = {
   searchId: string;
+  ownerId?: string;
   idempotencyKey?: string;
   requestFingerprint?: string;
   request: SearchRequest;
@@ -83,10 +85,22 @@ type SearchService = {
     request: SearchRequest,
     context?: SearchStartContext,
   ) => Promise<SearchResponse>;
-  getSearch: (searchId: string) => Promise<SearchResponse | null>;
-  cancelSearch: (searchId: string) => Promise<SearchResponse | null>;
-  resumeSearch: (searchId: string) => Promise<SearchResponse | null>;
-  reverifySearch: (searchId: string) => Promise<SearchResponse | null>;
+  getSearch: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  cancelSearch: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  resumeSearch: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  reverifySearch: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
 };
 
 type SearchDeps = {
@@ -919,6 +933,8 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     (process.env.NODE_ENV === 'test' ? undefined : discoverOsmLeads);
   const now = deps.now ?? Date.now;
   const idFactory = deps.idFactory ?? randomUUID;
+  const canAccessJob = (job: SearchJob, context?: SearchAccessContext) =>
+    !context?.ownerId || job.ownerId === context.ownerId;
   const schedule =
     deps.schedule ??
     ((task: () => Promise<void>) => {
@@ -1137,6 +1153,10 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
           (candidate) => candidate.idempotencyKey === idempotencyKey,
         );
         if (existingJob) {
+          if (existingJob.ownerId !== context?.ownerId) {
+            throw new SearchIdempotencyConflictError();
+          }
+
           if (existingJob.requestFingerprint !== requestFingerprint) {
             throw new SearchIdempotencyConflictError();
           }
@@ -1148,6 +1168,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       const searchId = idFactory();
       const job: SearchJob = {
         searchId,
+        ownerId: context?.ownerId,
         idempotencyKey,
         requestFingerprint,
         request: normalizedRequest,
@@ -1172,16 +1193,16 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       return toResponse(job);
     },
 
-    async getSearch(searchId) {
+    async getSearch(searchId, context) {
       cleanupExpiredJobs(jobs, now);
       const job = jobs.get(searchId);
-      return job ? toResponse(job) : null;
+      return job && canAccessJob(job, context) ? toResponse(job) : null;
     },
 
-    async cancelSearch(searchId) {
+    async cancelSearch(searchId, context) {
       cleanupExpiredJobs(jobs, now);
       const job = jobs.get(searchId);
-      if (!job) return null;
+      if (!job || !canAccessJob(job, context)) return null;
 
       if (!['complete', 'failed', 'cancelled'].includes(job.status)) {
         job.cancelRequested = true;
@@ -1194,10 +1215,10 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       return toResponse(job);
     },
 
-    async resumeSearch(searchId) {
+    async resumeSearch(searchId, context) {
       cleanupExpiredJobs(jobs, now);
       const job = jobs.get(searchId);
-      if (!job) return null;
+      if (!job || !canAccessJob(job, context)) return null;
 
       if (job.status === 'cancelled') {
         job.cancelRequested = false;
@@ -1214,10 +1235,10 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
       return toResponse(job);
     },
 
-    async reverifySearch(searchId) {
+    async reverifySearch(searchId, context) {
       cleanupExpiredJobs(jobs, now);
       const job = jobs.get(searchId);
-      if (!job) return null;
+      if (!job || !canAccessJob(job, context)) return null;
 
       job.leads = reverifyLeads(job.leads);
       appendUniqueWarnings(job, [

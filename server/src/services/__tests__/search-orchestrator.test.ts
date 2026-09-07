@@ -103,6 +103,32 @@ describe('createSearchService', () => {
     ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
   });
 
+  it('isolates local search jobs by owner and rejects cross-owner idempotency reuse', async () => {
+    const service = createSearchService({
+      idFactory: () => 'owned-search-1',
+      schedule: () => undefined,
+    });
+    const request = {
+      companyType: 'Dentist',
+      city: 'Austin, TX',
+      count: 50,
+    } as const;
+
+    const started = await service.startSearch(request, {
+      idempotencyKey: 'owned-retry-1',
+      ownerId: 'owner-a',
+    });
+
+    await expect(service.getSearch(started.searchId, { ownerId: 'owner-a' })).resolves.toMatchObject({
+      searchId: started.searchId,
+    });
+    await expect(service.getSearch(started.searchId, { ownerId: 'owner-b' })).resolves.toBeNull();
+    await expect(
+      service.startSearch(request, { idempotencyKey: 'owned-retry-1', ownerId: 'owner-b' }),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+    await expect(service.cancelSearch(started.searchId, { ownerId: 'owner-b' })).resolves.toBeNull();
+  });
+
   it('starts queued and becomes failed when US normalization fails', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 

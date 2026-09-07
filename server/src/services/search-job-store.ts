@@ -31,6 +31,7 @@ export type SearchLocationMode =
 export type SearchJobRecord = {
   schemaVersion: number;
   searchId: string;
+  ownerId?: string;
   idempotencyKey?: string;
   requestFingerprint?: string;
   request: SearchRequest;
@@ -60,7 +61,7 @@ export type SearchJobRecord = {
 
 export type SearchJobStore = {
   ensureSchema: () => Promise<void>;
-  get: (searchId: string) => Promise<SearchJobRecord | null>;
+  get: (searchId: string, ownerId?: string) => Promise<SearchJobRecord | null>;
   create: (job: SearchJobRecord) => Promise<{
     job: SearchJobRecord;
     created: boolean;
@@ -69,15 +70,21 @@ export type SearchJobStore = {
     idempotencyKey: string,
     requestFingerprint: string,
     now: number,
+    ownerId?: string,
   ) => Promise<SearchJobRecord | null>;
   claim: (
     searchId: string,
     now: number,
     leaseMs: number,
     token: string,
+    ownerId?: string,
   ) => Promise<SearchJobRecord | null>;
   upsert: (job: SearchJobRecord) => Promise<void>;
-  requestCancel: (searchId: string, now: number) => Promise<SearchJobRecord | null>;
+  requestCancel: (
+    searchId: string,
+    now: number,
+    ownerId?: string,
+  ) => Promise<SearchJobRecord | null>;
   deleteExpired: (now: number) => Promise<void>;
   close?: () => Promise<void>;
 };
@@ -261,6 +268,10 @@ const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
     ...job,
     schemaVersion: CURRENT_SCHEMA_VERSION,
     searchId: normalizeSearchId(job.searchId),
+    ownerId:
+      typeof job.ownerId === 'string' && job.ownerId.trim() && job.ownerId.trim().length <= 256
+        ? job.ownerId.trim()
+        : undefined,
     idempotencyKey:
       typeof job.idempotencyKey === 'string' && job.idempotencyKey.trim()
         ? job.idempotencyKey.trim()
@@ -325,6 +336,7 @@ const migrateJobPayload = (payload: unknown): SearchJobRecord | null => {
   return sanitizeJob({
     schemaVersion: Number(raw.schemaVersion ?? 1),
     searchId: String(raw.searchId),
+    ownerId: typeof raw.ownerId === 'string' ? raw.ownerId : undefined,
     idempotencyKey:
       typeof raw.idempotencyKey === 'string' ? raw.idempotencyKey : undefined,
     requestFingerprint:
@@ -415,7 +427,7 @@ const memoryStore = (): SearchJobStore => {
   return {
     ensureSchema: async () => undefined,
 
-    get: async (searchId: string) => {
+    get: async (searchId: string, ownerId?: string) => {
       const normalized = normalizeSearchId(searchId);
 
       if (!isValidSearchId(normalized)) {
@@ -423,20 +435,25 @@ const memoryStore = (): SearchJobStore => {
       }
 
       const job = jobs.get(normalized);
-      if (!job) return null;
+      if (!job || (ownerId && job.ownerId !== ownerId)) return null;
 
       return job;
     },
 
     create: async (job: SearchJobRecord) => {
       const sanitized = sanitizeJob(job);
-      const existing = sanitized.idempotencyKey
+      const existingByKey = sanitized.idempotencyKey
         ? [...jobs.values()].find(
             (candidate) => candidate.idempotencyKey === sanitized.idempotencyKey,
           )
-        : jobs.get(sanitized.searchId);
+        : undefined;
+      const existing = existingByKey ?? jobs.get(sanitized.searchId);
 
       if (existing) {
+        if (existing.ownerId !== sanitized.ownerId) {
+          throw new SearchIdempotencyConflictError();
+        }
+
         if (
           sanitized.idempotencyKey &&
           existing.requestFingerprint !== sanitized.requestFingerprint
@@ -465,13 +482,16 @@ const memoryStore = (): SearchJobStore => {
       idempotencyKey: string,
       requestFingerprint: string,
       now: number,
+      ownerId?: string,
     ) => {
       prune(now);
       const job = [...jobs.values()].find(
         (candidate) =>
-          candidate.idempotencyKey === idempotencyKey && candidate.expiresAt > now,
+          candidate.idempotencyKey === idempotencyKey &&
+          candidate.expiresAt > now &&
+          (ownerId ? candidate.ownerId === ownerId : !candidate.ownerId),
       );
-      if (!job) {
+      if (!job || (ownerId && job.ownerId !== ownerId)) {
         return null;
       }
 
@@ -482,7 +502,13 @@ const memoryStore = (): SearchJobStore => {
       return job;
     },
 
-    claim: async (searchId: string, now: number, leaseMs: number, token: string) => {
+    claim: async (
+      searchId: string,
+      now: number,
+      leaseMs: number,
+      token: string,
+      ownerId?: string,
+    ) => {
       const normalized = normalizeSearchId(searchId);
 
       if (!isValidSearchId(normalized)) {
@@ -492,6 +518,7 @@ const memoryStore = (): SearchJobStore => {
       const job = jobs.get(normalized);
       if (
         !job ||
+        (ownerId && job.ownerId !== ownerId) ||
         job.cancelRequested ||
         !['queued', 'discovering', 'enriching'].includes(job.status) ||
         (job.processingUntil ?? 0) > now
@@ -539,11 +566,15 @@ const memoryStore = (): SearchJobStore => {
       }
     },
 
-    requestCancel: async (searchId: string, now: number) => {
+    requestCancel: async (searchId: string, now: number, ownerId?: string) => {
       const normalized = normalizeSearchId(searchId);
       const job = jobs.get(normalized);
 
-      if (!job || ['complete', 'failed', 'cancelled'].includes(job.status)) {
+      if (
+        !job ||
+        (ownerId && job.ownerId !== ownerId) ||
+        ['complete', 'failed', 'cancelled'].includes(job.status)
+      ) {
         return job ?? null;
       }
 
@@ -620,7 +651,7 @@ const postgresStore = (): SearchJobStore => {
   return {
     ensureSchema,
 
-    get: async (searchId: string) => {
+    get: async (searchId: string, ownerId?: string) => {
       const normalized = normalizeSearchId(searchId);
 
       if (!isValidSearchId(normalized)) {
@@ -643,9 +674,10 @@ const postgresStore = (): SearchJobStore => {
           from lead_finder_jobs
           where search_id = $1
             and expires_at > $2
+            and ($3::text is null or payload->>'ownerId' = $3)
           limit 1
         `,
-        [normalized, nowMs()],
+        [normalized, nowMs(), ownerId ?? null],
       );
 
       const payload = result.rows[0]?.payload;
@@ -724,6 +756,10 @@ const postgresStore = (): SearchJobStore => {
         throw new Error('Search job could not be created or recovered.');
       }
 
+      if (existingJob.ownerId !== sanitized.ownerId) {
+        throw new SearchIdempotencyConflictError();
+      }
+
       if (
         sanitized.idempotencyKey &&
         existingJob.idempotencyKey === sanitized.idempotencyKey &&
@@ -739,6 +775,7 @@ const postgresStore = (): SearchJobStore => {
       idempotencyKey: string,
       requestFingerprint: string,
       now: number,
+      ownerId?: string,
     ) => {
       await ensureSchema();
 
@@ -756,10 +793,14 @@ const postgresStore = (): SearchJobStore => {
           from lead_finder_jobs
           where payload->>'idempotencyKey' = $1
             and expires_at > $2
+            and (
+              ($3::text is null and not (payload ? 'ownerId'))
+              or payload->>'ownerId' = $3
+            )
           order by updated_at desc
           limit 1
         `,
-        [idempotencyKey, now],
+        [idempotencyKey, now, ownerId ?? null],
       );
 
       const job = parsePayload(result.rows[0]?.payload);
@@ -774,7 +815,13 @@ const postgresStore = (): SearchJobStore => {
       return job;
     },
 
-    claim: async (searchId: string, now: number, leaseMs: number, token: string) => {
+    claim: async (
+      searchId: string,
+      now: number,
+      leaseMs: number,
+      token: string,
+      ownerId?: string,
+    ) => {
       const normalized = normalizeSearchId(searchId);
 
       if (!isValidSearchId(normalized)) {
@@ -812,9 +859,10 @@ const postgresStore = (): SearchJobStore => {
             ) <= $4
             and coalesce(payload->>'status', '') in ('queued', 'discovering', 'enriching')
             and coalesce(payload->>'cancelRequested', 'false') <> 'true'
+            and ($5::text is null or payload->>'ownerId' = $5)
           returning payload
         `,
-        [normalized, leaseUntil, token, now],
+        [normalized, leaseUntil, token, now, ownerId ?? null],
       );
 
       return parsePayload(result.rows[0]?.payload);
@@ -885,7 +933,7 @@ const postgresStore = (): SearchJobStore => {
       }
     },
 
-    requestCancel: async (searchId: string, now: number) => {
+    requestCancel: async (searchId: string, now: number, ownerId?: string) => {
       const normalized = normalizeSearchId(searchId);
 
       if (!isValidSearchId(normalized)) {
@@ -914,9 +962,10 @@ const postgresStore = (): SearchJobStore => {
           where search_id = $1
             and expires_at > $2
             and coalesce(payload->>'status', '') in ('queued', 'discovering', 'enriching')
+            and ($3::text is null or payload->>'ownerId' = $3)
           returning payload
         `,
-        [normalized, now],
+        [normalized, now, ownerId ?? null],
       );
 
       return parsePayload(result.rows[0]?.payload);
@@ -997,10 +1046,10 @@ export const createSearchJobStore = (): SearchJobStore => {
       );
     },
 
-    get: async (searchId: string) => {
+    get: async (searchId: string, ownerId?: string) => {
       return withFallback(
-        () => postgres.get(searchId),
-        () => fallback.get(searchId),
+        () => postgres.get(searchId, ownerId),
+        () => fallback.get(searchId, ownerId),
         'get',
       );
     },
@@ -1017,18 +1066,25 @@ export const createSearchJobStore = (): SearchJobStore => {
       idempotencyKey: string,
       requestFingerprint: string,
       now: number,
+      ownerId?: string,
     ) => {
       return withFallback(
-        () => postgres.getByIdempotencyKey(idempotencyKey, requestFingerprint, now),
-        () => fallback.getByIdempotencyKey(idempotencyKey, requestFingerprint, now),
+        () => postgres.getByIdempotencyKey(idempotencyKey, requestFingerprint, now, ownerId),
+        () => fallback.getByIdempotencyKey(idempotencyKey, requestFingerprint, now, ownerId),
         'getByIdempotencyKey',
       );
     },
 
-    claim: async (searchId: string, now: number, leaseMs: number, token: string) => {
+    claim: async (
+      searchId: string,
+      now: number,
+      leaseMs: number,
+      token: string,
+      ownerId?: string,
+    ) => {
       return withFallback(
-        () => postgres.claim(searchId, now, leaseMs, token),
-        () => fallback.claim(searchId, now, leaseMs, token),
+        () => postgres.claim(searchId, now, leaseMs, token, ownerId),
+        () => fallback.claim(searchId, now, leaseMs, token, ownerId),
         'claim',
       );
     },
@@ -1041,10 +1097,10 @@ export const createSearchJobStore = (): SearchJobStore => {
       );
     },
 
-    requestCancel: async (searchId: string, now: number) => {
+    requestCancel: async (searchId: string, now: number, ownerId?: string) => {
       return withFallback(
-        () => postgres.requestCancel(searchId, now),
-        () => fallback.requestCancel(searchId, now),
+        () => postgres.requestCancel(searchId, now, ownerId),
+        () => fallback.requestCancel(searchId, now, ownerId),
         'requestCancel',
       );
     },
@@ -1132,6 +1188,7 @@ export const createSearchJobRecord = (
     Partial<
       Pick<
         SearchJobRecord,
+        | 'ownerId'
         | 'idempotencyKey'
         | 'requestFingerprint'
         | 'status'
@@ -1149,6 +1206,7 @@ export const createSearchJobRecord = (
   return sanitizeJob({
     schemaVersion: CURRENT_SCHEMA_VERSION,
     searchId: params.searchId,
+    ownerId: params.ownerId,
     idempotencyKey: params.idempotencyKey,
     requestFingerprint: params.requestFingerprint,
     request: params.request,

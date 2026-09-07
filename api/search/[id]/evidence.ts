@@ -5,6 +5,7 @@ import {
   sendSearchError,
   setRequestIdHeader,
 } from '../../../server/src/http/search-http-contract.js';
+import { authorizeSearchRequest } from '../../_lib/search-auth.js';
 
 export default async function handler(req: any, res: any) {
   const requestId = getRequestId(req);
@@ -36,7 +37,14 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const response = await getSearchJobSnapshot(searchId);
+    const auth = await authorizeSearchRequest(req, res, requestId);
+    if (!auth) {
+      return;
+    }
+
+    const response = auth.ownerId
+      ? await getSearchJobSnapshot(searchId, { ownerId: auth.ownerId })
+      : await getSearchJobSnapshot(searchId);
     if (!response) {
       sendSearchError(res, 404, {
         code: 'SEARCH_NOT_FOUND',

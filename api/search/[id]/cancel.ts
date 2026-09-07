@@ -5,6 +5,7 @@ import {
   setRequestIdHeader,
   withSearchRequestId,
 } from '../../../server/src/http/search-http-contract.js';
+import { authorizeSearchRequest } from '../../_lib/search-auth.js';
 
 export default async function handler(req: any, res: any) {
   const requestId = getRequestId(req);
@@ -32,8 +33,15 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const auth = await authorizeSearchRequest(req, res, requestId);
+    if (!auth) {
+      return;
+    }
+
     const service = await getVercelSearchService();
-    const response = await service.cancelSearch(searchId);
+    const response = auth.ownerId
+      ? await service.cancelSearch(searchId, { ownerId: auth.ownerId })
+      : await service.cancelSearch(searchId);
 
     if (!response) {
       sendSearchError(res, 404, {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   handleCancelSearch,
@@ -70,6 +70,38 @@ const createResponse = () => {
 describe('/api/search handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('fails closed before parsing a search when auth is required and missing', async () => {
+    vi.stubEnv('LEAD_FINDER_AUTH_REQUIRED', 'true');
+    const search: SearchService = {
+      startSearch: vi.fn(),
+      getSearch: vi.fn(),
+    };
+    const { response, state } = createResponse();
+
+    await handleStartSearch(
+      search,
+      {
+        body: {
+          companyType: 'Dentist',
+          location: { mode: 'timezone', timeZone: 'EST' },
+          count: 50,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(401);
+    expect(state.body).toMatchObject({
+      code: 'AUTH_REQUIRED',
+      retryable: false,
+    });
+    expect(search.startSearch).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid timezone code', async () => {

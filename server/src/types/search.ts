@@ -36,6 +36,13 @@ export type SearchRequest = z.infer<typeof searchRequestSchema>;
 
 export type SearchStartContext = {
   idempotencyKey?: string;
+  /** Supabase auth user id used to isolate durable search jobs. */
+  ownerId?: string;
+};
+
+export type SearchAccessContext = {
+  /** Supabase auth user id used to authorize durable search reads and writes. */
+  ownerId?: string;
 };
 
 export type ProviderWarning = {

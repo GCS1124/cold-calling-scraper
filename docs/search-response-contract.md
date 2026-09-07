@@ -85,6 +85,24 @@ key. Client errors preserve the server `code`, `retryable`, `requestId`,
 `contractVersion`, `details`, and HTTP status so callers can retry transient
 failures without matching human-readable text.
 
+## Authentication and ownership
+
+When `LEAD_FINDER_AUTH_REQUIRED=true`, every search, snapshot, evidence,
+cancel, resume, and reverify request must carry a Supabase access token in the
+`Authorization: Bearer <token>` header. The server verifies that token against
+the configured Supabase Auth endpoint using `SUPABASE_PUBLISHABLE_KEY` or the
+legacy `SUPABASE_ANON_KEY`; service-role and secret keys are never sent to the
+browser. A verified user id is stored as the search owner and is required for
+all later durable reads and mutations. A different user receives the same
+not-found behavior as an expired search id.
+
+If the flag is unset, local and preview deployments retain anonymous
+development compatibility. That is intentionally not a production security
+posture: production must set the flag and configure Supabase Auth, otherwise
+the deployment does not provide tenant isolation. Stateless LinkedIn and AI
+fallbacks still verify the caller before returning a response but cannot offer
+cross-instance replay or later owner-scoped polling without durable storage.
+
 ## Coverage semantics
 
 `leadCount` is the number of candidates observed from that provider before the

@@ -1,4 +1,5 @@
 import type { SearchRequest, SearchResponse } from '../types/lead';
+import { getSupabaseClient } from '../lib/supabase';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() ?? '';
 const minimumRequestedCount = 50;
@@ -8,6 +9,61 @@ const localApiRetryIntervalMs = 500;
 const searchSnapshotRetryDelaysMs = [400, 900, 1_800] as const;
 const searchSnapshotTimeoutMs = 15_000;
 const isLocalDevelopment = import.meta.env.MODE === 'development';
+
+const getAuthHeaders = async (): Promise<Record<string, string>> => {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return {};
+  }
+
+  try {
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token?.trim();
+    return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  } catch {
+    return {};
+  }
+};
+
+const toHeaderRecord = (headers: HeadersInit | undefined) => {
+  if (!headers) {
+    return {};
+  }
+
+  if (headers instanceof Headers) {
+    const record: Record<string, string> = {};
+    headers.forEach((value, key) => {
+      record[key] = value;
+    });
+    return record;
+  }
+
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+
+  return { ...headers };
+};
+
+const attachAuthHeaders = async (init?: RequestInit): Promise<RequestInit | undefined> => {
+  const authHeaders = await getAuthHeaders();
+  if (!authHeaders.Authorization) {
+    return init;
+  }
+
+  const headers = toHeaderRecord(init?.headers);
+  const hasAuthorization = Object.keys(headers).some(
+    (key) => key.toLowerCase() === 'authorization',
+  );
+  if (!hasAuthorization) {
+    headers.Authorization = authHeaders.Authorization;
+  }
+
+  return {
+    ...init,
+    headers,
+  };
+};
 
 export class SearchApiError extends Error {
   readonly retryable: boolean;
@@ -135,7 +191,7 @@ const fetchFromApi = async (
   let response: Response;
 
   try {
-    response = await fetch(`${getApiBase()}${path}`, init);
+    response = await fetch(`${getApiBase()}${path}`, await attachAuthHeaders(init));
   } catch {
     throw new SearchApiError(fallbackMessage, true);
   }
@@ -173,10 +229,13 @@ const fetchSearchSnapshot = async (searchId: string) => {
       const timeoutId = window.setTimeout(() => controller.abort(), searchSnapshotTimeoutMs);
 
       try {
-        response = await fetch(`${getApiBase()}/api/search/${searchId}`, {
-          cache: 'no-store',
-          signal: controller.signal,
-        });
+        response = await fetch(
+          `${getApiBase()}/api/search/${searchId}`,
+          await attachAuthHeaders({
+            cache: 'no-store',
+            signal: controller.signal,
+          }),
+        );
       } finally {
         window.clearTimeout(timeoutId);
       }

@@ -11,6 +11,7 @@ import {
   withSearchRequestId,
 } from '../../server/src/http/search-http-contract.js';
 import { SearchIdempotencyConflictError } from '../../server/src/services/search-idempotency.js';
+import { authorizeSearchRequest } from '../_lib/search-auth.js';
 
 const isSearchPersistenceFailure = (error: unknown) =>
   error instanceof Error &&
@@ -66,6 +67,11 @@ export default async function handler(req: any, res: any) {
 
   try {
     res.setHeader?.('Cache-Control', 'no-store, max-age=0');
+    const auth = await authorizeSearchRequest(req, res, requestId);
+    if (!auth) {
+      return;
+    }
+
     const idempotencyKey = getIdempotencyKey(req);
     if (idempotencyKey === null) {
       sendSearchError(res, 400, {
@@ -121,8 +127,12 @@ export default async function handler(req: any, res: any) {
     }
 
     const service = await getVercelSearchService();
-    const response = idempotencyKey
-      ? await service.startSearch(flattenedRequest, { idempotencyKey })
+    const context = {
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+      ...(auth.ownerId ? { ownerId: auth.ownerId } : {}),
+    };
+    const response = Object.keys(context).length
+      ? await service.startSearch(flattenedRequest, context)
       : await service.startSearch(flattenedRequest);
 
     waitUntil(

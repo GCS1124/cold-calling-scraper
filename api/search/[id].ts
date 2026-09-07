@@ -7,6 +7,7 @@ import {
   setRequestIdHeader,
   withSearchRequestId,
 } from '../../server/src/http/search-http-contract.js';
+import { authorizeSearchRequest } from '../_lib/search-auth.js';
 
 const activeSearchStatuses = new Set(['queued', 'discovering', 'enriching']);
 
@@ -41,7 +42,14 @@ export default async function handler(req: any, res: any) {
 
   try {
     res.setHeader?.('Cache-Control', 'no-store, max-age=0');
-    const response = await getSearchJobSnapshot(searchId);
+    const auth = await authorizeSearchRequest(req, res, requestId);
+    if (!auth) {
+      return;
+    }
+
+    const response = auth.ownerId
+      ? await getSearchJobSnapshot(searchId, { ownerId: auth.ownerId })
+      : await getSearchJobSnapshot(searchId);
     if (!response) {
       res.status(204).end();
       return;

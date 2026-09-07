@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import { ZodError } from 'zod';
 
-import type { SearchRequest, SearchResponse, SearchStartContext } from '../types/search';
+import type {
+  SearchAccessContext,
+  SearchRequest,
+  SearchResponse,
+  SearchStartContext,
+} from '../types/search';
 import { flattenSearchRequest, searchRequestSchema } from '../../../api/_lib/search-contract.js';
 import { buildResearchDossier } from '../services/research-dossier';
 import {
@@ -12,16 +17,33 @@ import {
   getIdempotencyKey,
 } from '../http/search-http-contract';
 import { SearchIdempotencyConflictError } from '../services/search-idempotency';
+import {
+  authenticateSearchRequest,
+  isSearchAuthorizationError,
+  type SearchAuthContext,
+} from '../auth/search-auth';
 
 export type SearchService = {
   startSearch: (
     request: SearchRequest,
     context?: SearchStartContext,
   ) => Promise<SearchResponse>;
-  getSearch: (searchId: string) => Promise<SearchResponse | null>;
-  cancelSearch?: (searchId: string) => Promise<SearchResponse | null>;
-  resumeSearch?: (searchId: string) => Promise<SearchResponse | null>;
-  reverifySearch?: (searchId: string) => Promise<SearchResponse | null>;
+  getSearch: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  cancelSearch?: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  resumeSearch?: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  reverifySearch?: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
 };
 
 type SearchResponder = {
@@ -29,6 +51,34 @@ type SearchResponder = {
   status: (code: number) => SearchResponder;
   json: (payload: unknown) => SearchResponder;
   end: () => SearchResponder;
+};
+
+type SearchRouteRequest = {
+  headers?: Record<string, string | string[] | undefined>;
+  body?: unknown;
+  params: { searchId?: string };
+  query?: { leadId?: string };
+};
+
+const getAccessContext = (auth: SearchAuthContext): SearchAccessContext | undefined =>
+  auth.ownerId ? { ownerId: auth.ownerId } : undefined;
+
+const sendAuthorizationError = (
+  error: unknown,
+  res: SearchResponder,
+  requestId: string,
+) => {
+  if (!isSearchAuthorizationError(error)) {
+    return false;
+  }
+
+  sendSearchError(res, error.status, {
+    code: error.code,
+    message: error.message,
+    retryable: error.retryable,
+    requestId,
+  });
+  return true;
 };
 
 export const handleStartSearch = async (
@@ -43,6 +93,7 @@ export const handleStartSearch = async (
   setRequestIdHeader(res, requestId);
 
   try {
+    const auth = await authenticateSearchRequest(req);
     const idempotencyKey = getIdempotencyKey(req);
     if (idempotencyKey === null) {
       sendSearchError(res, 400, {
@@ -56,12 +107,20 @@ export const handleStartSearch = async (
 
     const payload = searchRequestSchema.parse(req.body);
     const request = flattenSearchRequest(payload);
-    const response = idempotencyKey
-      ? await search.startSearch(request, { idempotencyKey })
+    const context: SearchStartContext = {
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+      ...(auth.ownerId ? { ownerId: auth.ownerId } : {}),
+    };
+    const response = Object.keys(context).length
+      ? await search.startSearch(request, context)
       : await search.startSearch(request);
 
     res.status(200).json(withSearchRequestId(response, requestId));
   } catch (error) {
+    if (sendAuthorizationError(error, res, requestId)) {
+      return;
+    }
+
     if (error instanceof ZodError) {
       sendSearchError(res, 400, {
         code: 'INVALID_SEARCH_REQUEST',
@@ -94,13 +153,14 @@ export const handleStartSearch = async (
 
 export const handleGetSearch = async (
   search: SearchService,
-  req: { params: { searchId?: string } },
+  req: Pick<SearchRouteRequest, 'headers' | 'params'>,
   res: SearchResponder,
 ) => {
   const requestId = getRequestId(req);
   setRequestIdHeader(res, requestId);
 
   try {
+    const auth = await authenticateSearchRequest(req);
     const searchId = req.params.searchId;
     if (!searchId) {
       sendSearchError(res, 400, {
@@ -112,14 +172,21 @@ export const handleGetSearch = async (
       return;
     }
 
-    const response = await search.getSearch(searchId);
+    const access = getAccessContext(auth);
+    const response = access
+      ? await search.getSearch(searchId, access)
+      : await search.getSearch(searchId);
     if (!response) {
       res.status(204).end();
       return;
     }
 
     res.status(200).json(withSearchRequestId(response, requestId));
-  } catch {
+  } catch (error) {
+    if (sendAuthorizationError(error, res, requestId)) {
+      return;
+    }
+
     sendSearchError(res, 500, {
       code: 'SEARCH_FAILED',
       message: 'Search failed',
@@ -131,13 +198,14 @@ export const handleGetSearch = async (
 
 export const handleCancelSearch = async (
   search: SearchService,
-  req: { params: { searchId?: string } },
+  req: Pick<SearchRouteRequest, 'headers' | 'params'>,
   res: SearchResponder,
 ) => {
   const requestId = getRequestId(req);
   setRequestIdHeader(res, requestId);
 
   try {
+    const auth = await authenticateSearchRequest(req);
     const searchId = req.params.searchId;
     if (!searchId) {
       sendSearchError(res, 400, {
@@ -159,7 +227,10 @@ export const handleCancelSearch = async (
       return;
     }
 
-    const response = await search.cancelSearch(searchId);
+    const access = getAccessContext(auth);
+    const response = access
+      ? await search.cancelSearch(searchId, access)
+      : await search.cancelSearch(searchId);
     if (!response) {
       sendSearchError(res, 404, {
         code: 'SEARCH_NOT_FOUND',
@@ -171,7 +242,11 @@ export const handleCancelSearch = async (
     }
 
     res.status(200).json(withSearchRequestId(response, requestId));
-  } catch {
+  } catch (error) {
+    if (sendAuthorizationError(error, res, requestId)) {
+      return;
+    }
+
     sendSearchError(res, 500, {
       code: 'SEARCH_CANCEL_FAILED',
       message: 'Unable to cancel search',
@@ -183,13 +258,14 @@ export const handleCancelSearch = async (
 
 export const handleResumeSearch = async (
   search: SearchService,
-  req: { params: { searchId?: string } },
+  req: Pick<SearchRouteRequest, 'headers' | 'params'>,
   res: SearchResponder,
 ) => {
   const requestId = getRequestId(req);
   setRequestIdHeader(res, requestId);
 
   try {
+    const auth = await authenticateSearchRequest(req);
     const searchId = req.params.searchId;
     if (!searchId) {
       sendSearchError(res, 400, {
@@ -211,7 +287,10 @@ export const handleResumeSearch = async (
       return;
     }
 
-    const response = await search.resumeSearch(searchId);
+    const access = getAccessContext(auth);
+    const response = access
+      ? await search.resumeSearch(searchId, access)
+      : await search.resumeSearch(searchId);
     if (!response) {
       sendSearchError(res, 404, {
         code: 'SEARCH_NOT_FOUND',
@@ -223,7 +302,11 @@ export const handleResumeSearch = async (
     }
 
     res.status(200).json(withSearchRequestId(response, requestId));
-  } catch {
+  } catch (error) {
+    if (sendAuthorizationError(error, res, requestId)) {
+      return;
+    }
+
     sendSearchError(res, 500, {
       code: 'SEARCH_RESUME_FAILED',
       message: 'Unable to resume search',
@@ -235,13 +318,14 @@ export const handleResumeSearch = async (
 
 export const handleReverifySearch = async (
   search: SearchService,
-  req: { params: { searchId?: string } },
+  req: Pick<SearchRouteRequest, 'headers' | 'params'>,
   res: SearchResponder,
 ) => {
   const requestId = getRequestId(req);
   setRequestIdHeader(res, requestId);
 
   try {
+    const auth = await authenticateSearchRequest(req);
     const searchId = req.params.searchId;
     if (!searchId) {
       sendSearchError(res, 400, {
@@ -263,7 +347,10 @@ export const handleReverifySearch = async (
       return;
     }
 
-    const response = await search.reverifySearch(searchId);
+    const access = getAccessContext(auth);
+    const response = access
+      ? await search.reverifySearch(searchId, access)
+      : await search.reverifySearch(searchId);
     if (!response) {
       sendSearchError(res, 404, {
         code: 'SEARCH_NOT_FOUND',
@@ -275,7 +362,11 @@ export const handleReverifySearch = async (
     }
 
     res.status(200).json(withSearchRequestId(response, requestId));
-  } catch {
+  } catch (error) {
+    if (sendAuthorizationError(error, res, requestId)) {
+      return;
+    }
+
     sendSearchError(res, 500, {
       code: 'SEARCH_REVERIFY_FAILED',
       message: 'Unable to reverify search',
@@ -287,13 +378,14 @@ export const handleReverifySearch = async (
 
 export const handleGetEvidence = async (
   search: SearchService,
-  req: { params: { searchId?: string }; query?: { leadId?: string } },
+  req: Pick<SearchRouteRequest, 'headers' | 'params' | 'query'>,
   res: SearchResponder,
 ) => {
   const requestId = getRequestId(req);
   setRequestIdHeader(res, requestId);
 
   try {
+    const auth = await authenticateSearchRequest(req);
     const searchId = req.params.searchId;
     if (!searchId) {
       sendSearchError(res, 400, {
@@ -305,7 +397,10 @@ export const handleGetEvidence = async (
       return;
     }
 
-    const response = await search.getSearch(searchId);
+    const access = getAccessContext(auth);
+    const response = access
+      ? await search.getSearch(searchId, access)
+      : await search.getSearch(searchId);
     if (!response) {
       sendSearchError(res, 404, {
         code: 'SEARCH_NOT_FOUND',
@@ -328,7 +423,11 @@ export const handleGetEvidence = async (
     }
 
     res.status(200).json({ ...dossier, requestId });
-  } catch {
+  } catch (error) {
+    if (sendAuthorizationError(error, res, requestId)) {
+      return;
+    }
+
     sendSearchError(res, 500, {
       code: 'EVIDENCE_LOAD_FAILED',
       message: 'Unable to load research evidence',

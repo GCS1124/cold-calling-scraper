@@ -7,6 +7,7 @@ import type {
   SearchProgress,
   SearchRequest,
   SearchResponse,
+  SearchAccessContext,
   SearchStartContext,
   SearchStatus,
 } from '../types/search';
@@ -63,12 +64,27 @@ type VercelSearchService = {
     request: SearchRequest,
     context?: SearchStartContext,
   ) => Promise<SearchResponse>;
-  getSearch: (searchId: string) => Promise<SearchResponse | null>;
-  getSearchSnapshot: (searchId: string) => Promise<SearchResponse | null>;
+  getSearch: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  getSearchSnapshot: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
   advanceSearch: (searchId: string) => Promise<SearchResponse | null>;
-  cancelSearch: (searchId: string) => Promise<SearchResponse | null>;
-  resumeSearch: (searchId: string) => Promise<SearchResponse | null>;
-  reverifySearch: (searchId: string) => Promise<SearchResponse | null>;
+  cancelSearch: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  resumeSearch: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
+  reverifySearch: (
+    searchId: string,
+    context?: SearchAccessContext,
+  ) => Promise<SearchResponse | null>;
 };
 
 type VercelSearchServiceDeps = {
@@ -1098,10 +1114,10 @@ export const createVercelSearchServiceWithDeps = (
     (process.env.NODE_ENV === 'test' ? undefined : discoverOsm);
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
-  const getStoredSearch = async (searchId: string) => {
+  const getStoredSearch = async (searchId: string, context?: SearchAccessContext) => {
     await store.ensureSchema();
 
-    const job = await store.get(searchId);
+    const job = await store.get(searchId, context?.ownerId);
     return job ? toSearchResponse(job) : null;
   };
 
@@ -1187,6 +1203,7 @@ export const createVercelSearchServiceWithDeps = (
           idempotencyKey,
           requestFingerprint,
           startedAt,
+          context?.ownerId,
         );
         if (existingJob) {
           return toSearchResponse(existingJob);
@@ -1198,6 +1215,7 @@ export const createVercelSearchServiceWithDeps = (
       let job: SearchJobRecord = {
         schemaVersion: CURRENT_SCHEMA_VERSION,
         searchId,
+        ownerId: context?.ownerId,
         idempotencyKey,
         requestFingerprint,
         request: normalizedRequest,
@@ -1227,15 +1245,15 @@ export const createVercelSearchServiceWithDeps = (
       return toSearchResponse(job);
     },
 
-    async cancelSearch(searchId) {
+    async cancelSearch(searchId, context) {
       await store.ensureSchema();
-      const cancelled = await store.requestCancel(searchId, now());
+      const cancelled = await store.requestCancel(searchId, now(), context?.ownerId);
       return cancelled ? toSearchResponse(cancelled) : null;
     },
 
-    async resumeSearch(searchId) {
+    async resumeSearch(searchId, context) {
       await store.ensureSchema();
-      const job = await store.get(searchId);
+      const job = await store.get(searchId, context?.ownerId);
 
       if (!job) {
         return null;
@@ -1255,9 +1273,9 @@ export const createVercelSearchServiceWithDeps = (
       return toSearchResponse(job);
     },
 
-    async reverifySearch(searchId) {
+    async reverifySearch(searchId, context) {
       await store.ensureSchema();
-      const job = await store.get(searchId);
+      const job = await store.get(searchId, context?.ownerId);
 
       if (!job) {
         return null;
@@ -1278,7 +1296,12 @@ export const createVercelSearchServiceWithDeps = (
       return toSearchResponse(job);
     },
 
-    async getSearch(searchId) {
+    async getSearch(searchId, context) {
+      const accessible = await store.get(searchId, context?.ownerId);
+      if (!accessible) {
+        return null;
+      }
+
       return advanceSearch(searchId);
     },
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SearchApiError, searchApi } from '../services/search-service';
+import * as supabase from '../lib/supabase';
 
 const originalFetch = globalThis.fetch;
 
@@ -292,6 +293,46 @@ describe('searchApi', () => {
       },
       body: JSON.stringify({
         companyType: 'HVAC Contractors',
+        sourceMode: 'ai',
+        location: { mode: 'timezone', timeZone: 'EST' },
+        count: 50,
+      }),
+    });
+  });
+
+  it('propagates the active Supabase access token without replacing caller headers', async () => {
+    vi.spyOn(supabase, 'getSupabaseClient').mockReturnValue({
+      auth: {
+        getSession: vi.fn().mockResolvedValue({
+          data: { session: { access_token: 'access-token-1' } },
+        }),
+      },
+    } as never);
+    const json = vi.fn().mockResolvedValue(successfulPayload);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json,
+    } as unknown as Response);
+
+    await searchApi.startSearch(
+      {
+        companyType: 'Dentist',
+        sourceMode: 'ai',
+        location: { mode: 'timezone', timeZone: 'EST' },
+        count: 50,
+      },
+      { idempotencyKey: 'auth-search-1' },
+    );
+
+    expect(globalThis.fetch).toHaveBeenCalledWith('/api/search', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'auth-search-1',
+        Authorization: 'Bearer access-token-1',
+      }),
+      body: JSON.stringify({
+        companyType: 'Dentist',
         sourceMode: 'ai',
         location: { mode: 'timezone', timeZone: 'EST' },
         count: 50,
