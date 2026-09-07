@@ -3,6 +3,8 @@ coverage
 dist
 .DS_Store
 .env
+.env.vercel
+.env.production
 client/node_modules
 client/dist
 client/coverage

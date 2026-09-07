@@ -99,6 +99,7 @@ describe('runStatelessAiSearch', () => {
           listingUrl: 'https://linkedin.com/in/ai-phone',
           website: 'https://ai-phone.example',
           mobile: '+1 512 555 0120',
+          contactSourceUrl: 'https://ai-phone.example/contact',
           hasPhone: true,
           verifiedPhone: true,
         }),
@@ -118,6 +119,8 @@ describe('runStatelessAiSearch', () => {
 
     expect(response.leads).toHaveLength(1);
     expect(response.leads[0]?.id).toBe('ai-phone');
+    expect(response.meta.progress.duplicatesRemoved).toBe(0);
+    expect(response.meta.progress.totalCandidates).toBe(2);
     expect(response.meta.totals.withPhone).toBe(1);
     expect(response.meta.providerWarnings).toContainEqual(
       expect.objectContaining({

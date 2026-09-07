@@ -14,6 +14,7 @@ const response: SearchResponse = {
       mobile: '+1 512 555 0101',
       email: 'hello@publicdental.example',
       website: 'https://publicdental.example',
+      contactSourceUrl: 'https://publicdental.example/contact',
       category: 'Dentist',
       city: 'Austin',
       source: 'LinkedIn, Website Crawl',
@@ -67,5 +68,11 @@ describe('buildResearchDossier', () => {
   it('can scope a dossier to one lead', () => {
     expect(buildResearchDossier(response, 'lead-1').leads).toHaveLength(1);
     expect(buildResearchDossier(response, 'missing').leads).toHaveLength(0);
+  });
+
+  it('does not expose a legacy phone whose only evidence identifies a website', () => {
+    const dossier = buildResearchDossier({ ...response, leads: response.leads.map((lead) => ({ ...lead, contactSourceUrl: undefined })) });
+    expect(dossier.leads).toEqual([]);
+    expect(dossier.coverage.found).toBe(0);
   });
 });

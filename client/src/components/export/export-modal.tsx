@@ -29,7 +29,7 @@ export function ExportModal({ leads, open, onClose }: ExportModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-[28px] bg-white p-6 shadow-[0_30px_120px_rgba(15,23,42,0.18)]">
+      <div className="max-h-[90dvh] w-full max-w-xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-[0_30px_120px_rgba(15,23,42,0.18)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
@@ -102,7 +102,7 @@ export function ExportModal({ leads, open, onClose }: ExportModalProps) {
               columns,
             })
               .then(onClose)
-              .catch(() => toast.error('Export failed'))
+              .catch((error: unknown) => toast.error(error instanceof Error ? error.message : 'Export failed'))
               .finally(() => setIsDownloading(false));
           }}
           type="button"

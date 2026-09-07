@@ -1,4 +1,5 @@
 import type { Lead, LeadEvidence, LeadScores } from '../types/lead';
+import { getContactEvidence } from './contact-evidence';
 
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 
@@ -23,8 +24,8 @@ const buildReasons = (lead: Lead, scores: Omit<LeadScores, 'reasons'>) => {
   if (lead.matchSignals?.ownerMatched) reasons.push('Owner or founder signal');
   if (lead.matchSignals?.roleMatched) reasons.push('Decision-maker role signal');
   if (lead.hasWebsite) reasons.push('Public website found');
-  if (lead.verifiedPhone) reasons.push('Phone validated');
-  if (lead.verifiedEmail) reasons.push('Business email validated');
+  if (lead.verifiedPhone) reasons.push('Phone format checked');
+  if (lead.verifiedEmail) reasons.push('Business email format checked');
   if (publicSourceCount(lead) > 1) reasons.push('Multiple public sources');
   if (scores.opportunity > 0) reasons.push('Public opportunity signal');
 
@@ -89,27 +90,13 @@ export const buildLeadEvidence = (lead: Lead): LeadEvidence[] => {
     });
   }
 
-  if (lead.contactSourceUrl?.trim() && lead.verifiedPhone) {
+  for (const contact of getContactEvidence(lead, 'phone')) {
     evidence.push({
-      sourceUrl: lead.contactSourceUrl,
-      sourceName: 'Public website contact page',
-      claim: 'The public business website lists the validated phone number.',
+      sourceUrl: contact.sourceUrl,
+      sourceName: contact.sourceName,
+      claim: `Public source lists phone ${contact.value}; reachability has not been checked.`,
       status: 'confirmed',
-      observedAt,
-    });
-  }
-
-  if (
-    lead.verifiedPhone &&
-    lead.listingUrl?.trim() &&
-    !lead.contactSourceUrl?.trim()
-  ) {
-    evidence.push({
-      sourceUrl: lead.listingUrl,
-      sourceName: lead.source || 'Public listing',
-      claim: 'The public listing publishes the validated phone number.',
-      status: 'confirmed',
-      observedAt,
+      observedAt: contact.observedAt,
     });
   }
 

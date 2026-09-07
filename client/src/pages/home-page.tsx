@@ -31,6 +31,8 @@ import { FiltersPanel } from '../components/results/filters-panel';
 import { LinkedInQualityPanel } from '../components/results/linkedin-quality-panel';
 import { ResultsSummary } from '../components/results/results-summary';
 import { ResultsTable } from '../components/results/results-table';
+import { LeadQualityPanel } from '../components/results/lead-quality-details';
+import { compareLeadQuality, matchesQualityFilter, type QualityFilter } from '../utils/lead-quality';
 import { SearchForm } from '../components/search/search-form';
 import { useAuth } from '../hooks/use-auth';
 import { useSearchHistory } from '../hooks/use-search-history';
@@ -87,6 +89,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     evidenceBackedOnly: false,
   });
   const [linkedinSortMode, setLinkedinSortMode] = useState<LinkedInSortMode>('best-match');
+  const [qualityFilter, setQualityFilter] = useState<QualityFilter>('all');
 
   const auth = useAuth();
   const { rememberSearch } = useSearchHistory(auth.user?.id);
@@ -109,6 +112,7 @@ export function HomePage({ searchApi }: HomePageProps) {
       evidenceBackedOnly: false,
     });
     setLinkedinSortMode('best-match');
+    setQualityFilter('all');
 
     if (sourceMode !== search.sourceMode) {
       recordedSearchId.current = null;
@@ -123,7 +127,7 @@ export function HomePage({ searchApi }: HomePageProps) {
       .filter((lead) => {
         if (filters.hasEmail && !lead.hasEmail) return false;
         // Phone qualification is a product requirement, not an optional view filter.
-        if (!lead.hasPhone) return false;
+        if (!lead.hasPhone || !lead.verifiedPhone || !matchesQualityFilter(lead, qualityFilter)) return false;
         if (filters.hasWebsite && !lead.hasWebsite) return false;
         if (
           activeSourceMode === 'linkedin' &&
@@ -156,6 +160,8 @@ export function HomePage({ searchApi }: HomePageProps) {
         return true;
       })
       .sort((left, right) => {
+        const qualityOrder = compareLeadQuality(left, right);
+        if (qualityOrder) return qualityOrder;
         if (activeSourceMode === 'linkedin') {
           return (
             getLinkedInRankingScore(right, linkedinSortMode) -
@@ -176,6 +182,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     filters.hasWebsite,
     filters.highFitOnly,
     linkedinSortMode,
+    qualityFilter,
     result?.leads,
   ]);
 
@@ -630,7 +637,7 @@ export function HomePage({ searchApi }: HomePageProps) {
         <section className="relative mx-auto flex max-w-7xl justify-center px-4 pb-8 pt-3 md:px-8">
           <motion.div
             animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-[1280px] rounded-[2rem] border border-white/70 bg-white/90 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] backdrop-blur-xl sm:p-5"
+            className="min-w-0 w-full max-w-[1280px] rounded-[2rem] border border-white/70 bg-white/90 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] backdrop-blur-xl sm:p-5"
             initial={{ opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.45, delay: 0.08 }}
           >
@@ -1131,7 +1138,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                 </div>
               </aside>
 
-              <div className="rounded-[2rem] border border-slate-200 bg-white/90 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur sm:p-5">
+              <div className="min-w-0 rounded-[2rem] border border-slate-200 bg-white/90 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur sm:p-5">
                 <div className="mb-5 flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
@@ -1178,6 +1185,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                   </div>
                 </div>
 
+                <LeadQualityPanel leads={result?.leads ?? []} value={qualityFilter} onChange={setQualityFilter} />
                 <ResultsTable
                   emptyStateMessage={emptyStateMessage}
                   leads={tableLeads}
@@ -1207,7 +1215,7 @@ export function HomePage({ searchApi }: HomePageProps) {
       </div>
 
       {result?.meta.status === 'complete' ? (
-        <div className="sticky bottom-4 z-40 mx-auto flex w-[min(100%-2rem,1120px)] items-center justify-between gap-4 rounded-[1.5rem] border border-slate-200 bg-white/95 px-5 py-4 shadow-[0_24px_80px_rgba(15,23,42,0.16)] backdrop-blur-xl">
+        <div className="relative z-40 mx-auto mb-4 flex w-[min(100%-2rem,1120px)] items-center justify-between gap-4 rounded-[1.5rem] border border-slate-200 bg-white/95 px-5 py-4 shadow-[0_24px_80px_rgba(15,23,42,0.16)] backdrop-blur-xl sm:sticky sm:bottom-4">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
               Ready to export

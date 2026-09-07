@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { mkdir } from 'node:fs/promises';
 
 import { webkit } from 'playwright';
 
@@ -59,6 +60,14 @@ const makeLead = (mode, index = 1) => ({
   verifiedPhone: true,
   verifiedEmail: mode === 'ai',
   scrapedAt: new Date().toISOString(),
+  quality: {
+    version: 1, tier: 'supported', score: 60, freshness: 'recent',
+    lastObservedAt: new Date().toISOString(), sourceKinds: ['business_website'],
+    reasons: ['Valid US phone with public source evidence'],
+    gaps: ['Personal ownership is unconfirmed'], nextAction: 'Review the public contact page',
+    phone: { assessedValue: '+1 512 555 0101', formatValid: true, publiclyObserved: true, association: 'business', sourceUrls: ['https://public-business.example/contact'], lineType: 'unknown', reachability: 'not_checked' },
+    email: { formatValid: mode === 'ai', publiclyObserved: mode === 'ai', sourceUrls: mode === 'ai' ? ['https://public-business.example/contact'] : [], mailbox: 'not_checked' },
+  },
   evidence: [
     {
       sourceUrl: 'https://public-business.example/contact',
@@ -159,7 +168,22 @@ const run = async () => {
 
   const browser = await webkit.launch({ headless: true });
   const page = await browser.newPage();
+  const browserErrors = [];
+  page.on('pageerror', (error) => browserErrors.push(error.message));
+  const inspectQuality = async (mode) => {
+    await page.getByRole('button', { name: `Inspect ${mode} Public Lead`, exact: true }).click();
+    await page.getByRole('region', { name: `Contact evidence for ${mode} Public Lead` }).waitFor();
+    await page.getByText('Line type, reachability, email delivery', { exact: true }).waitFor();
+    assert(await page.getByRole('link', { name: 'Phone source 1', exact: true }).getAttribute('href') === 'https://public-business.example/contact', 'Phone evidence URL was not retained');
+    await page.getByRole('button', { name: 'Needs review 0', exact: true }).click();
+    assert(await page.getByRole('button', { name: new RegExp(`^(Inspect|Hide) ${mode} Public Lead$`) }).count() === 0, 'Quality filter did not hide the row');
+    await page.getByRole('button', { name: 'All public-phone leads 1', exact: true }).click();
+  };
   let linkedinFailureNext = false;
+
+  await page.route('**/api/health', (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"status":"ok"}',
+  }));
 
   await page.route('**/api/search', async (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}');
@@ -180,15 +204,22 @@ const run = async () => {
     await fillSearch(page, 'gmb', 'cityState');
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
     assert(await page.getByText('gmb Public Lead').count() === 1, 'GMB lead was not rendered');
+    await inspectQuality('gmb');
 
     await fillSearch(page, 'linkedin', 'timezone');
     await page.getByRole('heading', { name: 'Public LinkedIn discovery complete' }).waitFor();
     assert(await page.getByText('linkedin Public Lead').count() === 1, 'LinkedIn lead was not rendered');
+    await inspectQuality('linkedin');
 
     await fillSearch(page, 'ai', 'cityState');
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
     assert(await page.getByText('AI interpretation preview').count() === 1, 'AI preview is missing');
     assert(await page.getByText('Public Business Listings').count() === 1, 'AI public listing coverage is missing');
+    await inspectQuality('ai');
+    if (process.env.E2E_ARTIFACT_DIR) {
+      await mkdir(process.env.E2E_ARTIFACT_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(process.env.E2E_ARTIFACT_DIR, 'quality-desktop.png'), fullPage: true });
+    }
 
     await page.getByRole('button', { name: /download excel/i }).click();
     const downloadPromise = page.waitForEvent('download');
@@ -200,6 +231,27 @@ const run = async () => {
     await page.getByRole('heading', { name: 'Search failed' }).waitFor();
     await page.getByRole('button', { name: 'Try public search again' }).click();
     await page.getByRole('heading', { name: 'Public LinkedIn discovery complete' }).waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await fillSearch(page, 'ai', 'cityState');
+    await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
+    await inspectQuality('ai');
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'Mobile page overflows horizontally');
+    const evidenceBox = await page.getByRole('region', { name: 'Contact evidence for ai Public Lead' }).boundingBox();
+    assert(evidenceBox && evidenceBox.width < 390, 'Contact evidence panel is clipped on mobile');
+    const modeBox = await page.getByRole('button', { name: /^AI mode Free public discovery/i }).boundingBox();
+    assert(modeBox && modeBox.x + modeBox.width <= 390, 'Source selector is clipped on mobile');
+    if (process.env.E2E_ARTIFACT_DIR) {
+      await page.screenshot({ path: path.join(process.env.E2E_ARTIFACT_DIR, 'quality-mobile.png'), fullPage: true });
+      await page.getByRole('region', { name: 'Contact evidence for ai Public Lead' }).screenshot({ path: path.join(process.env.E2E_ARTIFACT_DIR, 'quality-mobile-evidence.png') });
+    }
+    assert(browserErrors.length === 0, `Browser errors: ${browserErrors.join('; ')}`);
+  } catch (error) {
+    if (process.env.E2E_ARTIFACT_DIR) {
+      await mkdir(process.env.E2E_ARTIFACT_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(process.env.E2E_ARTIFACT_DIR, 'quality-failure.png'), fullPage: true });
+    }
+    console.error((await page.locator('body').innerText()).slice(-4000));
+    throw error;
   } finally {
     await browser.close();
   }
@@ -207,7 +259,7 @@ const run = async () => {
 
 try {
   await run();
-  console.log('Browser acceptance flow passed for GMB, LinkedIn, AI mode, export, and retry recovery.');
+  console.log('Mocked browser acceptance passed: three modes, contact evidence, quality filters, export, retry, mobile layout, and no page errors. This does not measure live provider yield.');
 } finally {
   if (devServer && !devServer.killed) {
     devServer.kill('SIGTERM');

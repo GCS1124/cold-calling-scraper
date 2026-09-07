@@ -1,3 +1,5 @@
+import type { ContactEvidence, LeadQualityAssessment } from '../../../shared/lead-quality';
+
 export type PublicSocialLink = {
   platform:
     | 'Facebook'
@@ -55,6 +57,8 @@ export type Lead = {
   website?: string;
   /** Public business website used to verify an email or phone number. */
   contactSourceUrl?: string;
+  contactEvidence?: ContactEvidence[];
+  quality?: LeadQualityAssessment;
   /** Social links published by the lead's public business website. */
   publicSocialLinks?: PublicSocialLink[];
   /** Bounded public search-result evidence used for manual verification. */

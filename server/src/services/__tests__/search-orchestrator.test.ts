@@ -296,6 +296,7 @@ describe('createSearchService', () => {
           {
             ...sampleLead,
             id: 'linkedin-lead-1',
+            contactSourceUrl: 'https://markdental.com/contact',
             name: 'Mark Sweeney',
             source: 'LinkedIn',
             website: '',
@@ -410,6 +411,7 @@ describe('createSearchService', () => {
         mobile: '+1 512 555 0199',
         email: 'hello@markdental.com',
         website: 'https://markdental.com',
+        contactEvidence: [{ field: 'phone', value: '+15125550199', sourceUrl: 'https://markdental.com/contact', sourceName: 'Business website', sourceKind: 'business_website', association: 'business', observedAt: lead.scrapedAt }],
         hasEmail: true,
         hasPhone: true,
         hasWebsite: true,
@@ -481,6 +483,7 @@ describe('createSearchService', () => {
           {
             ...sampleLead,
             id: 'linkedin-enrichment-failure-lead',
+            contactSourceUrl: 'https://markdental.com/contact',
             name: 'Mark Sweeney',
             source: 'LinkedIn',
             listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',

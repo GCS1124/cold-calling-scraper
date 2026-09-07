@@ -67,6 +67,7 @@ describe('createSearchJobStore', () => {
       mobile: `+1512555${String(index).padStart(4, '0')}`,
       email: '',
       website: `https://dentist-${index}.example.com`,
+      listingUrl: `https://www.google.com/maps/place/dentist-${index}`,
       address: `${index} Congress Ave, Austin, TX`,
       category: 'Dentist',
       city: 'Austin, TX',
@@ -112,6 +113,17 @@ describe('createSearchJobStore', () => {
     expect(response.meta.totals.total).toBe(50);
     expect(response.meta.progress.foundCount).toBe(50);
     expect(response.meta.progress.totalCandidates).toBe(62);
+    const inProgress = toSearchResponse({ ...job, status: 'discovering', leads: [
+      { ...leads[0]!, contactEvidence: [] }, leads[1]!,
+    ] });
+    expect(inProgress.leads).toHaveLength(1);
+    expect(inProgress.meta.progress.foundCount).toBe(1);
+    expect(inProgress.meta.progress.totalCandidates).toBe(62);
+    expect(job.leads).toHaveLength(62);
+    const emptyCompletion = toSearchResponse({ ...job, leads: [{ ...leads[0]!, contactEvidence: [] }] });
+    expect(emptyCompletion.meta.status).toBe('failed');
+    expect(emptyCompletion.meta.progress.phoneExcludedCount).toBe(1);
+    expect(emptyCompletion.meta.providerWarnings.some((warning) => warning.providerId === 'no-usable-results')).toBe(true);
   });
 
   it('allows only one active processing claim for a job', async () => {

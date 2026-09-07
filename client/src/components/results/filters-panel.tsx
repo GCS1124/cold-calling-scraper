@@ -44,7 +44,7 @@ export function FiltersPanel({ filters, onChange, sourceMode }: FiltersPanelProp
             type="checkbox"
           />
           <span>
-            <span className="block font-semibold text-slate-900">Mobile number required</span>
+            <span className="block font-semibold text-slate-900">Public phone required</span>
             <span className="block text-xs leading-5 text-slate-500">
               Validated public phone/mobile only
             </span>

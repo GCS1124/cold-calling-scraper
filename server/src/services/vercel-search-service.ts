@@ -210,7 +210,7 @@ const finalizeLeads = (job: SearchJobRecord) => {
   if (phoneRequirement.warning) {
     appendWarningOnce(job, phoneRequirement.warning);
   }
-  job.leads = rankDiscoveryCandidates(phoneRequirement.leads).slice(0, job.request.count);
+  job.leads = phoneRequirement.leads.slice(0, job.request.count);
   refreshProgress(job);
 };
 

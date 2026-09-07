@@ -9,6 +9,8 @@ import type {
   SearchStatus,
 } from '../types/search';
 import { deduplicateLeads } from './lead-deduplication';
+import { enforcePhoneRequirement } from './phone-requirement';
+import { noUsableResultsWarning } from './search-finalization';
 import { persistNormalizedResearch } from './research-normalizer';
 import type { NormalizedUsLocation } from './us-location';
 
@@ -843,13 +845,21 @@ const countLeadTotals = (leads: Lead[]) => {
 };
 
 export const toSearchResponse = (job: SearchJobRecord): SearchResponse => {
-  const leads = deduplicateLeads(job.leads).slice(0, job.request.count);
-  const providerWarnings = dedupeWarnings(job.providerWarnings).filter(
+  const qualification = enforcePhoneRequirement(deduplicateLeads(job.leads), job.request);
+  const leads = qualification.leads.slice(0, job.request.count);
+  const emptyCompletion = job.status === 'complete' && !leads.length;
+  const providerWarnings = dedupeWarnings([
+    ...job.providerWarnings,
+    ...(qualification.warning ? [qualification.warning] : []),
+    ...(emptyCompletion ? [noUsableResultsWarning()] : []),
+  ]).filter(
     (warning) => !isHiddenWarning(warning),
   );
   const progress = {
     ...job.progress,
     foundCount: leads.length,
+    phoneExcludedCount: Math.max(job.progress.phoneExcludedCount ?? 0, qualification.excludedCount),
+    currentSource: emptyCompletion ? 'Failed' : job.progress.currentSource,
     estimatedRemaining: Math.max(0, job.request.count - leads.length),
   };
 
@@ -861,7 +871,7 @@ export const toSearchResponse = (job: SearchJobRecord): SearchResponse => {
       locationLabel: job.locationLabel,
       researchDepth: job.request.researchDepth ?? 'verified',
       researchBrief: job.request.researchBrief,
-      status: job.status,
+      status: emptyCompletion ? 'failed' : job.status,
       progress,
       totals: countLeadTotals(leads),
       providerWarnings,

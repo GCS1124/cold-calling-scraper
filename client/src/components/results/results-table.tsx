@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import { Fragment, useState } from 'react';
 
 import type { Lead } from '../../types/lead';
+import { LeadQualityBadge, LeadQualityDetails } from './lead-quality-details';
 import {
   getLinkedInQualityTier,
   getLinkedInReadinessLabel,
@@ -22,6 +23,7 @@ type ResultsTableProps = {
 type ContactCellProps = {
   value?: string;
   verified: boolean;
+  publiclyObserved?: boolean;
 };
 
 function isPublicLinkedInLead(lead: Lead) {
@@ -45,7 +47,7 @@ const queryFamilyLabels: Record<string, string> = {
   'role-led': 'Role-led',
 };
 
-function ContactCell({ value, verified }: ContactCellProps) {
+function ContactCell({ value, verified, publiclyObserved }: ContactCellProps) {
   if (!value) {
     return <>—</>;
   }
@@ -56,9 +58,9 @@ function ContactCell({ value, verified }: ContactCellProps) {
       {verified ? (
         <span
           className="mt-1 block text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-700"
-          title="Collected from a public result or listing and passed contact validation checks."
+          title="Public observation and format checks do not establish reachability, personal ownership, or email delivery."
         >
-          Publicly validated
+          {publiclyObserved ? 'Publicly listed' : 'Format checked'}
         </span>
       ) : null}
     </div>
@@ -90,7 +92,7 @@ export function ResultsTable({
       : 'Open a company name to inspect details before export.';
 
   return (
-    <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
+    <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.08)] [container-type:inline-size]">
       <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
@@ -191,6 +193,7 @@ export function ResultsTable({
                           {lead.headline}
                         </div>
                       ) : null}
+                      <div><LeadQualityBadge lead={lead} /></div>
                       {isLinkedInLead ? (
                         <>
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold">
@@ -198,7 +201,7 @@ export function ResultsTable({
                               Public match
                             </span>
                             <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
-                              {matchLabel} · {lead.confidence}%
+                              {matchLabel} · {lead.confidence}/100
                             </span>
                             {qualityTier ? (
                               <span
@@ -280,10 +283,10 @@ export function ResultsTable({
                       ) : null}
                     </td>
                     <td className="px-4 py-4">
-                      <ContactCell verified={lead.verifiedPhone} value={lead.mobile} />
+                      <ContactCell publiclyObserved={lead.quality?.phone.publiclyObserved} verified={lead.verifiedPhone} value={lead.mobile} />
                     </td>
                     <td className="px-4 py-4">
-                      <ContactCell verified={lead.verifiedEmail} value={lead.email} />
+                      <ContactCell publiclyObserved={lead.quality?.email.publiclyObserved} verified={lead.verifiedEmail} value={lead.email} />
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex min-w-[160px] flex-col gap-1.5">
@@ -370,6 +373,8 @@ export function ResultsTable({
                   {isExpanded ? (
                     <tr className="border-t border-slate-100 bg-slate-50/70" id={`lead-details-${lead.id}`}>
                       <td className="px-4 py-5" colSpan={8}>
+                        <div className="sticky left-4 w-[calc(100cqw-2rem)]">
+                        <LeadQualityDetails lead={lead} />
                         <div className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
                           <div>
                             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
@@ -377,7 +382,7 @@ export function ResultsTable({
                             </p>
                             <p className="mt-2 text-sm leading-5 text-slate-600">
                               {isLinkedInLead
-                                ? 'Profile identity is public; contact fields are kept only when openly listed on a business website.'
+                                ? 'Profile identity is public; contact fields come from public business sources. A business line does not establish a personal number.'
                                 : 'Review the available business details before adding this lead to your export.'}
                             </p>
                             {lead.contactSourceUrl ? (
@@ -502,7 +507,7 @@ export function ResultsTable({
                                     <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
                                       {label}
                                     </p>
-                                    <p className="mt-1 text-lg font-black text-slate-950">{value}%</p>
+                                    <p className="mt-1 text-lg font-black text-slate-950">{value}/100</p>
                                   </div>
                                 ))}
                               </div>
@@ -546,7 +551,7 @@ export function ResultsTable({
                             ) : null}
                             <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
                               <span className="rounded-full bg-white px-3 py-2 text-slate-700">
-                                Confidence {lead.confidence}%
+                                Match score {lead.confidence}/100
                               </span>
                               {isLinkedInLead ? (
                                 <span className="rounded-full bg-slate-950 px-3 py-2 text-white">
@@ -604,6 +609,7 @@ export function ResultsTable({
                               Source: {lead.source}. Verify the linked website or public profile before outreach.
                             </p>
                           </div>
+                        </div>
                         </div>
                       </td>
                     </tr>

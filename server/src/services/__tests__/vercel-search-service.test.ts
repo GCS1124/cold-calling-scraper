@@ -347,6 +347,7 @@ describe('createVercelSearchServiceWithDeps', () => {
         leads: [
           makeLead({
             id: 'linkedin-lead-1',
+            contactSourceUrl: 'https://markdental.com/contact',
             name: 'Mark Sweeney',
             source: 'LinkedIn',
             website: '',
@@ -563,6 +564,7 @@ describe('createVercelSearchServiceWithDeps', () => {
         mobile: '+1 512 555 0199',
         email: 'hello@markdental.com',
         website: 'https://markdental.com',
+        contactEvidence: [{ field: 'phone', value: '+15125550199', sourceUrl: 'https://markdental.com/contact', sourceName: 'Business website', sourceKind: 'business_website', association: 'business', observedAt: lead.scrapedAt }],
         hasEmail: true,
         hasPhone: true,
         hasWebsite: true,
@@ -646,6 +648,7 @@ describe('createVercelSearchServiceWithDeps', () => {
             mobile: `+1 512 555 ${String(1900 + Number(lead.id.split('-').pop())).padStart(4, '0')}`,
             email: `hello-${lead.id}@markdental.com`,
             website: `https://markdental-${lead.id}.com`,
+            contactEvidence: [{ field: 'phone', value: `+1512555${1900 + Number(lead.id.split('-').pop())}`, sourceUrl: `https://markdental-${lead.id}.com/contact`, sourceName: 'Business website', sourceKind: 'business_website', association: 'business', observedAt: lead.scrapedAt }],
             hasEmail: true,
             hasPhone: true,
             hasWebsite: true,

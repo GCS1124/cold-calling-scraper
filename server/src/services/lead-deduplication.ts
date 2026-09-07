@@ -1,4 +1,6 @@
 import type { EmploymentStatus, Lead, PublicSocialLink } from '../types/lead';
+import { collectContactEvidence, getContactEvidence, mergeContactEvidence, normalizeContactPhone } from './contact-evidence';
+import { withLeadQuality } from './lead-quality';
 
 const companySuffixPattern =
   /\b(private limited|pvt ltd|pvt\. ltd\.|private ltd|ltd|limited|llc|inc|inc\.|incorporated|corp|corp\.|corporation|co|co\.)\b/gi;
@@ -234,8 +236,10 @@ const normalizeListingUrl = (value?: string) => {
   try {
     const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
     url.hash = '';
-    if (url.hostname.endsWith('linkedin.com')) {
+    if (/(?:^|\.)linkedin\.com$/i.test(url.hostname)) {
       url.hostname = 'linkedin.com';
+      url.protocol = 'https:';
+      url.search = '';
     }
     const pathname =
       url.pathname !== '/' && url.pathname.endsWith('/')
@@ -260,6 +264,9 @@ const toPhoneKey = (value?: string) => {
 };
 
 const buildIdentityKeys = (lead: Lead) => {
+  if (isLinkedInProfileListing(lead.listingUrl)) {
+    return [`profile:${normalizeListingUrl(lead.listingUrl)}`];
+  }
   const keys: string[] = [];
   const domain = toDomain(lead.website);
   const phone = toPhoneKey(lead.mobile);
@@ -288,6 +295,31 @@ const buildIdentityKeys = (lead: Lead) => {
   return keys;
 };
 
+const compatibleBusinesses = (left: Lead, right: Lead) => {
+  if (isLinkedInProfileListing(left.listingUrl) || isLinkedInProfileListing(right.listingUrl)) {
+    return normalizeListingUrl(left.listingUrl) === normalizeListingUrl(right.listingUrl);
+  }
+  if (left.listingUrl && right.listingUrl &&
+    normalizeListingUrl(left.listingUrl) === normalizeListingUrl(right.listingUrl)) return true;
+  for (const field of ['stateCode', 'city'] as const) {
+    if (left[field] && right[field] && normalizeText(left[field]) !== normalizeText(right[field])) return false;
+  }
+  // Shared domains and switchboards do not identify an individual branch.
+  const street = (lead: Lead) => /^\s*\d+\b/.test(lead.address ?? '')
+    ? normalizeText(lead.address?.split(',')[0]).replace(/[.]/g, '')
+      .replace(/\bstreet\b/g, 'st').replace(/\bavenue\b/g, 'ave').replace(/\broad\b/g, 'rd')
+    : '';
+  if (street(left) && street(right) && street(left) !== street(right)) return false;
+  const sameName = canonicalizeName(left.name) === canonicalizeName(right.name);
+  const sameDomain = toDomain(left.website) && toDomain(left.website) === toDomain(right.website);
+  const leftName = canonicalizeName(left.name);
+  const rightName = canonicalizeName(right.name);
+  const relatedName = Math.min(leftName.split(' ').length, rightName.split(' ').length) >= 2 &&
+    (leftName.startsWith(`${rightName} `) || rightName.startsWith(`${leftName} `));
+  const sameStreet = street(left) && normalizeText(left.address) === normalizeText(right.address);
+  return Boolean(sameName || sameDomain || (relatedName && sameStreet));
+};
+
 const mergeGroup = (group: Lead[]) => {
   const sorted = [...group].sort((left, right) => right.confidence - left.confidence);
   const shortestNamed = [...group].sort((left, right) => left.name.length - right.name.length)[0] ?? sorted[0];
@@ -301,16 +333,21 @@ const mergeGroup = (group: Lead[]) => {
       ),
     ),
   ];
+  const phoneLead = sorted.find((lead) => normalizeContactPhone(lead.mobile) && getContactEvidence(lead, 'phone').length)
+    ?? sorted.find((lead) => normalizeContactPhone(lead.mobile));
+  const emailLead = sorted.find((lead) => lead.hasEmail && getContactEvidence(lead, 'email').length)
+    ?? sorted.find((lead) => lead.hasEmail && lead.email);
 
-  return {
+  return withLeadQuality({
     ...sorted[0],
     name: shortestNamed.name,
     headline: pickValue(...sorted.map((lead) => lead.headline)),
     employmentStatus: mergeEmploymentStatus(group),
-    mobile: pickValue(...sorted.map((lead) => lead.mobile)),
-    email: pickValue(...sorted.map((lead) => lead.email)),
+    mobile: phoneLead?.mobile ?? '',
+    email: emailLead?.email ?? '',
     website: pickValue(...sorted.map((lead) => lead.website)),
-    contactSourceUrl: pickValue(...sorted.map((lead) => lead.contactSourceUrl)),
+    contactSourceUrl: phoneLead ? getContactEvidence(phoneLead, 'phone')[0]?.sourceUrl : undefined,
+    contactEvidence: mergeContactEvidence(group.flatMap(collectContactEvidence)),
     publicSocialLinks: mergePublicSocialLinks(group),
     listingUrl: pickValue(...sorted.map((lead) => lead.listingUrl)),
     address: pickValue(...sorted.map((lead) => lead.address)),
@@ -329,17 +366,17 @@ const mergeGroup = (group: Lead[]) => {
     ],
     scores: sorted[0]?.scores,
     matchSignals: mergeMatchSignals(group),
-    hasEmail: sorted.some((lead) => lead.hasEmail),
-    hasPhone: sorted.some((lead) => lead.hasPhone),
+    hasEmail: Boolean(emailLead?.hasEmail),
+    hasPhone: Boolean(phoneLead?.hasPhone),
     hasWebsite: sorted.some((lead) => lead.hasWebsite),
-    verifiedEmail: sorted.some((lead) => lead.verifiedEmail),
-    verifiedPhone: sorted.some((lead) => lead.verifiedPhone),
+    verifiedEmail: Boolean(emailLead?.verifiedEmail),
+    verifiedPhone: Boolean(phoneLead?.verifiedPhone),
     rejectionReason:
       sorted.find((lead) => lead.rejectionReason === 'blocked_website')?.rejectionReason ??
       sorted.find((lead) => lead.rejectionReason === 'blocked_google')?.rejectionReason ??
       sorted.find((lead) => lead.rejectionReason)?.rejectionReason,
     crawlAttempts: Math.max(...group.map((lead) => lead.crawlAttempts ?? 0)),
-  };
+  });
 };
 
 export const deduplicateLeads = (leads: Lead[]) => {
@@ -348,6 +385,7 @@ export const deduplicateLeads = (leads: Lead[]) => {
   }
 
   const parent = leads.map((_, index) => index);
+  const members = leads.map((lead) => [lead]);
 
   const find = (index: number): number => {
     if (parent[index] !== index) {
@@ -364,27 +402,26 @@ export const deduplicateLeads = (leads: Lead[]) => {
     if (leftRoot === rightRoot) {
       return;
     }
+    if (!members[leftRoot].every((leftLead) => members[rightRoot].every((rightLead) =>
+      compatibleBusinesses(leftLead, rightLead)))) return;
 
     if (leftRoot < rightRoot) {
       parent[rightRoot] = leftRoot;
+      members[leftRoot].push(...members[rightRoot]);
       return;
     }
 
     parent[leftRoot] = rightRoot;
+    members[rightRoot].push(...members[leftRoot]);
   };
 
-  const firstSeenByKey = new Map<string, number>();
+  const seenByKey = new Map<string, number[]>();
 
   leads.forEach((lead, index) => {
     for (const key of buildIdentityKeys(lead)) {
-      const existingIndex = firstSeenByKey.get(key);
-
-      if (existingIndex === undefined) {
-        firstSeenByKey.set(key, index);
-        continue;
-      }
-
-      union(index, existingIndex);
+      const existingIndices = seenByKey.get(key) ?? [];
+      for (const existingIndex of existingIndices) union(index, existingIndex);
+      seenByKey.set(key, [...existingIndices, index]);
     }
   });
 

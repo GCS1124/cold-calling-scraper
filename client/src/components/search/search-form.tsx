@@ -50,10 +50,10 @@ export function SearchForm({
 
   return (
     <form
-      className="grid gap-5 rounded-[28px] border border-white/50 bg-white/82 p-5 shadow-[0_32px_120px_rgba(15,23,42,0.12)] backdrop-blur md:grid-cols-[1.1fr_0.85fr] md:p-7"
+      className="grid min-w-0 grid-cols-1 gap-5 rounded-[28px] border border-white/50 bg-white/82 p-5 shadow-[0_32px_120px_rgba(15,23,42,0.12)] backdrop-blur md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.85fr)] md:p-7 [&>*]:min-w-0"
       onSubmit={handleSubmit}
     >
-      <fieldset className="space-y-3 text-sm font-semibold text-slate-900 md:col-span-2">
+      <fieldset className="min-w-0 space-y-3 text-sm font-semibold text-slate-900 md:col-span-2">
         <legend>Lead Source</legend>
 
         <div className="inline-flex w-full rounded-2xl bg-slate-100 p-1">
@@ -62,7 +62,7 @@ export function SearchForm({
 
             return (
               <button
-                className={`flex flex-1 flex-col items-center justify-center rounded-2xl px-3 py-3 text-center transition ${
+                className={`flex min-w-0 flex-1 flex-col items-center justify-center rounded-2xl px-1.5 py-3 text-center transition sm:px-3 ${
                   active
                     ? 'bg-white text-slate-950 shadow-sm'
                     : 'text-slate-500 hover:text-slate-800'
@@ -80,7 +80,7 @@ export function SearchForm({
                 type="button"
                 aria-pressed={active}
               >
-                <span className="flex items-center gap-2 text-sm font-semibold">
+                <span className="flex items-center gap-1 text-xs font-semibold sm:gap-2 sm:text-sm">
                   {option.code === 'gmb' ? (
                     <Building2 className="h-4 w-4" />
                   ) : option.code === 'ai' ? (
@@ -100,17 +100,17 @@ export function SearchForm({
 
         <p className="text-xs font-normal leading-5 text-slate-500">
           {isLinkedInMode
-            ? `${sourceModeLabelsByCode.linkedin} searches public profiles only. Phone numbers and emails are collected only from public business websites.`
+            ? `${sourceModeLabelsByCode.linkedin} searches public profiles only. Phone numbers and emails come from public business websites, listings, or attributed search snippets.`
             : isAiMode
               ? 'AI mode searches public sources only: no paid databases, including commercial lead databases, private profiles, login sessions, or contact-reveal credits are used. Optional Gemini wording assistance is off by default.'
               : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
         </p>
 
         <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-xs font-normal leading-5 text-slate-600">
-          <p className="font-bold text-blue-900">Mobile number required</p>
+          <p className="font-bold text-blue-900">Public phone required</p>
           <p className="mt-1">
-            Only leads with a validated phone/mobile number publicly listed by the business are
-            included. Private or Premium contact data is never accessed.
+            Only leads with a valid US phone and public business source evidence are included.
+            Line type and reachability remain unconfirmed. Private or Premium contact data is never accessed.
           </p>
         </div>
 

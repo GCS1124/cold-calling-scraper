@@ -5,6 +5,7 @@ import type { Lead, PublicSocialLink } from '../types/lead';
 import type { ProviderWarning } from '../types/search';
 import { httpClient } from '../utils/http-client';
 import { isPublicHttpUrl } from '../utils/public-url';
+import { collectContactEvidence, mergeContactEvidence, normalizeContactPhone } from './contact-evidence';
 
 export { isPublicHttpUrl } from '../utils/public-url';
 
@@ -902,6 +903,7 @@ export const enrichLeadFromWebsite = async (
   ];
 
   const visited = new Set<string>();
+  const contactEvidence = collectContactEvidence(lead);
   const emails = new Set<string>();
   const phones = new Set<string>();
   const addresses = new Set<string>();
@@ -952,6 +954,7 @@ export const enrichLeadFromWebsite = async (
 
             if (
               isPublicHttpUrl(redirectUrl) &&
+              sameHost(origin, redirectUrl) &&
               !isSocialHost(redirectUrl.hostname) &&
               !isLikelyAssetUrl(redirectUrl)
             ) {
@@ -993,6 +996,13 @@ export const enrichLeadFromWebsite = async (
       }
 
       const extracted = extractContactDetailsFromHtml(html, currentUrl);
+      const observedAt = new Date().toISOString();
+      for (const [field, values] of [['phone', extracted.phones], ['email', extracted.emails]] as const) {
+        for (const value of values) contactEvidence.push({
+          field, value, sourceUrl: currentUrl, sourceName: 'Public business website',
+          sourceKind: 'business_website', observedAt, association: 'business',
+        });
+      }
 
       extracted.emails.forEach((email) => emails.add(email));
       extracted.phones.forEach((phone) => phones.add(phone));
@@ -1044,8 +1054,9 @@ export const enrichLeadFromWebsite = async (
     ...new Set([...(lead.opportunitySignals ?? []), ...opportunitySignals]),
   ];
 
-  const email = shouldKeepExistingValue(lead.email) ? lead.email ?? '' : crawledEmail;
-  const phone = shouldKeepExistingValue(lead.mobile) ? lead.mobile ?? '' : crawledPhone;
+  const email = normalizeEmail(lead.email ?? '') || crawledEmail;
+  const phone = normalizeContactPhone(lead.mobile) ? lead.mobile ?? '' : crawledPhone;
+  const mergedContactEvidence = mergeContactEvidence(contactEvidence);
   const address = shouldKeepExistingValue(lead.address) ? lead.address ?? '' : crawledAddress;
 
   const improved = Boolean(
@@ -1085,6 +1096,9 @@ export const enrichLeadFromWebsite = async (
       ...lead,
       email,
       mobile: phone,
+      contactEvidence: mergedContactEvidence,
+      contactSourceUrl: mergedContactEvidence.find((item) =>
+        item.field === 'phone' && item.value === normalizeContactPhone(phone))?.sourceUrl,
       address,
       website,
       publicSocialLinks,

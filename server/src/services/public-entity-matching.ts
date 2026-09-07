@@ -1,5 +1,6 @@
 import type { Lead, PublicSocialLink } from '../types/lead';
 import { enrichLead } from './lead-validation';
+import { collectContactEvidence, getContactEvidence, mergeContactEvidence } from './contact-evidence';
 
 const companySuffixPattern =
   /\b(private limited|pvt ltd|pvt\. ltd\.?|limited|ltd\.?|llc|inc\.?|incorporated|corp\.?|corporation|company|co\.?)\b/gi;
@@ -54,6 +55,8 @@ const sameLocation = (person: Lead, listing: Lead) => {
 };
 
 const hasStrongOrganizationMatch = (person: Lead, listing: Lead) => {
+  if (['former', 'conflicting'].includes(person.employmentStatus ?? '')) return false;
+  if (person.stateCode && listing.stateCode && person.stateCode !== listing.stateCode) return false;
   if (!sameLocation(person, listing)) {
     return false;
   }
@@ -98,12 +101,16 @@ const mergeSocialLinks = (person: Lead, listing: Lead): PublicSocialLink[] => {
 const mergePersonWithListing = (person: Lead, listing: Lead) =>
   enrichLead({
     ...person,
-    mobile: person.mobile || listing.mobile,
+    mobile: getContactEvidence(person, 'phone').length ? person.mobile : listing.mobile,
     email: person.email || listing.email,
     website: person.website || listing.website,
     contactSourceUrl:
-      person.contactSourceUrl ||
-      ((listing.mobile || listing.email) && listing.listingUrl ? listing.listingUrl : undefined),
+      (getContactEvidence(person, 'phone').length ? getContactEvidence(person, 'phone')
+        : getContactEvidence(listing, 'phone'))[0]?.sourceUrl,
+    contactEvidence: mergeContactEvidence([
+      ...collectContactEvidence(person),
+      ...collectContactEvidence(listing).map((item) => ({ ...item, association: 'business' as const })),
+    ]),
     publicSocialLinks: mergeSocialLinks(person, listing),
     address: person.address || listing.address,
     state: person.state || listing.state,
@@ -136,7 +143,7 @@ const matchLinkedInPeopleToPublicListings = (
   const usedListingIds = new Set<string>();
   const mergedPeople = linkedinLeads.map((person) => {
     const matches = publicListingLeads.filter(
-      (listing) => !usedListingIds.has(listing.id) && hasStrongOrganizationMatch(person, listing),
+      (listing) => hasStrongOrganizationMatch(person, listing),
     );
 
     if (matches.length !== 1) {

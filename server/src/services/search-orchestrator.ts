@@ -201,20 +201,35 @@ const createProgress = (requestedCount: number): SearchProgress => ({
   estimatedRemaining: requestedCount,
 });
 
-const toResponse = (job: SearchJob): SearchResponse => ({
-  searchId: job.searchId,
-  leads: job.leads,
-  meta: {
-    query: job.query,
-    locationLabel: job.locationLabel,
-    researchDepth: job.request.researchDepth ?? 'verified',
-    researchBrief: job.request.researchBrief,
-    status: job.status,
-    progress: job.progress,
-    totals: computeTotals(job.leads),
-    providerWarnings: job.providerWarnings,
-  },
-});
+const toResponse = (job: SearchJob): SearchResponse => {
+  const qualification = enforcePhoneRequirement(deduplicateLeads(job.leads), job.request);
+  const leads = qualification.leads.slice(0, job.request.count);
+  const emptyCompletion = job.status === 'complete' && !leads.length;
+  return {
+    searchId: job.searchId,
+    leads,
+    meta: {
+      query: job.query,
+      locationLabel: job.locationLabel,
+      researchDepth: job.request.researchDepth ?? 'verified',
+      researchBrief: job.request.researchBrief,
+      status: emptyCompletion ? 'failed' : job.status,
+      progress: {
+        ...job.progress,
+        foundCount: leads.length,
+        phoneExcludedCount: Math.max(job.progress.phoneExcludedCount ?? 0, qualification.excludedCount),
+        currentSource: emptyCompletion ? 'Failed' : job.progress.currentSource,
+        estimatedRemaining: Math.max(0, job.request.count - leads.length),
+      },
+      totals: computeTotals(leads),
+      providerWarnings: [
+        ...job.providerWarnings,
+        ...(qualification.warning ? [qualification.warning] : []),
+        ...(emptyCompletion ? [noUsableResultsWarning()] : []),
+      ],
+    },
+  };
+};
 
 const cleanupExpiredJobs = (jobs: Map<string, SearchJob>, now: () => number) => {
   const current = now();
@@ -269,7 +284,7 @@ const finalizeLeads = (job: SearchJob) => {
   if (phoneRequirement.warning) {
     appendUniqueWarnings(job, [phoneRequirement.warning]);
   }
-  job.leads = rankDiscoveryCandidates(phoneRequirement.leads).slice(0, job.request.count);
+  job.leads = phoneRequirement.leads.slice(0, job.request.count);
   refreshProgress(job);
 };
 

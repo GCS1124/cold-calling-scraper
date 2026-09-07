@@ -511,10 +511,10 @@ describe('App', () => {
     expect(normalizedText(container)).toContain('2 visible leads');
     expect(normalizedText(container)).toContain('Eastern Time');
     expect(normalizedText(container)).toContain('Discovery complete');
-    expect(normalizedText(container)).toContain('Mobile number required');
-    expect(getCheckboxByLabel(container, /mobile number required/i).checked).toBe(true);
-    expect(getCheckboxByLabel(container, /mobile number required/i).disabled).toBe(true);
-    await waitForText(container, /Publicly validated/i, 1000);
+    expect(normalizedText(container)).toContain('Public phone required');
+    expect(getCheckboxByLabel(container, /public phone required/i).checked).toBe(true);
+    expect(getCheckboxByLabel(container, /public phone required/i).disabled).toBe(true);
+    await waitForText(container, /Format checked/i, 1000);
 
     await unmount();
   });
@@ -549,7 +549,7 @@ describe('App', () => {
     await clickElement(getButton(container, /find leads/i));
 
     await waitForText(container, /public linkedin discovery complete/i, 6000);
-    await waitForText(container, /Publicly validated/i, 1000);
+    await waitForText(container, /Format checked/i, 1000);
     expect(normalizedText(container)).toContain('Public LinkedIn Northstar Labs');
     expect(normalizedText(container)).toContain('Profile / Website');
     expect(normalizedText(container)).toContain('Inspect public profile evidence before export.');
@@ -573,7 +573,7 @@ describe('App', () => {
     await waitForText(container, /Listing \/ profile URL/i, 1000);
     expect(normalizedText(container)).toContain('Business website');
     expect(normalizedText(container)).toContain('Contact source URL');
-    expect(normalizedText(container)).toContain('Match confidence');
+    expect(normalizedText(container)).toContain('Match score (not probability)');
 
     await unmount();
   });

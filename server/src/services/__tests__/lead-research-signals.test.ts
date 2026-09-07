@@ -51,7 +51,7 @@ describe('lead research signals', () => {
     expect(scores.contactability).toBe(100);
     expect(scores.priority).toBeGreaterThanOrEqual(80);
     expect(scores.reasons).toEqual(
-      expect.arrayContaining(['Phone validated', 'Owner or founder signal']),
+      expect.arrayContaining(['Phone format checked', 'Owner or founder signal']),
     );
   });
 

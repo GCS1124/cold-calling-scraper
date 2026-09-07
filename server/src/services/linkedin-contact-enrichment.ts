@@ -3,6 +3,7 @@ import type { ProviderWarning, SearchRequest } from '../types/search';
 import { isPhoneQualifiedLead } from './phone-requirement';
 import type { NormalizedUsLocation } from './us-location';
 import { enrichLead } from './lead-validation';
+import { collectContactEvidence, mergeContactEvidence, normalizeContactPhone } from './contact-evidence';
 import {
   enrichLeadFromWebsite,
   extractContactDetailsFromHtml,
@@ -986,7 +987,7 @@ const escapeHtmlText = (value: string) =>
     return '&gt;';
   });
 
-const enrichLeadFromPublicSnippet = (lead: Lead, snippet: string) => {
+const enrichLeadFromPublicSnippet = (lead: Lead, snippet: string, sourceUrl: string) => {
   if (!snippet.trim()) {
     return lead;
   }
@@ -1001,7 +1002,16 @@ const enrichLeadFromPublicSnippet = (lead: Lead, snippet: string) => {
   return enrichLead({
     ...lead,
     email: lead.email || details.emails[0] || '',
-    mobile: lead.mobile || details.phones[0] || '',
+    mobile: normalizeContactPhone(lead.mobile) ? lead.mobile : details.phones[0] || '',
+    contactEvidence: mergeContactEvidence([
+      ...collectContactEvidence(lead),
+      ...(['phone', 'email'] as const).flatMap((field) =>
+        (field === 'phone' ? details.phones : details.emails).map((value) => ({
+          field, value, sourceUrl, sourceName: 'Public search snippet',
+          sourceKind: 'public_snippet' as const, association: 'business' as const,
+          observedAt: new Date().toISOString(),
+        }))),
+    ]),
     address: lead.address || details.addresses[0] || '',
     rejectionReason:
       recoveredContact && lead.rejectionReason === 'blocked_website'
@@ -1069,7 +1079,7 @@ const enrichOneLead = async (
 
         const crawled = await enrichLeadFromWebsite(candidateLead);
         warnings.push(...crawled.warnings);
-        candidateLead = enrichLeadFromPublicSnippet(crawled.lead, candidate.snippet);
+        candidateLead = enrichLeadFromPublicSnippet(crawled.lead, candidate.snippet, candidate.website);
         candidateLead = attachContactProvenance(candidateLead, candidate.website, hadContact);
 
         const contactScore =

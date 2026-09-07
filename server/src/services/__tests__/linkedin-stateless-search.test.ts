@@ -86,6 +86,7 @@ describe('runStatelessLinkedinSearch', () => {
           email: 'hello@austindental.example',
           mobile: '+1 512 555 0100',
           website: 'https://austindental.example',
+          contactEvidence: [{ field: 'phone', value: '+15125550100', sourceUrl: 'https://austindental.example/contact', sourceName: 'Business website', sourceKind: 'business_website', association: 'business', observedAt: lead.scrapedAt }],
           hasEmail: true,
           hasPhone: true,
           hasWebsite: true,
@@ -162,6 +163,7 @@ describe('runStatelessLinkedinSearch', () => {
           ...leadWithPhone,
           mobile: '+1 512 555 0110',
           website: 'https://phone-ready.example',
+          contactSourceUrl: 'https://phone-ready.example/contact',
           hasPhone: true,
           hasWebsite: true,
           verifiedPhone: true,
@@ -179,6 +181,8 @@ describe('runStatelessLinkedinSearch', () => {
 
     expect(response.leads).toHaveLength(1);
     expect(response.leads[0]?.name).toBe('Phone Ready Practice');
+    expect(response.meta.progress.duplicatesRemoved).toBe(0);
+    expect(response.meta.progress.totalCandidates).toBe(2);
     expect(response.meta.totals.withPhone).toBe(1);
     expect(response.meta.providerWarnings).toContainEqual(
       expect.objectContaining({
