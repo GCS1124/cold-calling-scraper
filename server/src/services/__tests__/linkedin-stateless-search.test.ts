@@ -112,6 +112,25 @@ describe('runStatelessLinkedinSearch', () => {
       currentSource: 'Complete',
       requestedCount: 50,
     });
+    expect(response.contractVersion).toBe(2);
+    expect(response.meta).toMatchObject({
+      sourceMode: 'linkedin',
+      phonePolicy: { required: true, evidence: 'public_phone_evidence' },
+    });
+    expect(response.meta.progress.providerCoverage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerId: 'linkedin-public-search',
+          status: 'returned',
+          leadCount: 1,
+        }),
+        expect.objectContaining({
+          providerId: 'public-website-enrichment',
+          status: 'returned',
+          leadCount: 1,
+        }),
+      ]),
+    );
     expect(response.leads[0]).toMatchObject({
       email: 'hello@austindental.example',
       mobile: '+1 512 555 0100',

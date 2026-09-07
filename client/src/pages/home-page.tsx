@@ -32,6 +32,7 @@ import { LinkedInQualityPanel } from '../components/results/linkedin-quality-pan
 import { ResultsSummary } from '../components/results/results-summary';
 import { ResultsTable } from '../components/results/results-table';
 import { LeadQualityPanel } from '../components/results/lead-quality-details';
+import { ProviderCoveragePanel } from '../components/results/provider-coverage-panel';
 import { compareLeadQuality, matchesQualityFilter, type QualityFilter } from '../utils/lead-quality';
 import { SearchForm } from '../components/search/search-form';
 import { useAuth } from '../hooks/use-auth';
@@ -237,7 +238,7 @@ export function HomePage({ searchApi }: HomePageProps) {
   const publicProvidersChecked = result?.meta.progress.publicProvidersChecked;
   const publicQueryFamilies = result?.meta.progress.publicQueryFamilies ?? [];
   const publicQueryFamilyCounts = result?.meta.progress.publicQueryFamilyCounts ?? {};
-  const aiProviderCoverage = result?.meta.progress.providerCoverage ?? [];
+  const providerCoverage = result?.meta.progress.providerCoverage ?? [];
   const displayedProviderWarnings =
     activeSourceMode === 'ai'
       ? (result?.meta.providerWarnings ?? []).filter(
@@ -873,60 +874,12 @@ export function HomePage({ searchApi }: HomePageProps) {
                   </div>
                 ) : null}
 
+                {providerCoverage.length ? (
+                  <ProviderCoveragePanel coverage={providerCoverage} mode={activeSourceMode} />
+                ) : null}
+
                 {activeSourceMode === 'ai' ? (
-                  <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">
-                          Free AI mode coverage
-                        </p>
-                        <p className="mt-1 text-sm leading-5 text-slate-600">
-                          Public LinkedIn discovery, public website checks, and published social links are merged and deduplicated. Commercial databases are audited but never called.
-                        </p>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-bold text-blue-700 shadow-sm">
-                        No paid lead databases
-                      </span>
-                    </div>
-
-                    {aiProviderCoverage.length ? (
-                      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {aiProviderCoverage.map((provider) => {
-                          const statusLabel =
-                              provider.status === 'not_configured'
-                                ? 'Not used'
-                                : provider.status === 'returned'
-                                ? provider.providerId === 'gemini-query-assistance'
-                                  ? 'Query wording returned'
-                                  : `${provider.leadCount} discovered`
-                                : provider.status === 'failed'
-                                  ? 'Unavailable'
-                                  : 'Ready';
-                          const statusClass =
-                            provider.status === 'returned'
-                              ? 'text-emerald-700'
-                              : provider.status === 'failed'
-                                ? 'text-amber-700'
-                                : 'text-slate-500';
-
-                          return (
-                            <div
-                              className="rounded-xl border border-white/80 bg-white/80 p-3"
-                              key={provider.providerId}
-                              title={provider.message}
-                            >
-                              <p className="truncate text-sm font-bold text-slate-900">
-                                {provider.providerName}
-                              </p>
-                              <p className={`mt-1 text-xs font-semibold ${statusClass}`}>
-                                {statusLabel}
-                              </p>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-
+                  <div className="mt-3 rounded-2xl border border-blue-100 bg-white/80 p-4">
                     {phoneExcludedCount > 0 ? (
                       <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-sm text-amber-950">
                         <p className="font-bold">Eligibility gate</p>

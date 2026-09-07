@@ -783,7 +783,7 @@ describe('App', () => {
     expect(content).toContain('No paid lead databases');
     expect(content).toContain('Public LinkedIn Search');
     expect(content).toContain('Apollo');
-    expect(content).toContain('Not used');
+    expect(content).toContain('Not configured');
     expect(content).toContain('Gemini query assistance is disabled by default');
 
     await unmount();

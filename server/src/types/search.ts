@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
 import type { Lead } from './lead';
+import type {
+  PhonePolicyContract,
+  SearchModeCode,
+  SEARCH_RESPONSE_CONTRACT_VERSION,
+} from '../../../shared/search-contract';
 
 const searchSourceModes = ['gmb', 'linkedin', 'ai'] as const;
 
@@ -37,7 +42,7 @@ export type ProviderWarning = {
 export type ProviderCoverage = {
   providerId: string;
   providerName: string;
-  status: 'configured' | 'not_configured' | 'returned' | 'failed';
+  status: 'configured' | 'not_configured' | 'returned' | 'failed' | 'partial';
   leadCount: number;
   message?: string;
 };
@@ -79,9 +84,15 @@ export type SearchProgress = {
 };
 
 export type SearchResponse = {
+  /** Optional for compatibility with legacy synthetic fixtures; runtime responses include it. */
+  contractVersion?: typeof SEARCH_RESPONSE_CONTRACT_VERSION;
   searchId: string;
   leads: Lead[];
   meta: {
+    /** Optional for compatibility with legacy snapshots; runtime responses include it. */
+    sourceMode?: SearchModeCode;
+    phonePolicy?: PhonePolicyContract;
+    limitations?: string[];
     query: string;
     locationLabel: string;
     researchDepth?: ResearchDepth;

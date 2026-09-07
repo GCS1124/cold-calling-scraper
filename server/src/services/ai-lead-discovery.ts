@@ -27,6 +27,8 @@ import { enforcePhoneRequirement } from './phone-requirement';
 import { noUsableResultsWarning } from './search-finalization';
 import { mergeLinkedInWithPublicListings } from './public-entity-matching';
 import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
+import { buildSearchResponseContract } from '../../../shared/search-contract';
+import { normalizeLeadSourceMode } from './search-source-mode';
 
 export type AiDiscoveryResult = {
   leads: Lead[];
@@ -374,10 +376,14 @@ const buildResponse = ({
     addWarning(responseWarnings, noUsableResultsWarning());
   }
 
+  const contract = buildSearchResponseContract(normalizeLeadSourceMode(request.sourceMode ?? 'ai'));
+
   return {
+    ...contract,
     searchId,
     leads: visibleLeads,
     meta: {
+      ...contract.meta,
       query: `${request.companyType} in ${locationLabel}`,
       locationLabel,
       researchDepth: request.researchDepth ?? 'verified',

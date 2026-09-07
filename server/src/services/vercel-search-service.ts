@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
 import type { Lead } from '../types/lead';
-import type { ProviderWarning, SearchProgress, SearchRequest, SearchResponse, SearchStatus } from '../types/search';
+import type {
+  ProviderCoverage,
+  ProviderWarning,
+  SearchProgress,
+  SearchRequest,
+  SearchResponse,
+  SearchStatus,
+} from '../types/search';
 import { deduplicateLeads } from './lead-deduplication';
 import { enrichLead } from './lead-validation';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
@@ -39,6 +46,7 @@ import { createResearchQueue, type ResearchQueue } from './research-queue';
 import { reverifyLeads } from './research-reverification';
 import { noUsableResultsWarning } from './search-finalization';
 import { bridgeLinkedInWithPublicListings } from './public-entity-matching';
+import { recordProviderCoverage } from './provider-coverage';
 import {
   leadSourceModeLabels,
   normalizeLeadSourceMode,
@@ -259,8 +267,27 @@ const runLinkedinDiscovery = async (
   now: () => number,
 ) => {
   job.progress.currentSource = leadSourceModeLabels.linkedin;
+  recordProviderCoverage(job.progress, [
+    {
+      providerId: 'linkedin-public-search',
+      providerName: 'Public LinkedIn Search',
+      status: 'configured',
+      leadCount: 0,
+      message: 'Public search engines only; private profiles and authenticated sessions are not accessed.',
+    },
+    {
+      providerId: 'public-business-listings',
+      providerName: 'Public Business Listings',
+      status: discoverPublicListings ? 'configured' : 'not_configured',
+      leadCount: 0,
+      message: discoverPublicListings
+        ? 'Free public listings are used for organization and phone corroboration.'
+        : 'No public listing fallback was configured for this execution path.',
+    },
+  ]);
 
   const discoveryDeadlineMs = now() + getLinkedinProfileDiscoveryWindowMs(request.count);
+  let publicListingsFailed = false;
   const linkedinResultPromise = discoverLinkedinLeads({
     request,
     location,
@@ -279,6 +306,7 @@ const runLinkedinDiscovery = async (
           now() + getGooglePlacesTimeoutMs(request.count),
         ),
       }).catch((error): Lead[] => {
+        publicListingsFailed = true;
         appendWarningOnce(job, {
           providerId: 'public-business-listings',
           providerName: 'Public Business Listings',
@@ -300,6 +328,32 @@ const runLinkedinDiscovery = async (
   for (const warning of linkedinResult.warnings) {
     appendWarningOnce(job, warning);
   }
+  recordProviderCoverage(job.progress, [
+    {
+      providerId: 'linkedin-public-search',
+      providerName: 'Public LinkedIn Search',
+      status: linkedinResult.blocked ? 'failed' : 'returned',
+      leadCount: linkedinResult.leads.length,
+      message: linkedinResult.blocked
+        ? 'Public search providers were blocked or rate-limited.'
+        : 'Public profile discovery returned candidates.',
+    },
+    {
+      providerId: 'public-business-listings',
+      providerName: 'Public Business Listings',
+      status: publicListingsFailed
+        ? 'failed'
+        : publicListingLeads.length
+          ? 'returned'
+          : discoverPublicListings
+            ? 'returned'
+            : 'not_configured',
+      leadCount: publicListingLeads.length,
+      message: publicListingsFailed
+        ? 'Public listing discovery failed; LinkedIn profiles were preserved.'
+        : `Free public listing provider returned ${publicListingLeads.length} candidate(s).`,
+    },
+  ]);
 
   if (linkedinResult.coverage) {
     job.progress.publicQueriesAttempted = linkedinResult.coverage.queriesAttempted;
@@ -388,6 +442,15 @@ const runLinkedinEnrichment = async (
   for (const warning of contactResult.warnings) {
     appendWarningOnce(job, warning);
   }
+  recordProviderCoverage(job.progress, [
+    {
+      providerId: 'public-website-enrichment',
+      providerName: 'Public Website Enrichment',
+      status: 'returned',
+      leadCount: contactResult.enrichedCount,
+      message: 'Public business websites were checked for published contact details.',
+    },
+  ]);
 
   job.progress.enriched = contactResult.enrichedCount;
   mergeLeads(job, contactResult.leads, now, false);
@@ -420,7 +483,7 @@ const runAiDiscovery = async (
     appendWarningOnce(job, warning);
   }
 
-  job.progress.providerCoverage = result.coverage;
+  recordProviderCoverage(job.progress, result.coverage);
   job.progress.aiAssistance = result.aiAssistance;
   job.progress.enriched = result.enrichedCount;
   if (result.publicCoverage) {
@@ -463,12 +526,52 @@ const discoverRegionLeads = async (
     profile,
   );
   const warnings: ProviderWarning[] = [...profile.warnings, ...discoveryLocation.warnings];
+  const googlePlacesAvailable =
+    googlePlaces !== googlePlacesProvider || isGooglePlacesConfigured();
+  let googlePlacesFailed = false;
+  let osmFailed = false;
+  const providerCoverage: ProviderCoverage[] = [
+    {
+      providerId: 'google-places',
+      providerName: 'Google Places',
+      status: googlePlacesAvailable ? 'configured' : 'not_configured',
+      leadCount: 0,
+      message: googlePlacesAvailable
+        ? 'Configured business listing discovery source.'
+        : 'Not configured; free public listing discovery remains available.',
+    },
+    {
+      providerId: 'public-business-listings',
+      providerName: 'OpenStreetMap',
+      status: 'configured',
+      leadCount: 0,
+      message: 'Independent free public listing discovery source.',
+    },
+    {
+      providerId: 'google-maps-discovery',
+      providerName: 'Public Google Maps Discovery',
+      status: discoverGoogleMapsLeads ? 'configured' : 'not_configured',
+      leadCount: 0,
+      message: discoverGoogleMapsLeads
+        ? 'Bounded fallback discovery is available when primary sources are insufficient.'
+        : 'Fallback discovery is not configured for this execution path.',
+    },
+  ];
+  const updateCoverage = (entry: ProviderCoverage) => {
+    const current = providerCoverage.find((item) => item.providerId === entry.providerId);
+    if (!current) {
+      providerCoverage.push(entry);
+      return;
+    }
+
+    current.status = entry.status;
+    current.leadCount += Math.max(0, entry.leadCount);
+    current.message = entry.message ?? current.message;
+  };
   const googlePlacesDeadlineMs = Math.min(
     deadlineMs,
     now() + getGooglePlacesTimeoutMs(request.count),
   );
-  const googlePlacesAvailable =
-    googlePlaces !== googlePlacesProvider || isGooglePlacesConfigured();
 
   // These sources are independent. Run them together so adding free coverage
   // does not add another full network round trip to every search seed.
@@ -494,6 +597,7 @@ const discoverRegionLeads = async (
         deadlineMs: googlePlacesDeadlineMs,
       });
     } catch (error) {
+      googlePlacesFailed = true;
       warnings.push({
         providerId: 'google-places',
         providerName: 'Google Places',
@@ -517,6 +621,7 @@ const discoverRegionLeads = async (
         deadlineMs,
       });
     } catch (error) {
+      osmFailed = true;
       warnings.push({
         providerId: 'osm-discovery',
         providerName: 'OpenStreetMap',
@@ -528,6 +633,31 @@ const discoverRegionLeads = async (
   })();
 
   const [googleLeads, osmLeads] = await Promise.all([googleLeadsPromise, osmLeadsPromise]);
+
+  updateCoverage({
+    providerId: 'google-places',
+    providerName: 'Google Places',
+    status: googlePlacesFailed
+      ? 'failed'
+      : googleLeads.length
+        ? 'returned'
+        : googlePlacesAvailable
+          ? 'returned'
+          : 'not_configured',
+    leadCount: googleLeads.length,
+    message: googleLeads.length
+      ? 'Business listing candidates returned.'
+      : googlePlacesAvailable
+        ? 'Provider responded without candidates.'
+        : 'Provider was not configured.',
+  });
+  updateCoverage({
+    providerId: 'public-business-listings',
+    providerName: 'OpenStreetMap',
+    status: osmFailed ? 'failed' : 'returned',
+    leadCount: osmLeads.length,
+    message: `Free public listing provider returned ${osmLeads.length} candidate(s).`,
+  });
 
   if (!googleLeads.length && !osmLeads.length) {
     warnings.push({
@@ -564,8 +694,22 @@ const discoverRegionLeads = async (
         queryLimit: getResearchDepthConfig(request.researchDepth).googleMapsQueryLimit,
         deadlineMs: googleMapsDeadlineMs,
       });
+      updateCoverage({
+        providerId: 'google-maps-discovery',
+        providerName: 'Public Google Maps Discovery',
+        status: 'returned',
+        leadCount: googleMapsLeads.length,
+        message: `Bounded fallback discovery returned ${googleMapsLeads.length} candidate(s).`,
+      });
     } catch (error) {
       googleMapsUnavailable = true;
+      updateCoverage({
+        providerId: 'google-maps-discovery',
+        providerName: 'Public Google Maps Discovery',
+        status: 'failed',
+        leadCount: 0,
+        message: error instanceof Error ? error.message : 'Public Google Maps discovery failed.',
+      });
       warnings.push({
         providerId: 'google-maps',
         providerName: 'Google Maps',
@@ -578,6 +722,7 @@ const discoverRegionLeads = async (
     leads: filterLeadsForLocation([...acceptedDiscoveryLeads, ...googleMapsLeads], targetLocation),
     warnings,
     googleMapsUnavailable,
+    providerCoverage,
   };
 };
 
@@ -802,7 +947,7 @@ const tickJob = async (
       }
 
       const foundCountBeforeRegional = job.leads.length;
-      const { leads, warnings, googleMapsUnavailable } = await discoverRegionLeads(
+      const { leads, warnings, googleMapsUnavailable, providerCoverage } = await discoverRegionLeads(
         job.request,
         targetLocation,
         regionalLocation,
@@ -815,6 +960,7 @@ const tickJob = async (
       );
 
       job.providerWarnings.push(...warnings);
+      recordProviderCoverage(job.progress, providerCoverage);
       mergeLeads(job, leads, deps.now);
 
       if (
@@ -830,6 +976,19 @@ const tickJob = async (
         for (const warning of websiteResult.warnings) {
           appendWarningOnce(job, warning);
         }
+        recordProviderCoverage(job.progress, [{
+          providerId: 'public-website-enrichment',
+          providerName: 'Public Website Enrichment',
+          status: websiteResult.leads.length
+            ? 'returned'
+            : websiteResult.candidateCount
+              ? 'failed'
+              : 'configured',
+          leadCount: websiteResult.leads.length,
+          message: websiteResult.candidateCount
+            ? `Checked ${websiteResult.attemptedCount} phone-missing website candidate(s) within the bounded recovery window.`
+            : 'No phone-missing website candidates required recovery.',
+        }]);
         if (websiteResult.leads.length) {
           mergeLeads(job, websiteResult.leads, deps.now, false);
           job.progress.enriched += websiteResult.attemptedCount;

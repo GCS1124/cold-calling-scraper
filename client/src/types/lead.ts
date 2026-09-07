@@ -5,6 +5,11 @@ import type {
   LeadQualityAssessment,
   WebsiteAssessment,
 } from '../../../shared/lead-quality';
+import type {
+  PhonePolicyContract,
+  SearchModeCode,
+  SEARCH_RESPONSE_CONTRACT_VERSION,
+} from '../../../shared/search-contract';
 
 export type PublicSocialLink = {
   platform:
@@ -119,6 +124,14 @@ export type Lead = {
   scrapedAt: string;
 };
 
+export type ProviderCoverage = {
+  providerId: string;
+  providerName: string;
+  status: 'configured' | 'not_configured' | 'returned' | 'failed' | 'partial';
+  leadCount: number;
+  message?: string;
+};
+
 export type SearchLocation =
   | {
       mode: 'timezone';
@@ -168,9 +181,13 @@ export type SearchStatus =
   | 'failed';
 
 export type SearchResponse = {
+  contractVersion?: typeof SEARCH_RESPONSE_CONTRACT_VERSION;
   searchId: string;
   leads: Lead[];
   meta: {
+    sourceMode?: SearchModeCode;
+    phonePolicy?: PhonePolicyContract;
+    limitations?: string[];
     query: string;
     locationLabel: string;
     researchDepth?: ResearchDepth;
@@ -185,13 +202,7 @@ export type SearchResponse = {
       publicProvidersChecked?: number;
       publicQueryFamilies?: string[];
       publicQueryFamilyCounts?: Record<string, number>;
-      providerCoverage?: Array<{
-        providerId: string;
-        providerName: string;
-        status: 'configured' | 'not_configured' | 'returned' | 'failed';
-        leadCount: number;
-        message?: string;
-      }>;
+      providerCoverage?: ProviderCoverage[];
       aiAssistance?: 'enabled' | 'disabled' | 'failed';
       totalCandidates: number;
       requestedCount: number;

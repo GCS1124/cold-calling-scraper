@@ -38,7 +38,7 @@ Observed issues in the baseline:
 
 ## Architecture
 
-Existing UI -> validated search input -> bounded discovery by mode -> identity resolution -> public website research -> contact evidence -> qualification -> ranking -> result snapshot -> dossier/export.
+Existing UI -> validated search input -> bounded discovery by mode -> identity resolution -> public website research -> contact evidence -> qualification -> ranking -> result snapshot -> dossier/export. A versioned internal response contract now carries the source mode, mandatory public-phone policy, limitations, and per-provider coverage through local, durable, and stateless responses without creating a new public API product.
 
 Shared types describe evidence and quality. Server services own qualification and scoring. UI components render the assessment and offer filters; they do not reinterpret provider data or silently promote legacy records. Existing routes remain internal application transport.
 
@@ -68,7 +68,7 @@ GMB: refine category synonyms and location seeds; keep exact city/state boundari
 
 LinkedIn: expand public professional discovery through company leadership pages, associations, and public search references; corroborate current company and role. Reuse a proven company contact route for multiple relevant people while labeling it a business route. Quarantine former/conflicting employment for review.
 
-AI: compile the brief into typed supported criteria; show which requirements are enforced versus still unverified. Route company/people discovery according to intent. Honor exclusions. Recover with deterministic query expansion if Gemini is unavailable. Do not label an unsupported criterion as matched.
+AI: compile the brief into typed supported criteria; show which requirements are enforced versus still unverified. Route company/people discovery according to intent. Honor exclusions. Recover with deterministic query expansion if Gemini is unavailable. Do not label an unsupported criterion as matched. All three modes now expose the same provider-coverage states (`configured`, `not_configured`, `returned`, `failed`, and `partial`) so a zero result cannot be mistaken for an unattempted source.
 
 Acceptance: multi-industry fixtures (dentist, HVAC, plumbing, roofing, legal, software); region boundary tests; query diversity checks; simulated 429/403/timeout/restart/cancellation; complete searches without continuous browser polling when a worker is configured. Local tests now cover independent free-source execution and bounded website recovery; live multi-industry coverage and worker recovery remain pending.
 
@@ -103,7 +103,7 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 | Detailed implementation roadmap | Written | This document and source audit |
 | Trust foundation | Local regression and browser checks pass | 248 server tests, 52 client tests, both builds, runtime boot, lint, and mocked browser flow |
 | Crawler/domain checks | Partial: unrelated redirects and robots/parked pages rejected locally | Official-domain validation and bounded live checks still pending; unchanged-document reuse is not yet persistent |
-| Discovery reliability across three modes | Partial: GMB free-source merge and bounded public-phone recovery implemented locally | Recovery, coverage, and real-source smoke matrix still pending |
+| Discovery reliability across three modes | Partial: GMB free-source merge, bounded public-phone recovery, and shared provider-coverage contract implemented locally | Recovery, retention reuse, and real-source smoke matrix still pending |
 | Typed qualification / role and signal research | Pending | Criteria and evidence tests |
 | Dossiers / feedback / suppression | Partial: evidence dossiers and export checks added | Feedback, suppression, persistence and isolation checks still pending |
 | Commercial quality benchmark | Pending | Reviewed dataset and measured results |
@@ -121,6 +121,8 @@ Deduplication keeps distinct professional profiles and business branches separat
 Website enrichment records exact contact-page URLs and observation times, recovers from invalid existing phone values, and refuses unrelated-domain redirects. Website and listing corroboration requires matching phone values, recent observations and different hosts. A fresh record timestamp cannot refresh an old observation. Snippet evidence is labeled separately. None of these checks proves personal ownership, mobile line type, reachability or mailbox deliverability.
 
 The three-mode UI now includes common quality filters, evidence explanations, source links, observation dates and next actions. Legacy records need refreshed quality metadata before file export, and changing a phone invalidates its old export assessment. Mobile source controls and expanded evidence fit the viewport; the export bar stays in normal flow on mobile so it does not obscure evidence.
+
+All three modes now render a shared provider-coverage panel. `configured`, `not_configured`, `returned`, `failed`, and `partial` are distinguished in the UI; provider observation counts are explicitly not treated as unique final leads. The internal response contract is documented in `docs/search-response-contract.md` and is covered by server contract/merge tests.
 
 Verification commands:
 

@@ -92,12 +92,26 @@ const makeResponse = (mode, failed = false) => ({
       publicContactsFound: failed ? 0 : 1,
       publicQueriesAttempted: mode === 'linkedin' ? 4 : 1,
       publicProvidersChecked: mode === 'linkedin' ? 4 : 1,
-      providerCoverage: mode === 'ai' ? [{
-        providerId: 'public-business-listings',
-        providerName: 'Public Business Listings',
-        status: 'returned',
-        leadCount: 1,
-      }] : undefined,
+      providerCoverage: mode === 'gmb'
+        ? [{
+            providerId: 'google-places',
+            providerName: 'Google Places',
+            status: 'returned',
+            leadCount: 1,
+          }]
+        : mode === 'linkedin'
+          ? [{
+              providerId: 'linkedin-public-search',
+              providerName: 'Public LinkedIn Search',
+              status: 'returned',
+              leadCount: 1,
+            }]
+          : [{
+              providerId: 'public-business-listings',
+              providerName: 'Public Business Listings',
+              status: 'returned',
+              leadCount: 1,
+            }],
       aiAssistance: mode === 'ai' ? 'disabled' : undefined,
       totalCandidates: failed ? 0 : 1,
       requestedCount: 50,
@@ -203,16 +217,19 @@ const run = async () => {
   try {
     await fillSearch(page, 'gmb', 'cityState');
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
+    await page.getByText('GMB source coverage', { exact: true }).waitFor();
     assert(await page.getByText('gmb Public Lead').count() === 1, 'GMB lead was not rendered');
     await inspectQuality('gmb');
 
     await fillSearch(page, 'linkedin', 'timezone');
     await page.getByRole('heading', { name: 'Public LinkedIn discovery complete' }).waitFor();
+    await page.getByText('LinkedIn source coverage', { exact: true }).waitFor();
     assert(await page.getByText('linkedin Public Lead').count() === 1, 'LinkedIn lead was not rendered');
     await inspectQuality('linkedin');
 
     await fillSearch(page, 'ai', 'cityState');
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
+    await page.getByText('Free AI mode coverage', { exact: true }).waitFor();
     assert(await page.getByText('AI interpretation preview').count() === 1, 'AI preview is missing');
     assert(await page.getByText('Public Business Listings').count() === 1, 'AI public listing coverage is missing');
     await inspectQuality('ai');

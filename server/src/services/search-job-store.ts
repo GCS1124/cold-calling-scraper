@@ -13,6 +13,8 @@ import { enforcePhoneRequirement } from './phone-requirement';
 import { noUsableResultsWarning } from './search-finalization';
 import { persistNormalizedResearch } from './research-normalizer';
 import type { NormalizedUsLocation } from './us-location';
+import { normalizeLeadSourceMode } from './search-source-mode';
+import { buildSearchResponseContract } from '../../../shared/search-contract';
 
 export type SearchLocationMode =
   | 'local'
@@ -848,6 +850,7 @@ export const toSearchResponse = (job: SearchJobRecord): SearchResponse => {
   const qualification = enforcePhoneRequirement(deduplicateLeads(job.leads), job.request);
   const leads = qualification.leads.slice(0, job.request.count);
   const emptyCompletion = job.status === 'complete' && !leads.length;
+  const contract = buildSearchResponseContract(normalizeLeadSourceMode(job.request.sourceMode));
   const providerWarnings = dedupeWarnings([
     ...job.providerWarnings,
     ...(qualification.warning ? [qualification.warning] : []),
@@ -864,9 +867,11 @@ export const toSearchResponse = (job: SearchJobRecord): SearchResponse => {
   };
 
   return {
+    ...contract,
     searchId: job.searchId,
     leads,
     meta: {
+      ...contract.meta,
       query: job.query,
       locationLabel: job.locationLabel,
       researchDepth: job.request.researchDepth ?? 'verified',

@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
 import type { Lead } from '../types/lead';
-import type { ProviderWarning, SearchRequest, SearchResponse } from '../types/search';
+import type {
+  ProviderCoverage,
+  ProviderWarning,
+  SearchRequest,
+  SearchResponse,
+} from '../types/search';
 import { deduplicateLeads } from './lead-deduplication';
 import { enrichLead } from './lead-validation';
 import {
@@ -16,6 +21,9 @@ import { noUsableResultsWarning } from './search-finalization';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { resolveCategoryProfile } from './us-category-mapping';
 import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
+import { buildSearchResponseContract } from '../../../shared/search-contract';
+import { normalizeLeadSourceMode } from './search-source-mode';
+import { mergeProviderCoverage } from './provider-coverage';
 
 // Keep the no-database path within the Vercel function budget. It returns a
 // completed public-only response, so the client does not need a durable poll.
@@ -53,6 +61,7 @@ const buildResponse = ({
   enriched,
   warnings,
   coverage,
+  providerCoverage,
 }: {
   searchId: string;
   request: SearchRequest;
@@ -62,6 +71,7 @@ const buildResponse = ({
   enriched: number;
   warnings: ProviderWarning[];
   coverage?: LinkedInDiscoveryResult['coverage'];
+  providerCoverage?: ProviderCoverage[];
 }): SearchResponse => {
   const deduplicatedLeads = deduplicateLeads(leads);
   const phoneRequirement = enforcePhoneRequirement(deduplicatedLeads, request);
@@ -75,10 +85,14 @@ const buildResponse = ({
     addWarnings(responseWarnings, [noUsableResultsWarning()]);
   }
 
+  const contract = buildSearchResponseContract(normalizeLeadSourceMode(request.sourceMode ?? 'linkedin'));
+
   return {
+    ...contract,
     searchId,
     leads: visibleLeads,
     meta: {
+      ...contract.meta,
       query: `${request.companyType} in ${locationLabel}`,
       locationLabel,
       researchDepth: request.researchDepth ?? 'verified',
@@ -95,6 +109,7 @@ const buildResponse = ({
         publicProvidersChecked: coverage?.providersChecked,
         publicQueryFamilies: coverage?.queryFamilies,
         publicQueryFamilyCounts: coverage?.queryFamilyCounts,
+        providerCoverage,
         totalCandidates: deduplicatedLeads.length,
         requestedCount: request.count,
         foundCount: visibleLeads.length,
@@ -169,6 +184,31 @@ export const createStatelessLinkedinSearch = (
     const warnings: ProviderWarning[] = [];
     addWarnings(warnings, location.warnings);
 
+    let providerCoverage: ProviderCoverage[] = [
+      {
+        providerId: 'linkedin-public-search',
+        providerName: 'Public LinkedIn Search',
+        status: 'configured',
+        leadCount: 0,
+        message:
+          'Public search engines only; private profiles and authenticated sessions are not accessed.',
+      },
+      {
+        providerId: 'public-business-listings',
+        providerName: 'Public Business Listings',
+        status: discoverPublicListings ? 'configured' : 'not_configured',
+        leadCount: 0,
+        message: discoverPublicListings
+          ? 'Free public listings are used for organization and phone corroboration.'
+          : 'No public listing fallback was configured for this execution path.',
+      },
+    ];
+    const addCoverage = (entries: ProviderCoverage[]) => {
+      providerCoverage = mergeProviderCoverage(providerCoverage, entries);
+    };
+    let linkedinFailed = false;
+    let publicListingsFailed = false;
+
     let discoveryResult: LinkedInDiscoveryResult = {
       leads: [],
       warnings: [],
@@ -185,6 +225,7 @@ export const createStatelessLinkedinSearch = (
             deadlineMs: discoveryDeadlineMs,
           });
         } catch (error) {
+          linkedinFailed = true;
           addWarnings(warnings, [buildDiscoveryFailureWarning(error)]);
           return discoveryResult;
         }
@@ -219,6 +260,7 @@ export const createStatelessLinkedinSearch = (
 
           return listings;
         } catch (error) {
+          publicListingsFailed = true;
           addWarnings(warnings, [
             {
               providerId: 'public-business-listings',
@@ -237,6 +279,31 @@ export const createStatelessLinkedinSearch = (
 
     discoveryResult = linkedinResult;
     addWarnings(warnings, discoveryResult.warnings);
+    addCoverage([
+      {
+        providerId: 'linkedin-public-search',
+        providerName: 'Public LinkedIn Search',
+        status: linkedinFailed || discoveryResult.blocked ? 'failed' : 'returned',
+        leadCount: discoveryResult.leads.length,
+        message:
+          linkedinFailed || discoveryResult.blocked
+            ? 'Public search providers failed, were blocked, or were rate-limited.'
+            : 'Public LinkedIn profile results were returned and deduplicated.',
+      },
+      {
+        providerId: 'public-business-listings',
+        providerName: 'Public Business Listings',
+        status: publicListingsFailed
+          ? 'failed'
+          : discoverPublicListings
+            ? 'returned'
+            : 'not_configured',
+        leadCount: publicListingLeads.length,
+        message: publicListingsFailed
+          ? 'Public listing discovery failed; LinkedIn profiles were preserved.'
+          : `Free public listing provider returned ${publicListingLeads.length} candidate(s).`,
+      },
+    ]);
 
     if (publicListingLeads.length && discoveryResult.leads.length) {
       discoveryResult = {
@@ -264,6 +331,16 @@ export const createStatelessLinkedinSearch = (
     let enriched = 0;
 
     if (leads.length) {
+      addCoverage([
+        {
+          providerId: 'public-website-enrichment',
+          providerName: 'Public Website Enrichment',
+          status: 'configured',
+          leadCount: 0,
+          message:
+            'A bounded crawl checks public business pages for published contact details.',
+        },
+      ]);
       try {
         const contactResult = await enrichPublicContacts({
           leads,
@@ -272,9 +349,31 @@ export const createStatelessLinkedinSearch = (
           deadlineMs: Date.now() + contactEnrichmentWindowMs,
         });
         addWarnings(warnings, contactResult.warnings);
+        addCoverage([
+          {
+            providerId: 'public-website-enrichment',
+            providerName: 'Public Website Enrichment',
+            status: 'returned',
+            leadCount: contactResult.enrichedCount,
+            message:
+              'Public business websites were checked for published contact details.',
+          },
+        ]);
         leads = deduplicateLeads(contactResult.leads.map(enrichLead));
         enriched = contactResult.enrichedCount;
       } catch (error) {
+        addCoverage([
+          {
+            providerId: 'public-website-enrichment',
+            providerName: 'Public Website Enrichment',
+            status: 'failed',
+            leadCount: 0,
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Public website enrichment failed.',
+          },
+        ]);
         addWarnings(warnings, [
           {
             providerId: 'linkedin-public-contact-enrichment',
@@ -286,6 +385,16 @@ export const createStatelessLinkedinSearch = (
           },
         ]);
       }
+    } else {
+      addCoverage([
+        {
+          providerId: 'public-website-enrichment',
+          providerName: 'Public Website Enrichment',
+          status: 'configured',
+          leadCount: 0,
+          message: 'No public profiles were available for website enrichment.',
+        },
+      ]);
     }
 
     return buildResponse({
@@ -297,6 +406,7 @@ export const createStatelessLinkedinSearch = (
       enriched,
       warnings,
       coverage: discoveryResult.coverage,
+      providerCoverage,
     });
   };
 };
