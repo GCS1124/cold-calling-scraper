@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { waitUntil } from '@vercel/functions';
 import { runStatelessLinkedinSearch } from '../../../server/src/services/linkedin-stateless-search.js';
 import { vercelSearchService } from '../../../server/src/services/vercel-search-service.js';
+import { authorizeSearchRequest } from '../../../api/_lib/search-auth.js';
 
 vi.mock('../../../api/_lib/vercel-search-service.js', () => ({
   getVercelSearchService: vi.fn().mockResolvedValue(vercelSearchService),
@@ -17,6 +18,10 @@ vi.mock('../../../server/src/services/vercel-search-service.js', () => ({
 
 vi.mock('../../../server/src/services/linkedin-stateless-search.js', () => ({
   runStatelessLinkedinSearch: vi.fn(),
+}));
+
+vi.mock('../../../api/_lib/search-auth.js', () => ({
+  authorizeSearchRequest: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('@vercel/functions', () => ({
@@ -53,6 +58,7 @@ const createResponse = () => {
 describe('/api/search', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(authorizeSearchRequest).mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -133,6 +139,40 @@ describe('/api/search', () => {
     });
     expect(vercelSearchService.advanceSearch).toHaveBeenCalledWith('search-1');
     expect(waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes the authenticated owner to background advancement', async () => {
+    vi.mocked(authorizeSearchRequest).mockResolvedValue({ ownerId: 'owner-a' });
+    vi.mocked(vercelSearchService.startSearch).mockResolvedValue({
+      searchId: 'owner-search-1',
+      leads: [],
+      meta: {},
+    } as never);
+    vi.mocked(vercelSearchService.advanceSearch).mockReturnValue(new Promise(() => {}));
+    const { response, state } = createResponse();
+
+    await handler(
+      {
+        method: 'POST',
+        body: {
+          companyType: 'Dentist',
+          sourceMode: 'linkedin',
+          location: { mode: 'timezone', timeZone: 'EST' },
+          count: 50,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(200);
+    expect(vercelSearchService.startSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceMode: 'linkedin' }),
+      { ownerId: 'owner-a' },
+    );
+    expect(vercelSearchService.advanceSearch).toHaveBeenCalledWith(
+      'owner-search-1',
+      'owner-a',
+    );
   });
 
   it('returns a configuration error when search persistence is unavailable', async () => {

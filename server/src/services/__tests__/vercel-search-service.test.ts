@@ -188,6 +188,36 @@ describe('createVercelSearchServiceWithDeps', () => {
     ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
   });
 
+  it('does not let one owner advance another owner\'s durable job', async () => {
+    const store = createSearchJobStore();
+    const discoverLinkedinLeads = vi.fn();
+    const service = createVercelSearchServiceWithDeps({
+      store,
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      discoverLinkedinLeads,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'owner-isolated-search',
+      now: () => 1000,
+    });
+
+    const started = await service.startSearch(
+      {
+        companyType: 'Dentist',
+        city: 'Austin, TX',
+        count: 50,
+        sourceMode: 'linkedin',
+      },
+      { ownerId: 'owner-a' },
+    );
+
+    await expect(service.advanceSearch(started.searchId, 'owner-b')).resolves.toBeNull();
+    expect(discoverLinkedinLeads).not.toHaveBeenCalled();
+    await expect(store.get(started.searchId, 'owner-a')).resolves.toMatchObject({
+      status: 'queued',
+      ownerId: 'owner-a',
+    });
+  });
+
   it('caps the persisted completed result at the requested count', async () => {
     const candidates = Array.from({ length: 75 }, (_, index) =>
       makeLead({

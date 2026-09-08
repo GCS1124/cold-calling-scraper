@@ -62,7 +62,10 @@ export default async function handler(req: any, res: any) {
       callbackStatuses.has(response.meta.callback?.status ?? '')
     ) {
       waitUntil(
-        service.advanceSearch(searchId).catch((error) => {
+        (auth.ownerId
+          ? service.advanceSearch(searchId, auth.ownerId)
+          : service.advanceSearch(searchId)
+        ).catch((error) => {
           console.error('[api/search/:id/resume] background search failed', error);
         }),
       );

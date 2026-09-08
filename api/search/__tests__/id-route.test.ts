@@ -4,6 +4,7 @@ import { waitUntil } from '@vercel/functions';
 import { getSearchJobSnapshot } from '../../../server/src/services/search-job-snapshot.js';
 import { vercelSearchService } from '../../../server/src/services/vercel-search-service.js';
 import { getVercelSearchService } from '../../../api/_lib/vercel-search-service.js';
+import { authorizeSearchRequest } from '../../../api/_lib/search-auth.js';
 
 vi.mock('../../../server/src/services/search-job-snapshot.js', () => ({
   getSearchJobSnapshot: vi.fn(),
@@ -18,6 +19,10 @@ vi.mock('../../../server/src/services/vercel-search-service.js', () => ({
     getSearchSnapshot: vi.fn(),
     advanceSearch: vi.fn(),
   },
+}));
+
+vi.mock('../../../api/_lib/search-auth.js', () => ({
+  authorizeSearchRequest: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('@vercel/functions', () => ({
@@ -62,6 +67,7 @@ const createResponse = () => {
 describe('/api/search/[id]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(authorizeSearchRequest).mockResolvedValue({});
   });
 
   it('returns 204 when the snapshot is no longer available', async () => {
@@ -137,6 +143,7 @@ describe('/api/search/[id]', () => {
   });
 
   it('returns an in-progress snapshot without waiting for provider work', async () => {
+    vi.mocked(authorizeSearchRequest).mockResolvedValue({ ownerId: 'owner-a' });
     vi.mocked(getSearchJobSnapshot).mockResolvedValue({
       searchId: 'search-1',
       leads: [],
@@ -182,7 +189,8 @@ describe('/api/search/[id]', () => {
       searchId: 'search-1',
       meta: { status: 'discovering' },
     });
-    expect(vercelSearchService.advanceSearch).toHaveBeenCalledWith('search-1');
+    expect(getSearchJobSnapshot).toHaveBeenCalledWith('search-1', { ownerId: 'owner-a' });
+    expect(vercelSearchService.advanceSearch).toHaveBeenCalledWith('search-1', 'owner-a');
     expect(waitUntil).toHaveBeenCalledTimes(1);
   });
 

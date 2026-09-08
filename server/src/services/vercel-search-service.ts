@@ -1172,7 +1172,7 @@ export const createVercelSearchServiceWithDeps = (
   const advanceSearch = async (searchId: string, ownerId?: string) => {
     await store.ensureSchema();
 
-    const job = await store.get(searchId);
+    const job = await store.get(searchId, ownerId);
     if (!job) {
       return null;
     }
@@ -1190,10 +1190,11 @@ export const createVercelSearchServiceWithDeps = (
       now(),
       processingLeaseMs,
       processingToken,
+      ownerId,
     );
 
     if (!claimedJob) {
-      const latestJob = await store.get(searchId);
+      const latestJob = await store.get(searchId, ownerId);
       return latestJob ? renderResponse(latestJob, ownerId) : null;
     }
 

@@ -62,7 +62,11 @@ export default async function handler(req: any, res: any) {
     ) {
       waitUntil(
         getVercelSearchService()
-          .then((service) => service.advanceSearch(searchId))
+          .then((service) =>
+            auth.ownerId
+              ? service.advanceSearch(searchId, auth.ownerId)
+              : service.advanceSearch(searchId),
+          )
           .catch((error) => {
             console.error('[api/search/:id] background search failed', error);
           }),
