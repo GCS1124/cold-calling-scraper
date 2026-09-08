@@ -27,6 +27,11 @@ Every runtime response includes:
   summary of returned leads, not a probability or deliverability guarantee.
 - `meta.progress.providerCoverage`: provider observations with `configured`,
   `not_configured`, `returned`, `failed`, or `partial` status.
+- `researchCandidates` (AI mode when populated): every grounded or source-review
+  candidate returned by Gemini, including public source URLs, evidence, social
+  links, and model-reported phone/email fields labeled as unverified. These
+  records are retained for research and are never included in the exportable
+  `leads` array until independent public phone validation succeeds.
 
 ## Lead quality and identity fields
 
@@ -167,7 +172,14 @@ the final phone gate still applies.
 
 ### AI
 
-AI assistance is optional query wording support. Public discovery providers
-supply the leads and contact facts. Apollo, Lusha, ZoomInfo, and RocketReach are
-audited for limitation messaging only and are never called; no paid database is
-required.
+Gemini can expand public search lenses and return grounded public research
+candidates. Candidates and cited source details remain available for review even
+when the required public-phone gate excludes them from export. Public discovery
+providers supply independently validated lead and contact facts. Apollo, Lusha,
+ZoomInfo, and RocketReach are audited for limitation messaging only and are never
+called; no paid lead database is required. Gemini usage remains subject to the
+configured account's limits or charges.
+
+The evidence/dossier response also carries `researchCandidates` separately from
+`leads`, so requesting evidence does not discard AI-mode references that still
+need source or phone review.

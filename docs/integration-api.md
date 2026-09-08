@@ -226,6 +226,9 @@ all owner-scoped feedback require the configured Postgres connection.
   every error includes `requestId`, `code`, `retryable`, and `contractVersion`.
 - Evidence retains source URL, source family, authority tier, claim, status,
   and observation date where available.
+- AI-mode `researchCandidates` are retained in the search response and evidence
+  dossier separately from exportable `leads`, including candidates that still
+  need source or public-phone review.
 - `feedback` accepts only a lead id, bounded event type, and optional bounded
   reason. The server derives phone, profile, organization, and branch keys from
   the stored lead; the client cannot rewrite contact identity.
@@ -250,11 +253,13 @@ silently treated as current.
 
 ### AI
 
-AI assistance may rewrite or expand query wording. Public discovery providers
-supply the lead facts and contact evidence. If optional Gemini assistance is
-unavailable, deterministic query expansion continues where supported. AI never
-manufactures a person, owner claim, phone, email, employment relationship, or
-verification result.
+Gemini can expand public search wording and return grounded public research
+candidates. Every returned candidate and cited source is retained for review,
+even when it does not pass the required public-phone gate. Public discovery and
+deterministic validation supply the exportable lead facts and contact evidence.
+If Gemini is unavailable, deterministic query expansion continues where
+supported. AI never manufactures a person, owner claim, phone, email,
+employment relationship, or verification result.
 
 ## Error Handling
 

@@ -71,6 +71,26 @@ export type EmploymentStatus =
   | 'former'
   | 'unverified';
 
+/** Model-reported public research retained separately from phone-qualified leads. */
+export type ResearchCandidate = {
+  id: string;
+  name?: string;
+  organizationName?: string;
+  originalRole?: string;
+  location?: string;
+  website?: string;
+  profileUrl?: string;
+  reportedPhone?: string;
+  reportedEmail?: string;
+  socialLinks?: Array<{ platform: string; url: string }>;
+  sourceUrls: string[];
+  sourceTitles?: string[];
+  evidence?: string;
+  grounded: boolean;
+  status: 'needs_phone_validation' | 'needs_source_review';
+  discoveredAt: string;
+};
+
 export type Lead = {
   id: string;
   name: string;
@@ -202,6 +222,7 @@ export type SearchResponse = {
   contractVersion?: typeof SEARCH_RESPONSE_CONTRACT_VERSION;
   searchId: string;
   leads: Lead[];
+  researchCandidates?: ResearchCandidate[];
   meta: {
     sourceMode?: SearchModeCode;
     execution?: SearchExecutionContract;

@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ResearchCandidate } from '../../types/lead';
 import type { SearchResponse } from '../../types/search';
 import { buildResearchDossier } from '../research-dossier';
+
+const researchCandidate: ResearchCandidate = {
+  id: 'gemini-research-1',
+  name: 'Public Dental Owner Reference',
+  organizationName: 'Public Dental',
+  originalRole: 'Owner',
+  sourceUrls: ['https://publicdental.example/about'],
+  evidence: 'Public research reference retained for review.',
+  grounded: true,
+  status: 'needs_phone_validation',
+  discoveredAt: '2026-09-04T00:00:00.000Z',
+};
 
 const response: SearchResponse = {
   searchId: 'dossier-search-1',
@@ -35,6 +48,7 @@ const response: SearchResponse = {
       ],
     },
   ],
+  researchCandidates: [researchCandidate],
   meta: {
     sourceMode: 'linkedin',
     execution: {
@@ -102,6 +116,7 @@ describe('buildResearchDossier', () => {
       freshPhoneObservations: 1,
       tierCounts: { supported: 1 },
     });
+    expect(dossier.researchCandidates).toEqual([researchCandidate]);
     expect(dossier.limitations).toContain('Provider coverage is execution-specific.');
     expect(dossier.limitations.join(' ')).toContain('public');
   });

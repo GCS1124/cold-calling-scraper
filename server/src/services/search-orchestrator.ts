@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { Lead } from '../types/lead';
+import type { Lead, ResearchCandidate } from '../types/lead';
 import type {
   ProviderWarning,
   SearchProgress,
@@ -42,6 +42,8 @@ import {
   normalizeLeadSourceMode,
   type LeadSourceMode,
 } from './search-source-mode';
+import { expandQueryWithGemini } from '../providers/gemini';
+import { runGeminiQueryAssistance } from './gemini-query-assistance';
 import { getResearchDepthConfig } from './research-depth';
 import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 import { reverifyLeads } from './research-reverification';
@@ -79,6 +81,7 @@ type SearchJob = {
   status: SearchStatus;
   progress: SearchProgress;
   providerWarnings: ProviderWarning[];
+  researchCandidates?: ResearchCandidate[];
   expiresAt: number;
   createdAt: number;
   lastProgressAt: number;
@@ -137,6 +140,7 @@ type SearchDeps = {
   discoverLinkedinLeads?: (args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
+    queryHints?: string[];
     deadlineMs?: number;
   }) => Promise<LinkedInDiscoveryResult>;
   discoverAiLeads?: (args: {
@@ -154,6 +158,7 @@ type SearchDeps = {
   now?: () => number;
   idFactory?: () => string;
   feedbackStore?: LeadFeedbackStore;
+  expandQuery?: typeof expandQueryWithGemini;
 };
 
 const jobTtlMs = 15 * 60 * 1000;
@@ -267,6 +272,7 @@ const toResponse = (
     ...contract,
     searchId: job.searchId,
     leads,
+    ...(job.researchCandidates?.length ? { researchCandidates: job.researchCandidates } : {}),
     meta: {
       ...contract.meta,
       query: job.query,
@@ -405,6 +411,7 @@ const runLinkedinDiscovery = async (
   discoverLinkedinLeads: NonNullable<SearchDeps['discoverLinkedinLeads']>,
   enrichLinkedinLeads: SearchDeps['enrichLinkedinLeads'],
   discoverPublicListings: SearchDeps['discoverOsmLeads'] | undefined,
+  expandQuery: SearchDeps['expandQuery'],
   now: () => number,
 ) => {
   job.progress.currentSource = leadSourceModeLabels.linkedin;
@@ -430,11 +437,24 @@ const runLinkedinDiscovery = async (
   const discoveryDeadlineMs = Date.now() + linkedinProfileDiscoveryWindowMs;
   let linkedinFailed = false;
   let publicListingsFailed = false;
+  const assistancePromise = runGeminiQueryAssistance({
+    request,
+    locationLabel: location.label,
+    seedHints: request.researchBrief?.trim() ? [request.researchBrief.trim()] : [],
+    deadlineMs: discoveryDeadlineMs,
+    expandQuery,
+  });
   const linkedinResultPromise = withTimeout(
-    discoverLinkedinLeads({
-      request,
-      location,
-      deadlineMs: discoveryDeadlineMs,
+    assistancePromise.then((assistance) => {
+      job.progress.aiAssistance = assistance.aiAssistance;
+      recordProviderCoverage(job.progress, [assistance.coverage]);
+      if (assistance.warning) appendUniqueWarnings(job, [assistance.warning]);
+      return discoverLinkedinLeads({
+        request,
+        location,
+        queryHints: assistance.queryHints,
+        deadlineMs: discoveryDeadlineMs,
+      });
     }),
     linkedinDiscoveryTimeoutMs,
     'LinkedIn discovery timed out before the batch completed',
@@ -666,6 +686,12 @@ const runAiDiscovery = async (
       job.progress.publicQueryFamilyCounts = result.publicCoverage.queryFamilyCounts;
     }
     upsertLeads(job, result.leads, now);
+    if (result.researchCandidates?.length) {
+      job.researchCandidates = [
+        ...(job.researchCandidates ?? []),
+        ...result.researchCandidates,
+      ];
+    }
   } catch (error) {
     appendUniqueWarnings(job, [
       {
@@ -947,6 +973,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
   const discoverLinkedinLeads =
     deps.discoverLinkedinLeads ??
     (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
+  const expandQuery = deps.expandQuery ?? expandQueryWithGemini;
   const discoverAiLeads = deps.discoverAiLeads ?? discoverUsLeadsFromAiMode;
   const enrichLinkedinLeads =
     deps.enrichLinkedinLeads ??
@@ -1046,6 +1073,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
           discoverLinkedinLeads,
           enrichLinkedinLeads,
           discoverLinkedinListings,
+          expandQuery,
           now,
         );
       } catch (error) {
@@ -1212,6 +1240,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         status: 'queued',
         progress: createProgress(request.count),
         providerWarnings: [],
+        researchCandidates: [],
         expiresAt: startedAt + jobTtlMs,
         createdAt: startedAt,
         lastProgressAt: startedAt,

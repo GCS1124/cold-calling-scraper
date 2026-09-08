@@ -33,6 +33,7 @@ import { ResultsSummary } from '../components/results/results-summary';
 import { ResultsTable } from '../components/results/results-table';
 import { LeadQualityPanel } from '../components/results/lead-quality-details';
 import { ProviderCoveragePanel } from '../components/results/provider-coverage-panel';
+import { ResearchCandidatesPanel } from '../components/results/research-candidates-panel';
 import { compareLeadQuality, matchesQualityFilter, type QualityFilter } from '../utils/lead-quality';
 import { SearchForm } from '../components/search/search-form';
 import { useAuth } from '../hooks/use-auth';
@@ -323,9 +324,9 @@ export function HomePage({ searchApi }: HomePageProps) {
       ? `Your ${activeSourceLabel} search is waiting to begin.`
       : result.meta.status === 'discovering'
         ? activeSourceMode === 'linkedin'
-          ? 'Searching public LinkedIn profiles, capturing matched prospects, and removing duplicates.'
+          ? 'Searching public LinkedIn profiles, using multiple public search lenses, and removing duplicates.'
           : activeSourceMode === 'ai'
-            ? 'Running free public discovery in parallel, merging duplicates, and keeping source limitations visible.'
+            ? 'Running Gemini public research and deterministic discovery in parallel, merging duplicates, and retaining every research candidate.'
             : 'Scanning matching businesses and removing duplicates.'
       : result.meta.status === 'enriching'
               ? 'Adding emails, phone numbers, websites, and source details.'
@@ -334,7 +335,7 @@ export function HomePage({ searchApi }: HomePageProps) {
               : linkedinDiscoveryBlocked
                       ? 'Free public-search providers temporarily blocked this request. No unverified or fabricated leads were added.'
                       : phoneGateFailure
-                        ? `${phoneExcludedCount} public candidate${phoneExcludedCount === 1 ? '' : 's'} were discovered, but none exposed a validated public phone/mobile number. Those profiles were not accepted as leads.`
+                        ? `${phoneExcludedCount} public candidate${phoneExcludedCount === 1 ? '' : 's'} were discovered, but none exposed a validated public phone/mobile number. AI research references remain below for review; they were not accepted as exportable leads.`
                       : result.meta.status === 'failed'
                         ? 'The search could not be completed. Adjust the query and try again.'
                         : providerFailureNotice
@@ -344,7 +345,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                         : activeSourceMode === 'linkedin'
                           ? 'Profiles were ranked using public category, role, location, and cross-source signals. Contact fields are populated only from public websites.'
                         : activeSourceMode === 'ai'
-                          ? 'Free public AI matching finished. Results were deduplicated, and contact details were kept only when publicly listed.'
+                          ? 'Free public AI research finished. Gemini candidates and cited details were retained for review; only independently validated public phone leads are exportable.'
                           : resultsExhausted
                             ? 'We verified the available businesses and stopped once the discovery sources stopped returning new results.'
                             : 'Your leads are ready to review, filter, copy, and export.'
@@ -912,6 +913,10 @@ export function HomePage({ searchApi }: HomePageProps) {
                   <ProviderCoveragePanel coverage={providerCoverage} mode={activeSourceMode} />
                 ) : null}
 
+                {activeSourceMode === 'ai' && result.researchCandidates?.length ? (
+                  <ResearchCandidatesPanel candidates={result.researchCandidates} />
+                ) : null}
+
                 {activeSourceMode === 'ai' ? (
                   <div className="mt-3 rounded-2xl border border-blue-100 bg-white/80 p-4">
                     {phoneExcludedCount > 0 ? (
@@ -926,10 +931,10 @@ export function HomePage({ searchApi }: HomePageProps) {
 
                     <p className="mt-3 text-xs leading-5 text-slate-500">
                       {result.meta.progress.aiAssistance === 'enabled'
-                        ? 'Optional Gemini query assistance rewrote search wording only; public providers supplied the leads.'
+                        ? 'Gemini expanded public search lenses and returned grounded research candidates. Public evidence and phone validation decide which records become exportable leads.'
                         : result.meta.progress.aiAssistance === 'failed'
-                          ? 'Optional Gemini query assistance was unavailable; local public query expansion continued.'
-                          : 'Gemini query assistance is disabled by default. Matching uses local category and role intelligence, and public providers supply the leads.'}
+                          ? 'Gemini assistance was unavailable; deterministic public expansion continued and no unverified details were promoted.'
+                          : 'Gemini was not configured; deterministic local category and role expansion continued.'}
                     </p>
                   </div>
                 ) : null}

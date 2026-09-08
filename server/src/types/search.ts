@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { Lead } from './lead';
+import type { Lead, ResearchCandidate } from './lead';
 import type { LeadFeedbackEventType } from '../../../shared/lead-feedback';
 import type { LeadQualitySummary } from '../../../shared/lead-quality';
 import type {
@@ -101,7 +101,7 @@ export type SearchProgress = {
   publicQueryFamilyCounts?: Record<string, number>;
   /** Status of each provider involved in AI mode discovery. */
   providerCoverage?: ProviderCoverage[];
-  /** Whether an optional model-assisted query layer was used. Free mode keeps this disabled. */
+  /** Whether Gemini public search assistance ran. A configured key enables it unless disabled. */
   aiAssistance?: 'enabled' | 'disabled' | 'failed';
   totalCandidates: number;
   requestedCount: number;
@@ -117,6 +117,8 @@ export type SearchResponse = {
   contractVersion?: typeof SEARCH_RESPONSE_CONTRACT_VERSION;
   searchId: string;
   leads: Lead[];
+  /** Model-discovered public references retained for review even when they do not pass phone validation. */
+  researchCandidates?: ResearchCandidate[];
   meta: {
     /** Optional for compatibility with legacy snapshots; runtime responses include it. */
     sourceMode?: SearchModeCode;

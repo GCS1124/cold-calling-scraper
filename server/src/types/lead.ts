@@ -63,6 +63,30 @@ export type EmploymentStatus =
   | 'former'
   | 'unverified';
 
+/**
+ * A model-discovered public-web reference that has not yet passed the lead
+ * phone-evidence gate. Keep this separate from Lead so useful research is
+ * preserved without treating model-reported contact data as verified.
+ */
+export type ResearchCandidate = {
+  id: string;
+  name?: string;
+  organizationName?: string;
+  originalRole?: string;
+  location?: string;
+  website?: string;
+  profileUrl?: string;
+  reportedPhone?: string;
+  reportedEmail?: string;
+  socialLinks?: Array<{ platform: string; url: string }>;
+  sourceUrls: string[];
+  sourceTitles?: string[];
+  evidence?: string;
+  grounded: boolean;
+  status: 'needs_phone_validation' | 'needs_source_review';
+  discoveredAt: string;
+};
+
 export type Lead = {
   id: string;
   name: string;

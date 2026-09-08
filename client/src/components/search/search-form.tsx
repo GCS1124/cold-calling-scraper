@@ -100,9 +100,9 @@ export function SearchForm({
 
         <p className="text-xs font-normal leading-5 text-slate-500">
           {isLinkedInMode
-            ? `${sourceModeLabelsByCode.linkedin} searches public profiles only. Phone numbers and emails come from public business websites, listings, or attributed search snippets.`
+            ? `${sourceModeLabelsByCode.linkedin} searches public profiles only, with Gemini expanding multiple public search lenses when configured. Phone numbers and emails come from public business websites, listings, or attributed search snippets.`
             : isAiMode
-              ? 'AI mode searches public sources only: no paid databases, including commercial lead databases, private profiles, login sessions, or contact-reveal credits are used. Optional Gemini wording assistance is off by default.'
+              ? 'AI mode searches public sources only. Gemini can expand search lenses and return grounded public research candidates; no paid databases, private profiles, login sessions, or contact-reveal credits are used.'
               : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
         </p>
 
@@ -358,8 +358,9 @@ export function SearchForm({
               }
             />
             <span className="text-xs font-normal leading-5 text-slate-500">
-              AI turns this into a research plan. Gemini may help word queries, but public sources
-              and deterministic checks decide what becomes a lead.
+              AI turns this into a research plan. Gemini searches public-web lenses and returns
+              grounded candidate references; every candidate is retained for review, while public
+              phone evidence decides what becomes exportable.
             </span>
           </label>
 

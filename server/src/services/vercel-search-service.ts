@@ -50,6 +50,8 @@ import { reverifyLeads } from './research-reverification';
 import { noUsableResultsWarning } from './search-finalization';
 import { bridgeLinkedInWithPublicListings } from './public-entity-matching';
 import { recordProviderCoverage } from './provider-coverage';
+import { expandQueryWithGemini } from '../providers/gemini';
+import { runGeminiQueryAssistance } from './gemini-query-assistance';
 import {
   createSearchCallbackState,
   deliverSearchCompletionCallback,
@@ -120,6 +122,7 @@ type VercelSearchServiceDeps = {
   discoverLinkedinLeads?: (args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
+    queryHints?: string[];
     deadlineMs?: number;
   }) => Promise<LinkedInDiscoveryResult>;
   discoverAiLeads?: (args: {
@@ -128,6 +131,7 @@ type VercelSearchServiceDeps = {
     deadlineMs?: number;
   }) => Promise<AiDiscoveryResult>;
   enrichLinkedinLeads?: typeof enrichLinkedinLeadsWithPublicContacts;
+  expandQuery?: typeof expandQueryWithGemini;
   discoverOsmLeads?: (args: {
     request: { companyType: string; count: number };
     location: NormalizedUsLocation;
@@ -308,6 +312,7 @@ const runLinkedinDiscovery = async (
   location: NormalizedUsLocation,
   discoverLinkedinLeads: NonNullable<VercelSearchServiceDeps['discoverLinkedinLeads']>,
   discoverPublicListings: VercelSearchServiceDeps['discoverLinkedinListings'],
+  expandQuery: NonNullable<VercelSearchServiceDeps['expandQuery']>,
   now: () => number,
 ) => {
   job.progress.currentSource = leadSourceModeLabels.linkedin;
@@ -332,10 +337,23 @@ const runLinkedinDiscovery = async (
 
   const discoveryDeadlineMs = now() + getLinkedinProfileDiscoveryWindowMs(request.count);
   let publicListingsFailed = false;
-  const linkedinResultPromise = discoverLinkedinLeads({
+  const assistancePromise = runGeminiQueryAssistance({
     request,
-    location,
+    locationLabel: location.label,
+    seedHints: request.researchBrief?.trim() ? [request.researchBrief.trim()] : [],
     deadlineMs: discoveryDeadlineMs,
+    expandQuery,
+  });
+  const linkedinResultPromise = assistancePromise.then((assistance) => {
+    job.progress.aiAssistance = assistance.aiAssistance;
+    recordProviderCoverage(job.progress, [assistance.coverage]);
+    if (assistance.warning) appendWarningOnce(job, assistance.warning);
+    return discoverLinkedinLeads({
+      request,
+      location,
+      queryHints: assistance.queryHints,
+      deadlineMs: discoveryDeadlineMs,
+    });
   });
   const publicListingPromise = discoverPublicListings
     ? discoverPublicListings({
@@ -538,6 +556,12 @@ const runAiDiscovery = async (
   }
 
   mergeLeads(job, result.leads, now);
+  if (result.researchCandidates?.length) {
+    job.researchCandidates = [
+      ...(job.researchCandidates ?? []),
+      ...result.researchCandidates,
+    ];
+  }
   job.progress.batchesCompleted += 1;
 };
 
@@ -773,7 +797,7 @@ const discoverRegionLeads = async (
 const tickJob = async (
   job: SearchJobRecord,
   store: ReturnType<typeof createSearchJobStore>,
-  deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'now'>> &
+  deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'now' | 'expandQuery'>> &
     Pick<
       VercelSearchServiceDeps,
       | 'discoverGoogleMapsLeads'
@@ -914,6 +938,7 @@ const tickJob = async (
           targetLocation,
           discoverLinkedinLeads,
           deps.discoverLinkedinListings,
+          deps.expandQuery,
           deps.now,
         );
 
@@ -1122,6 +1147,7 @@ export const createVercelSearchServiceWithDeps = (
   const discoverLinkedinLeads =
     deps.discoverLinkedinLeads ??
     (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
+  const expandQuery = deps.expandQuery ?? expandQueryWithGemini;
   const discoverAiLeads = deps.discoverAiLeads ?? discoverUsLeadsFromAiMode;
   const enrichLinkedinLeads =
     deps.enrichLinkedinLeads ??
@@ -1207,6 +1233,7 @@ export const createVercelSearchServiceWithDeps = (
       discoverAiLeads,
       enrichLinkedinLeads,
       enrichWebsiteLead,
+      expandQuery,
       discoverOsmLeads: discoverOsm,
       now,
     });
@@ -1280,6 +1307,7 @@ export const createVercelSearchServiceWithDeps = (
         status: 'queued',
         progress: createProgress(normalizedRequest.count),
         leads: [],
+        researchCandidates: [],
         providerWarnings: [],
         searchSeeds: [],
         nextSeedIndex: 0,

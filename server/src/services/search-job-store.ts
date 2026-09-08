@@ -1,6 +1,6 @@
 import { Pool, type PoolConfig } from 'pg';
 
-import type { Lead } from '../types/lead';
+import type { Lead, ResearchCandidate } from '../types/lead';
 import type {
   ProviderWarning,
   SearchProgress,
@@ -51,6 +51,7 @@ export type SearchJobRecord = {
   status: SearchStatus;
   progress: SearchProgress;
   leads: Lead[];
+  researchCandidates?: ResearchCandidate[];
   providerWarnings: ProviderWarning[];
   searchSeeds: string[];
   nextSeedIndex: number;
@@ -307,6 +308,7 @@ const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
     locationMode: normalizeLocationMode(job.locationMode),
     progress: clampProgress(job.progress),
     leads: deduplicateLeads(Array.isArray(job.leads) ? job.leads : []),
+    researchCandidates: Array.isArray(job.researchCandidates) ? job.researchCandidates : [],
     providerWarnings: dedupeWarnings(
       Array.isArray(job.providerWarnings) ? job.providerWarnings : [],
     ),
@@ -371,6 +373,7 @@ const migrateJobPayload = (payload: unknown): SearchJobRecord | null => {
     status: raw.status,
     progress: raw.progress,
     leads: Array.isArray(raw.leads) ? raw.leads : [],
+    researchCandidates: Array.isArray(raw.researchCandidates) ? raw.researchCandidates : [],
     providerWarnings: Array.isArray(raw.providerWarnings)
       ? raw.providerWarnings
       : [],
@@ -1234,6 +1237,7 @@ export const toSearchResponse = (
     ...contract,
     searchId: job.searchId,
     leads,
+    ...(job.researchCandidates?.length ? { researchCandidates: job.researchCandidates } : {}),
     meta: {
       ...contract.meta,
       query: job.query,
@@ -1270,6 +1274,7 @@ export const createSearchJobRecord = (
         | 'callback'
         | 'status'
         | 'leads'
+        | 'researchCandidates'
         | 'providerWarnings'
         | 'searchSeeds'
         | 'nextSeedIndex'
@@ -1294,6 +1299,7 @@ export const createSearchJobRecord = (
     status: params.status ?? 'queued',
     progress: params.progress,
     leads: params.leads ?? [],
+    researchCandidates: params.researchCandidates ?? [],
     providerWarnings: params.providerWarnings ?? [],
     searchSeeds: params.searchSeeds ?? [],
     nextSeedIndex: params.nextSeedIndex ?? 0,

@@ -178,6 +178,7 @@ describe('search completion callback', () => {
         warnings: [],
         coverage: [],
         aiAssistance: 'disabled',
+        researchCandidates: [],
         enrichedCount: 0,
       }),
       callbackFetch: fetchImplementation,

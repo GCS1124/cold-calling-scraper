@@ -227,6 +227,23 @@ const emptyLinkedinResponse: SearchResponse = {
 const aiModeResponse: SearchResponse = {
   ...completedResponse,
   searchId: 'search-ai-mode',
+  researchCandidates: [
+    {
+      id: 'gemini-research-test-1',
+      name: 'Avery Smith',
+      organizationName: 'Austin Dental Studio',
+      originalRole: 'Owner',
+      location: 'Austin, TX',
+      reportedPhone: '+1 512 555 0100',
+      reportedEmail: 'avery@example.com',
+      sourceUrls: ['https://example.com/about'],
+      sourceTitles: ['Austin Dental Studio - About'],
+      evidence: 'Public owner reference from the company about page.',
+      grounded: true,
+      status: 'needs_phone_validation',
+      discoveredAt: '2026-09-08T00:00:00.000Z',
+    },
+  ],
   meta: {
     ...completedResponse.meta,
     query: 'Dentist in Eastern Time',
@@ -248,10 +265,10 @@ const aiModeResponse: SearchResponse = {
         },
         {
           providerId: 'gemini-query-assistance',
-          providerName: 'Gemini query assistance',
+          providerName: 'Gemini search planning',
           status: 'not_configured',
           leadCount: 0,
-          message: 'Disabled by default; requires a user-provided key and explicit opt-in.',
+          message: 'Gemini is not configured; deterministic local category and role expansion continues.',
         },
       ],
       aiAssistance: 'disabled',
@@ -784,7 +801,9 @@ describe('App', () => {
     expect(content).toContain('Public LinkedIn Search');
     expect(content).toContain('Apollo');
     expect(content).toContain('Not configured');
-    expect(content).toContain('Gemini query assistance is disabled by default');
+    expect(content).toContain('Gemini was not configured; deterministic local category and role expansion continued.');
+    expect(content).toContain('Nothing silently discarded');
+    expect(content).toContain('AI-reported phone');
 
     await unmount();
   });

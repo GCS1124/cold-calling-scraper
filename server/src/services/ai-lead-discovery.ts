@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { Lead } from '../types/lead';
+import type { Lead, ResearchCandidate } from '../types/lead';
 import type {
   ProviderCoverage,
   ProviderWarning,
@@ -22,7 +22,10 @@ import { freeAiModePolicy, salesProviderAudits } from '../providers/sales-intell
 import {
   expandQueryWithGemini,
   isGeminiQueryAssistanceEnabled,
+  isGeminiLeadDiscoveryEnabled,
 } from '../providers/gemini';
+import { discoverGeminiResearch, type GeminiResearchDiscovery } from './gemini-lead-discovery';
+import { runGeminiQueryAssistance } from './gemini-query-assistance';
 import { enforcePhoneRequirement } from './phone-requirement';
 import { noUsableResultsWarning } from './search-finalization';
 import { mergeLinkedInWithPublicListings } from './public-entity-matching';
@@ -39,6 +42,7 @@ export type AiDiscoveryResult = {
   warnings: ProviderWarning[];
   coverage: ProviderCoverage[];
   aiAssistance: 'enabled' | 'disabled' | 'failed';
+  researchCandidates: ResearchCandidate[];
   publicCoverage?: LinkedInDiscoveryResult['coverage'];
   enrichedCount: number;
 };
@@ -48,12 +52,11 @@ type AiDiscoveryDeps = {
   discoverPublicListings?: typeof discoverUsLeadsFromOsm;
   enrichPublicContacts?: typeof enrichLinkedinLeadsWithPublicContacts;
   expandQuery?: typeof expandQueryWithGemini;
+  discoverGemini?: typeof discoverGeminiResearch;
 };
 
 const discoveryWindowMs = 24_000;
 const contactEnrichmentWindowMs = 18_000;
-const queryAssistanceWindowMs = 8_000;
-
 const withTimeout = async <T>(promise: Promise<T>, deadlineMs: number, message: string) => {
   const remainingMs = Math.max(1_000, deadlineMs - Date.now());
   let timer: NodeJS.Timeout | undefined;
@@ -116,12 +119,21 @@ const buildCoverage = (): ProviderCoverage[] => [
   },
   {
     providerId: 'gemini-query-assistance',
-    providerName: 'Gemini query assistance',
+    providerName: 'Gemini search planning',
     status: isGeminiQueryAssistanceEnabled() ? 'configured' : 'not_configured',
     leadCount: 0,
     message: isGeminiQueryAssistanceEnabled()
-      ? 'Optional user-configured query wording only; Gemini is not a lead or contact source.'
-      : 'Disabled by default; requires a user-provided key and explicit opt-in.',
+      ? 'Gemini expands multiple public search lenses; public sources and deterministic checks decide what becomes a lead.'
+      : 'Gemini is not configured; deterministic local category and role expansion continues.',
+  },
+  {
+    providerId: 'gemini-public-discovery',
+    providerName: 'Gemini public discovery',
+    status: isGeminiLeadDiscoveryEnabled() ? 'configured' : 'not_configured',
+    leadCount: 0,
+    message: isGeminiLeadDiscoveryEnabled()
+      ? 'Grounded public-web candidates are retained for review; only public phone evidence makes a lead exportable.'
+      : 'Grounded public discovery is unavailable until Gemini is configured.',
   },
 ];
 
@@ -142,6 +154,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
   const enrichPublicContacts =
     deps.enrichPublicContacts ?? enrichLinkedinLeadsWithPublicContacts;
   const expandQuery = deps.expandQuery ?? expandQueryWithGemini;
+  const discoverGemini = deps.discoverGemini ?? discoverGeminiResearch;
 
   return async ({
     request,
@@ -161,49 +174,91 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     ];
     const coverage = buildCoverage();
     let aiAssistance: AiDiscoveryResult['aiAssistance'] = 'disabled';
+    let researchCandidates: ResearchCandidate[] = [];
     let queryHints: string[] = request.researchBrief?.trim()
       ? [request.researchBrief.trim()]
       : [];
 
-    if (isGeminiQueryAssistanceEnabled()) {
-      const rawQuery = `${request.companyType} in ${location.label}`;
-
-      try {
-        const assistedQuery = await withTimeout(
-          expandQuery(rawQuery, request),
-          Math.min(deadlineMs, Date.now() + queryAssistanceWindowMs),
-          'Gemini query assistance timed out; local public query expansion continued.',
-        );
-        const normalizedAssistedQuery = assistedQuery.trim().slice(0, 180);
-
-        if (normalizedAssistedQuery && normalizedAssistedQuery.toLowerCase() !== rawQuery.toLowerCase()) {
-          queryHints = [...queryHints, normalizedAssistedQuery];
-        }
-
-        aiAssistance = 'enabled';
-        updateCoverage(coverage, 'gemini-query-assistance', {
-          status: 'returned',
-          message: 'Gemini expanded search wording only; public providers supplied the results.',
-        });
-      } catch (error) {
-        aiAssistance = 'failed';
-        addWarning(warnings, {
-          providerId: 'gemini-query-assistance',
-          providerName: 'Gemini query assistance',
-          message:
-            error instanceof Error
-              ? `${error.message} Local public query expansion continued.`
-              : 'Gemini query assistance failed. Local public query expansion continued.',
-        });
-        updateCoverage(coverage, 'gemini-query-assistance', {
-          status: 'failed',
-          message: error instanceof Error ? error.message : 'Gemini query assistance failed.',
-        });
-      }
-    }
-    // Run independent free sources together so a slow LinkedIn provider does
-    // not consume the entire window before OSM gets a chance to return phones.
     const discoveryDeadlineMs = Math.min(deadlineMs, Date.now() + discoveryWindowMs);
+    // Gemini's candidate search does not depend on the query-lens response, so
+    // start it immediately and keep it independent from LinkedIn's timeout.
+    const geminiDiscoveryPromise: Promise<GeminiResearchDiscovery> = isGeminiLeadDiscoveryEnabled()
+      ? withTimeout(
+          discoverGemini(request, location.label),
+          Math.min(discoveryDeadlineMs, Date.now() + 14_000),
+          'Gemini public discovery timed out; other public sources were preserved.',
+        ).catch((error): GeminiResearchDiscovery => {
+          addWarning(warnings, {
+            providerId: 'gemini-public-discovery',
+            providerName: 'Gemini public discovery',
+            message:
+              error instanceof Error
+                ? `${error.message} Gemini candidates were not available for this search.`
+                : 'Gemini public discovery failed. Other public sources were preserved.',
+            severity: 'warning',
+          });
+          updateCoverage(coverage, 'gemini-public-discovery', {
+            status: 'failed',
+            message: error instanceof Error ? error.message : 'Gemini public discovery failed.',
+          });
+          return { candidates: [], groundingSources: [], leads: [] };
+        })
+      : Promise.resolve({ candidates: [], groundingSources: [], leads: [] });
+
+    const publicListingPromise = discoverPublicListings
+      ? withTimeout(
+          discoverPublicListings({
+            request: {
+              companyType: request.companyType,
+              count: getLeadDiscoveryCandidateTarget(request.count, 3),
+            },
+            location,
+            profile: resolveCategoryProfile(request.companyType),
+            deadlineMs: discoveryDeadlineMs,
+          }),
+          discoveryDeadlineMs,
+          'Public business-listing discovery timed out; other public sources were preserved.',
+        )
+          .then((leads) => {
+            updateCoverage(coverage, 'public-business-listings', {
+              status: 'returned',
+              leadCount: leads.length,
+              message: 'Free public business listings were merged with public discovery results.',
+            });
+            return leads;
+          })
+          .catch((error): Lead[] => {
+            addWarning(warnings, {
+              providerId: 'public-business-listings',
+              providerName: 'Public Business Listings',
+              message:
+                error instanceof Error
+                  ? `${error.message} Other public results were preserved.`
+                  : 'Public business-listing discovery failed. Other public results were preserved.',
+            });
+            updateCoverage(coverage, 'public-business-listings', {
+              status: 'failed',
+              message:
+                error instanceof Error ? error.message : 'Public business-listing discovery failed.',
+            });
+            return [];
+          })
+      : Promise.resolve([] as Lead[]);
+
+    const assistance = await runGeminiQueryAssistance({
+      request,
+      locationLabel: location.label,
+      seedHints: queryHints,
+      deadlineMs,
+      expandQuery,
+    });
+    queryHints = assistance.queryHints;
+    aiAssistance = assistance.aiAssistance;
+    updateCoverage(coverage, 'gemini-query-assistance', assistance.coverage);
+    if (assistance.warning) addWarning(warnings, assistance.warning);
+
+    // Run independent free sources together so a slow LinkedIn provider does
+    // not consume the entire window before other providers get a chance to return phones.
     const linkedinDiscoveryPromise = withTimeout(
       discoverLinkedin({
         request,
@@ -243,53 +298,26 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
         return { leads: [], warnings: [], blocked: false };
       });
 
-    const publicListingPromise = discoverPublicListings
-      ? withTimeout(
-          discoverPublicListings({
-            request: {
-              companyType: request.companyType,
-              count: getLeadDiscoveryCandidateTarget(request.count, 3),
-            },
-            location,
-            profile: resolveCategoryProfile(request.companyType),
-            deadlineMs: discoveryDeadlineMs,
-          }),
-          discoveryDeadlineMs,
-          'Public business-listing discovery timed out; LinkedIn results were preserved.',
-        )
-          .then((leads) => {
-            updateCoverage(coverage, 'public-business-listings', {
-              status: 'returned',
-              leadCount: leads.length,
-              message: 'Free public business listings were merged with public LinkedIn results.',
-            });
-            return leads;
-          })
-          .catch((error): Lead[] => {
-            addWarning(warnings, {
-              providerId: 'public-business-listings',
-              providerName: 'Public Business Listings',
-              message:
-                error instanceof Error
-                  ? `${error.message} LinkedIn results were preserved.`
-                  : 'Public business-listing discovery failed. LinkedIn results were preserved.',
-            });
-            updateCoverage(coverage, 'public-business-listings', {
-              status: 'failed',
-              message:
-                error instanceof Error ? error.message : 'Public business-listing discovery failed.',
-            });
-            return [];
-          })
-      : Promise.resolve([] as Lead[]);
-
-    const [discoveryResult, publicListingLeads] = await Promise.all([
+    const [discoveryResult, publicListingLeads, geminiResult] = await Promise.all([
       linkedinDiscoveryPromise,
       publicListingPromise,
+      geminiDiscoveryPromise,
     ]);
 
+    researchCandidates = geminiResult.candidates;
+    updateCoverage(coverage, 'gemini-public-discovery', {
+      status: isGeminiLeadDiscoveryEnabled() ? 'returned' : 'not_configured',
+      leadCount: researchCandidates.length,
+      message: isGeminiLeadDiscoveryEnabled()
+        ? `Retained ${researchCandidates.length} Gemini public research candidate${researchCandidates.length === 1 ? '' : 's'}; candidates remain visible even when phone validation excludes them from export.`
+        : 'Grounded Gemini public discovery was not configured.',
+    });
+
     let leads = deduplicateLeads(
-      mergeLinkedInWithPublicListings(discoveryResult.leads, publicListingLeads).map(enrichLead),
+      mergeLinkedInWithPublicListings(
+        [...discoveryResult.leads, ...geminiResult.leads],
+        publicListingLeads,
+      ).map(enrichLead),
     );
     let enrichedCount = 0;
 
@@ -345,6 +373,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       warnings,
       coverage,
       aiAssistance,
+      researchCandidates,
       publicCoverage: discoveryResult.coverage,
       enrichedCount,
     };
@@ -389,6 +418,7 @@ const buildResponse = ({
     ...contract,
     searchId,
     leads: visibleLeads,
+    researchCandidates: result.researchCandidates,
     meta: {
       ...contract.meta,
       query: `${request.companyType} in ${locationLabel}`,
@@ -458,6 +488,7 @@ export const runStatelessAiSearch = async (request: SearchRequest): Promise<Sear
         ],
         coverage: buildCoverage(),
         aiAssistance: 'disabled',
+        researchCandidates: [],
         enrichedCount: 0,
       },
     });

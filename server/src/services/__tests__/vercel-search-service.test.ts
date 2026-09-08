@@ -486,6 +486,62 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.meta.providerWarnings).toHaveLength(0);
   });
 
+  it('passes Gemini public search lenses into the durable LinkedIn path', async () => {
+    const previousApiKey = process.env.GEMINI_API_KEY;
+    const previousFlag = process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
+    try {
+      process.env.GEMINI_API_KEY = 'user-supplied-test-key';
+      delete process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
+      const discoverLinkedinLeads = vi.fn().mockResolvedValue({
+        leads: [makeLead({ id: 'linkedin-gemini-lens', source: 'LinkedIn' })],
+        warnings: [],
+        blocked: false,
+      });
+      const expandQuery = vi.fn().mockResolvedValue(['HVAC owner Austin', 'HVAC founder Austin']);
+      const service = createVercelSearchServiceWithDeps({
+        store: createSearchJobStore(),
+        normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+        discoverLinkedinLeads,
+        expandQuery,
+        discoverOsmLeads: vi.fn().mockResolvedValue([]),
+        idFactory: () => 'search-linkedin-gemini-lenses',
+        now: () => 1000,
+      });
+
+      const response = await service.startSearch({
+        companyType: 'HVAC contractor',
+        city: 'Austin, TX',
+        count: 50,
+        sourceMode: 'linkedin',
+      });
+      const snapshot = await service.getSearch(response.searchId);
+
+      expect(expandQuery).toHaveBeenCalledWith(
+        'HVAC contractor in Austin, TX',
+        expect.objectContaining({ companyType: 'HVAC contractor' }),
+      );
+      expect(discoverLinkedinLeads).toHaveBeenCalledWith(
+        expect.objectContaining({
+          queryHints: ['HVAC owner Austin', 'HVAC founder Austin'],
+        }),
+      );
+      expect(snapshot?.meta.progress.aiAssistance).toBe('enabled');
+      expect(snapshot?.meta.progress.providerCoverage).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            providerId: 'gemini-query-assistance',
+            status: 'returned',
+          }),
+        ]),
+      );
+    } finally {
+      if (previousApiKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previousApiKey;
+      if (previousFlag === undefined) delete process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
+      else process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = previousFlag;
+    }
+  });
+
   it('bridges a matching free listing phone into durable LinkedIn discovery', async () => {
     const owner = makeLead({
       id: 'linkedin-owner',
@@ -1339,6 +1395,7 @@ describe('createVercelSearchServiceWithDeps', () => {
         },
       ],
       aiAssistance: 'disabled' as const,
+      researchCandidates: [],
       enrichedCount: 0,
       publicCoverage: {
         queriesAttempted: 10,

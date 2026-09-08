@@ -113,8 +113,8 @@ const modeLimitations: Record<SearchModeCode, readonly string[]> = {
     'LinkedIn discovery uses public search results only; private profiles, authenticated sessions, Premium data, and paywalls are not accessed.',
   ],
   ai: [
-    'AI assistance can rewrite search wording only; public providers supply the lead and contact facts.',
-    'Commercial lead databases and paid contact lookups are not called.',
+    'Gemini can expand public search lenses and return grounded public research candidates; public evidence and the required phone gate decide what becomes an exportable lead.',
+    'Commercial lead databases, paid contact lookups, private profiles, authenticated sessions, and contact-reveal credits are not called.',
   ],
 };
 

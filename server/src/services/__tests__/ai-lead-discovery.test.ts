@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Lead } from '../../types/lead';
+import type { Lead, ResearchCandidate } from '../../types/lead';
 import { createAiLeadDiscovery } from '../ai-lead-discovery';
 import type { NormalizedUsLocation } from '../us-location';
 
@@ -46,6 +46,7 @@ const makeLead = (overrides: Partial<Lead> = {}): Lead => ({
 
 const originalGeminiApiKey = process.env.GEMINI_API_KEY;
 const originalGeminiFlag = process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
+const originalGeminiDiscoveryFlag = process.env.GEMINI_LEAD_DISCOVERY_ENABLED;
 
 afterEach(() => {
   if (originalGeminiApiKey === undefined) {
@@ -57,6 +58,11 @@ afterEach(() => {
     delete process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
   } else {
     process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = originalGeminiFlag;
+  }
+  if (originalGeminiDiscoveryFlag === undefined) {
+    delete process.env.GEMINI_LEAD_DISCOVERY_ENABLED;
+  } else {
+    process.env.GEMINI_LEAD_DISCOVERY_ENABLED = originalGeminiDiscoveryFlag;
   }
 });
 
@@ -200,5 +206,58 @@ describe('free AI lead discovery', () => {
     expect(result.coverage.find((entry) => entry.providerId === 'linkedin-public-search')?.status).toBe(
       'failed',
     );
+  });
+
+  it('retains every Gemini research candidate while keeping contact validation separate', async () => {
+    process.env.GEMINI_API_KEY = 'user-supplied-test-key';
+    delete process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
+    delete process.env.GEMINI_LEAD_DISCOVERY_ENABLED;
+
+    const candidate: ResearchCandidate = {
+      id: 'gemini-research-1',
+      name: 'Avery Smith',
+      organizationName: 'Austin Dental Studio',
+      originalRole: 'Owner',
+      reportedPhone: '+1 512 555 0100',
+      reportedEmail: 'avery@austindental.example',
+      sourceUrls: ['https://austindental.example/about'],
+      evidence: 'Public owner reference.',
+      grounded: true,
+      status: 'needs_phone_validation',
+      discoveredAt: '2026-09-08T00:00:00.000Z',
+    };
+    const discoverGemini = vi.fn().mockResolvedValue({
+      candidates: [candidate],
+      groundingSources: [],
+      leads: [makeLead({
+        id: 'gemini-lead-1',
+        name: 'Avery Smith',
+        organizationName: 'Austin Dental Studio',
+        mobile: '',
+        hasPhone: false,
+      })],
+    });
+
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({
+        leads: [],
+        warnings: [],
+        blocked: false,
+      }) as never,
+      expandQuery: vi.fn().mockResolvedValue([]) as never,
+      discoverGemini: discoverGemini as never,
+    })({
+      request: { companyType: 'Dentist', city: 'Austin, TX', count: 50 },
+      location,
+    });
+
+    expect(discoverGemini).toHaveBeenCalledOnce();
+    expect(result.researchCandidates).toEqual([candidate]);
+    expect(result.coverage.find((entry) => entry.providerId === 'gemini-public-discovery')).toMatchObject({
+      status: 'returned',
+      leadCount: 1,
+    });
+    expect(result.leads[0]?.mobile).toBe('');
+    expect(result.leads[0]?.hasPhone).toBe(false);
   });
 });

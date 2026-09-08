@@ -28,6 +28,8 @@ import {
 import { normalizeLeadSourceMode } from './search-source-mode';
 import { mergeProviderCoverage } from './provider-coverage';
 import { buildLeadQualitySummary } from './quality-summary';
+import { runGeminiQueryAssistance } from './gemini-query-assistance';
+import { expandQueryWithGemini } from '../providers/gemini';
 
 // Keep the no-database path within the Vercel function budget. It returns a
 // completed public-only response, so the client does not need a durable poll.
@@ -39,6 +41,7 @@ type StatelessLinkedInSearchDeps = {
   discoverPublicListings?: typeof discoverUsLeadsFromOsm;
   enrichPublicContacts?: typeof enrichLinkedinLeadsWithPublicContacts;
   normalizeLocation?: typeof normalizeUsLocation;
+  expandQuery?: typeof expandQueryWithGemini;
 };
 
 const addWarnings = (target: ProviderWarning[], incoming: ProviderWarning[]) => {
@@ -67,6 +70,7 @@ const buildResponse = ({
   warnings,
   coverage,
   providerCoverage,
+  aiAssistance,
 }: {
   searchId: string;
   startedAt: string;
@@ -78,6 +82,7 @@ const buildResponse = ({
   warnings: ProviderWarning[];
   coverage?: LinkedInDiscoveryResult['coverage'];
   providerCoverage?: ProviderCoverage[];
+  aiAssistance?: 'enabled' | 'disabled' | 'failed';
 }): SearchResponse => {
   const deduplicatedLeads = deduplicateLeads(leads);
   const phoneRequirement = enforcePhoneRequirement(deduplicatedLeads, request);
@@ -124,6 +129,7 @@ const buildResponse = ({
         publicQueryFamilies: coverage?.queryFamilies,
         publicQueryFamilyCounts: coverage?.queryFamilyCounts,
         providerCoverage,
+        aiAssistance,
         totalCandidates: deduplicatedLeads.length,
         requestedCount: request.count,
         foundCount: visibleLeads.length,
@@ -186,6 +192,7 @@ export const createStatelessLinkedinSearch = (
   const enrichPublicContacts =
     deps.enrichPublicContacts ?? enrichLinkedinLeadsWithPublicContacts;
   const normalizeLocation = deps.normalizeLocation ?? normalizeUsLocation;
+  const expandQuery = deps.expandQuery ?? expandQueryWithGemini;
 
   return async (request: SearchRequest): Promise<SearchResponse> => {
     const startedAt = new Date().toISOString();
@@ -225,6 +232,15 @@ export const createStatelessLinkedinSearch = (
     };
     let linkedinFailed = false;
     let publicListingsFailed = false;
+    let aiAssistance: 'enabled' | 'disabled' | 'failed' = 'disabled';
+    const discoveryDeadlineMs = Date.now() + discoveryWindowMs;
+    const assistancePromise = runGeminiQueryAssistance({
+      request,
+      locationLabel: location.label,
+      seedHints: request.researchBrief?.trim() ? [request.researchBrief.trim()] : [],
+      deadlineMs: discoveryDeadlineMs,
+      expandQuery,
+    });
 
     let discoveryResult: LinkedInDiscoveryResult = {
       leads: [],
@@ -232,13 +248,17 @@ export const createStatelessLinkedinSearch = (
       blocked: false,
     };
 
-    const discoveryDeadlineMs = Date.now() + discoveryWindowMs;
     const [linkedinResult, publicListingLeads] = await Promise.all([
       (async () => {
         try {
+          const assistance = await assistancePromise;
+          aiAssistance = assistance.aiAssistance;
+          addCoverage([assistance.coverage]);
+          if (assistance.warning) addWarnings(warnings, [assistance.warning]);
           return await discoverLinkedin({
             request,
             location,
+            queryHints: assistance.queryHints,
             deadlineMs: discoveryDeadlineMs,
           });
         } catch (error) {
@@ -425,6 +445,7 @@ export const createStatelessLinkedinSearch = (
       warnings,
       coverage: discoveryResult.coverage,
       providerCoverage,
+      aiAssistance,
     });
   };
 };

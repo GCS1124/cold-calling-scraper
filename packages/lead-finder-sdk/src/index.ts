@@ -136,6 +136,25 @@ export type IntegrationLead = {
   [key: string]: unknown;
 };
 
+export type ResearchCandidate = {
+  id: string;
+  name?: string;
+  organizationName?: string;
+  originalRole?: string;
+  location?: string;
+  website?: string;
+  profileUrl?: string;
+  reportedPhone?: string;
+  reportedEmail?: string;
+  socialLinks?: Array<{ platform: string; url: string }>;
+  sourceUrls: string[];
+  sourceTitles?: string[];
+  evidence?: string;
+  grounded: boolean;
+  status: 'needs_phone_validation' | 'needs_source_review';
+  discoveredAt: string;
+};
+
 export type LeadEvidence = {
   sourceUrl: string;
   sourceName: string;
@@ -171,6 +190,7 @@ export type SearchResponse = {
   contractVersion?: number;
   searchId: string;
   leads: IntegrationLead[];
+  researchCandidates?: ResearchCandidate[];
   meta: {
     sourceMode?: LeadFinderMode;
     execution?: SearchExecution;
@@ -214,6 +234,7 @@ export type ResearchDossier = {
   coverage: Record<string, number>;
   qualitySummary: Record<string, unknown>;
   leads: IntegrationLead[];
+  researchCandidates?: ResearchCandidate[];
 };
 
 export type IntegrationCapabilities = {

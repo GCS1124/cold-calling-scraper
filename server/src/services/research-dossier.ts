@@ -1,4 +1,4 @@
-import type { Lead } from '../types/lead';
+import type { Lead, ResearchCandidate } from '../types/lead';
 import type { SearchResponse } from '../types/search';
 import type { LeadQualitySummary } from '../../../shared/lead-quality';
 import { isPhoneQualifiedLead } from './phone-requirement';
@@ -39,6 +39,8 @@ export type ResearchDossier = {
   };
   qualitySummary: LeadQualitySummary;
   leads: Lead[];
+  /** AI-mode public research references are retained separately from qualified leads. */
+  researchCandidates: ResearchCandidate[];
 };
 
 const dossierLimitations = [
@@ -88,5 +90,6 @@ export const buildResearchDossier = (
     },
     qualitySummary: buildLeadQualitySummary(leads),
     leads,
+    researchCandidates: response.researchCandidates ?? [],
   };
 };

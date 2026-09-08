@@ -23,7 +23,7 @@ const modeCopy = {
   ai: {
     title: 'Free AI mode coverage',
     description:
-      'AI can improve query wording, while public providers supply and verify the leads. Commercial lead databases are audited but never called.',
+      'Gemini expands public search lenses and retains grounded candidate references. Public evidence and the required phone gate decide which records become exportable leads. Commercial lead databases are audited but never called.',
     badge: 'No paid lead databases',
   },
 } as const;
@@ -32,7 +32,9 @@ const getStatusLabel = (provider: ProviderCoverage) => {
   if (provider.status === 'not_configured') return 'Not configured';
   if (provider.status === 'returned') {
     return provider.providerId === 'gemini-query-assistance'
-      ? 'Query wording returned'
+      ? 'Search lenses returned'
+      : provider.providerId === 'gemini-public-discovery'
+        ? `${provider.leadCount} candidates retained`
       : `${provider.leadCount} observed`;
   }
   if (provider.status === 'partial') return 'Partial';
