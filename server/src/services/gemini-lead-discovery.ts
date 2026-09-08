@@ -9,6 +9,95 @@ export type GeminiResearchDiscovery = GeminiLeadDiscoveryResult & {
   leads: Lead[];
 };
 
+const normalizeIdentityPart = (value?: string) =>
+  value
+    ?.trim()
+    .toLowerCase()
+    .replace(/https?:\/\//g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() ?? '';
+
+const researchCandidateKey = (candidate: ResearchCandidate) => {
+  const profile = normalizeIdentityPart(candidate.profileUrl);
+  if (profile) return `profile:${profile}`;
+
+  const website = normalizeIdentityPart(candidate.website);
+  if (website) return `website:${website}`;
+
+  const name = normalizeIdentityPart(candidate.name);
+  const organization = normalizeIdentityPart(candidate.organizationName);
+  const location = normalizeIdentityPart(candidate.location);
+
+  if (name && organization) return `person:${name}|organization:${organization}`;
+  if (organization || name) return `entity:${organization || name}|location:${location}`;
+
+  return `id:${candidate.id}`;
+};
+
+const uniqueStrings = (values: string[]) => [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+
+const mergeResearchCandidate = (
+  current: ResearchCandidate,
+  incoming: ResearchCandidate,
+): ResearchCandidate => {
+  const grounded = current.grounded || incoming.grounded;
+  const evidence = uniqueStrings([current.evidence ?? '', incoming.evidence ?? '']).join(' | ');
+  const socialLinks = [
+    ...(current.socialLinks ?? []),
+    ...(incoming.socialLinks ?? []),
+  ].filter(
+    (link, index, links) => links.findIndex((candidate) => candidate.url === link.url) === index,
+  );
+
+  return {
+    ...current,
+    ...incoming,
+    name: current.name || incoming.name,
+    organizationName: current.organizationName || incoming.organizationName,
+    originalRole: current.originalRole || incoming.originalRole,
+    location: current.location || incoming.location,
+    website: current.website || incoming.website,
+    profileUrl: current.profileUrl || incoming.profileUrl,
+    reportedPhone: current.reportedPhone || incoming.reportedPhone,
+    reportedEmail: current.reportedEmail || incoming.reportedEmail,
+    sourceUrls: uniqueStrings([...current.sourceUrls, ...incoming.sourceUrls]).slice(0, 12),
+    sourceTitles: uniqueStrings([
+      ...(current.sourceTitles ?? []),
+      ...(incoming.sourceTitles ?? []),
+    ]).slice(0, 12),
+    ...(socialLinks.length ? { socialLinks: socialLinks.slice(0, 12) } : {}),
+    ...(evidence ? { evidence: evidence.slice(0, 2_000) } : {}),
+    grounded,
+    status: grounded ? 'needs_phone_validation' : 'needs_source_review',
+  };
+};
+
+/** Merge overlapping Gemini passes without dropping fields from either pass. */
+export const mergeResearchCandidates = (candidates: ResearchCandidate[]) => {
+  const merged = new Map<string, ResearchCandidate>();
+
+  for (const candidate of candidates) {
+    const key = researchCandidateKey(candidate);
+    const current = merged.get(key);
+    merged.set(key, current ? mergeResearchCandidate(current, candidate) : candidate);
+  }
+
+  return [...merged.values()];
+};
+
+export const mergeGroundingSources = (
+  sources: GeminiResearchDiscovery['groundingSources'],
+) => {
+  const merged = new Map<string, GeminiResearchDiscovery['groundingSources'][number]>();
+
+  for (const source of sources) {
+    if (!merged.has(source.url)) merged.set(source.url, source);
+  }
+
+  return [...merged.values()];
+};
+
 const decisionMakerRole = /\b(owner|founder|co[- ]?founder|chief|ceo|president|partner|principal|director|manager|operator|practice administrator|general manager|managing member)\b/i;
 
 const titleForCandidate = (candidate: ResearchCandidate) =>
@@ -89,8 +178,9 @@ export const buildLeadsFromGeminiCandidates = (
 export const discoverGeminiResearch = async (
   request: SearchRequest,
   locationLabel: string,
+  listingSeeds: Lead[] = [],
 ): Promise<GeminiResearchDiscovery> => {
-  const result = await discoverLeadsWithGemini(request, locationLabel);
+  const result = await discoverLeadsWithGemini(request, locationLabel, listingSeeds);
   return {
     ...result,
     leads: buildLeadsFromGeminiCandidates(result.candidates, request, locationLabel),

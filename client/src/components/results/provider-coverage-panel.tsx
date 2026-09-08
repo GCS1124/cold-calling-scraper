@@ -23,7 +23,7 @@ const modeCopy = {
   ai: {
     title: 'Free AI mode coverage',
     description:
-      'Gemini expands public search lenses and retains grounded candidate references. Public evidence and the required phone gate decide which records become exportable leads. Commercial lead databases are audited but never called.',
+      'Gemini expands public search lenses and enriches Google Business listing seeds with grounded company and decision-maker details. Public evidence and the required phone gate decide which records become exportable leads. Commercial lead databases are audited but never called.',
     badge: 'No paid lead databases',
   },
 } as const;
@@ -35,6 +35,8 @@ const getStatusLabel = (provider: ProviderCoverage) => {
       ? 'Search lenses returned'
       : provider.providerId === 'gemini-public-discovery'
         ? `${provider.leadCount} candidates retained`
+        : provider.providerId === 'gemini-listing-enrichment'
+          ? `${provider.leadCount} details retained`
       : `${provider.leadCount} observed`;
   }
   if (provider.status === 'partial') return 'Partial';

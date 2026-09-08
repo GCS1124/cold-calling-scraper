@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-import type { ResearchCandidate } from '../types/lead';
+import type { Lead, ResearchCandidate } from '../types/lead';
 import type { SearchRequest } from '../types/search';
 import { isPublicHttpUrl } from '../utils/public-url';
 
@@ -11,6 +11,7 @@ const geminiQueryModel = (process.env.GEMINI_QUERY_MODEL?.trim() || 'gemini-2.5-
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiQueryModel)}:generateContent`;
 const MAX_QUERY_HINTS = 8;
 const MAX_RESEARCH_CANDIDATES = 120;
+const MAX_LISTING_SEEDS = 40;
 
 const parsedGeminiTimeoutMs = Number(process.env.GEMINI_QUERY_TIMEOUT_MS ?? 5_500);
 const geminiTimeoutMs = Number.isFinite(parsedGeminiTimeoutMs)
@@ -252,6 +253,30 @@ export type GeminiLeadDiscoveryResult = {
   groundingSources: GroundingSource[];
 };
 
+export type GeminiListingSeed = Pick<
+  Lead,
+  'name' | 'organizationName' | 'address' | 'website' | 'listingUrl' | 'mobile' | 'source'
+>;
+
+const serializeListingSeeds = (listingSeeds: GeminiListingSeed[]) => {
+  const seeds = listingSeeds
+    .map((listing) => ({
+      name: readString(listing.name, 180),
+      organizationName: readString(listing.organizationName, 220),
+      address: readString(listing.address, 240),
+      website: normalizePublicSourceUrl(listing.website),
+      listingUrl: normalizePublicSourceUrl(listing.listingUrl),
+      publicPhone: readString(listing.mobile, 80),
+      source: readString(listing.source, 100),
+    }))
+    .filter((listing) => listing.name || listing.organizationName || listing.listingUrl)
+    .slice(0, MAX_LISTING_SEEDS);
+
+  if (!seeds.length) return '';
+
+  return `\nPublic Google Business (GMB) and other business-listing seeds to enrich (these are starting points, not private data):\n${JSON.stringify(seeds)}\nFor each seed you can support, search public pages for the company and its current owner, founder, principal, CEO, operator, practice administrator, or other decision-maker. Preserve the seed listingUrl in sourceUrls when you discuss that company. Re-check any phone or email against a cited public page; do not guess or infer missing values.`;
+};
+
 /**
  * Parse only candidates returned alongside Google Search grounding metadata.
  * Model-reported details are retained for review, but never promoted to
@@ -390,8 +415,11 @@ export const expandQueryWithGemini = async (
 export const discoverLeadsWithGemini = async (
   request: SearchRequest,
   locationLabel: string,
+  listingSeeds: GeminiListingSeed[] = [],
 ): Promise<GeminiLeadDiscoveryResult> => {
   if (!isGeminiLeadDiscoveryEnabled()) return { candidates: [], groundingSources: [] };
+
+  const listingSeedContext = serializeListingSeeds(listingSeeds);
 
   const response = await geminiRequest(
     {
@@ -399,7 +427,7 @@ export const discoverLeadsWithGemini = async (
         {
           parts: [
             {
-              text: `Use Google Search to find public, current US business lead candidates for this request. Search official company websites, public professional profile pages, trade associations, licensing or registry pages, news, public social links, and reputable business directories. Return JSON only with a candidates array, up to 40 concise records. Each record may include: name, organizationName, role, location, website, profileUrl, phone, email, sourceUrls, sourceTitles, evidence. Include only details visible in public search results or cited pages. Phone and email must be publicly listed business contact details, never guessed or inferred. Do not use private/authenticated profiles, Sales Navigator/Premium, paywalls, contact-reveal services, commercial lead databases, login sessions, or bypasses. Keep former or conflicting roles marked in evidence instead of presenting them as current. Always include sourceUrls for supporting pages; never fabricate a URL.\nCompany type: ${request.companyType}\nTarget location: ${locationLabel}\nResearch brief: ${request.researchBrief?.trim() || 'Find owner-led businesses and their publicly evidenced decision-makers.'}`,
+              text: `Use Google Search to find public, current US business lead candidates for this request. Search official company websites, public professional profile pages, trade associations, licensing or registry pages, news, public social links, and reputable business directories. Return JSON only with a candidates array, up to 40 concise records. Each record may include: name, organizationName, role, location, website, profileUrl, phone, email, socialLinks, sourceUrls, sourceTitles, evidence. Include only details visible in public search results or cited pages. Phone and email must be publicly listed business contact details, never guessed or inferred. Do not use private/authenticated profiles, Sales Navigator/Premium, paywalls, contact-reveal services, commercial lead databases, login sessions, or bypasses. Keep former or conflicting roles marked in evidence instead of presenting them as current. Always include sourceUrls for supporting pages; never fabricate a URL.\nCompany type: ${request.companyType}\nTarget location: ${locationLabel}\nResearch brief: ${request.researchBrief?.trim() || 'Find owner-led businesses and their publicly evidenced decision-makers.'}${listingSeedContext}`,
             },
           ],
         },

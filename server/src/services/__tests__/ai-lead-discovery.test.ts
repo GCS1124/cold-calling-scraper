@@ -260,4 +260,89 @@ describe('free AI lead discovery', () => {
     expect(result.leads[0]?.mobile).toBe('');
     expect(result.leads[0]?.hasPhone).toBe(false);
   });
+
+  it('passes Google Business listing companies to Gemini for public detail enrichment', async () => {
+    process.env.GEMINI_API_KEY = 'user-supplied-test-key';
+    process.env.GEMINI_LEAD_DISCOVERY_ENABLED = 'true';
+
+    const gmbLead = makeLead({
+      id: 'google-business-dental',
+      name: 'Austin Dental Studio',
+      headline: undefined,
+      source: 'Google Places',
+      listingUrl: 'https://www.google.com/maps/search/?api=1&query=Austin%20Dental%20Studio',
+      mobile: '+1 512 555 0198',
+      hasPhone: true,
+      verifiedPhone: true,
+    });
+    const candidate: ResearchCandidate = {
+      id: 'gemini-gmb-research-1',
+      name: 'Avery Smith',
+      organizationName: 'Austin Dental Studio',
+      originalRole: 'Owner',
+      reportedPhone: '+1 512 555 0198',
+      reportedEmail: 'avery@austindental.example',
+      sourceUrls: [gmbLead.listingUrl ?? ''],
+      evidence: 'Public pages identify Avery Smith as the owner of Austin Dental Studio.',
+      grounded: true,
+      status: 'needs_phone_validation',
+      discoveredAt: '2026-09-08T00:00:00.000Z',
+    };
+    const discoverGemini = vi.fn().mockImplementation(
+      async (_request: unknown, _locationLabel: string, listingSeeds: Lead[] = []) => ({
+        candidates: listingSeeds.length ? [candidate] : [],
+        groundingSources: [],
+        leads: listingSeeds.length
+          ? [
+              makeLead({
+                id: 'gemini-gmb-owner',
+                name: 'Avery Smith',
+                headline: 'Owner at Austin Dental Studio',
+                mobile: '',
+                hasPhone: false,
+                verifiedPhone: false,
+              }),
+            ]
+          : [],
+      }),
+    );
+
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({
+        leads: [],
+        warnings: [],
+        blocked: false,
+      }) as never,
+      discoverGmbListings: vi.fn().mockResolvedValue([gmbLead]) as never,
+      expandQuery: vi.fn().mockResolvedValue([]) as never,
+      discoverGemini: discoverGemini as never,
+      enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
+        leads,
+        warnings: [],
+        enrichedCount: leads.length,
+      })) as never,
+    })({
+      request: { companyType: 'Dentist', city: 'Austin, TX', count: 50 },
+      location,
+    });
+
+    expect(discoverGemini).toHaveBeenCalledTimes(2);
+    expect(discoverGemini.mock.calls[1]?.[2]).toEqual([gmbLead]);
+    expect(result.researchCandidates).toEqual([candidate]);
+    expect(result.coverage).toContainEqual(
+      expect.objectContaining({
+        providerId: 'google-places-ai',
+        status: 'returned',
+        leadCount: 1,
+      }),
+    );
+    expect(result.coverage).toContainEqual(
+      expect.objectContaining({
+        providerId: 'gemini-listing-enrichment',
+        status: 'returned',
+        leadCount: 1,
+      }),
+    );
+    expect(result.leads.some((lead) => lead.mobile === gmbLead.mobile)).toBe(true);
+  });
 });

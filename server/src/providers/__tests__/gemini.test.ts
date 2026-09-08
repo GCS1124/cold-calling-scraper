@@ -1,6 +1,15 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const axiosPost = vi.hoisted(() => vi.fn());
+
+vi.mock('axios', () => ({
+  default: {
+    post: axiosPost,
+  },
+}));
 
 import {
+  discoverLeadsWithGemini,
   isGeminiLeadDiscoveryEnabled,
   isGeminiQueryAssistanceEnabled,
   normalizeGeminiQueryHints,
@@ -12,6 +21,7 @@ const originalAssistanceFlag = process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
 const originalDiscoveryFlag = process.env.GEMINI_LEAD_DISCOVERY_ENABLED;
 
 afterEach(() => {
+  vi.clearAllMocks();
   for (const [name, value] of [
     ['GEMINI_API_KEY', originalApiKey],
     ['GEMINI_QUERY_ASSISTANCE_ENABLED', originalAssistanceFlag],
@@ -200,5 +210,50 @@ describe('Gemini public research layer', () => {
       grounded: true,
       status: 'needs_phone_validation',
     });
+  });
+
+  it('sends public Google Business listing seeds to the grounded enrichment request', async () => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    delete process.env.GEMINI_LEAD_DISCOVERY_ENABLED;
+    axiosPost.mockResolvedValue({
+      data: {
+        candidates: [
+          {
+            content: {
+              parts: [{ text: JSON.stringify({ candidates: [] }) }],
+            },
+            groundingMetadata: { groundingChunks: [] },
+          },
+        ],
+      },
+    });
+
+    await discoverLeadsWithGemini(
+      { companyType: 'Dentist', city: 'Austin, TX', count: 50 },
+      'Austin, TX',
+      [
+        {
+          name: 'Austin Dental Studio',
+          address: 'Austin, TX',
+          listingUrl: 'https://www.google.com/maps/search/?api=1&query=Austin%20Dental%20Studio',
+          mobile: '+1 512 555 0198',
+          source: 'Google Places',
+        },
+      ],
+    );
+
+    const requestBody = axiosPost.mock.calls[0]?.[1] as {
+      contents?: Array<{ parts?: Array<{ text?: string }> }>;
+    };
+    const requestConfig = axiosPost.mock.calls[0]?.[2] as {
+      headers?: Record<string, string>;
+    };
+    const prompt = requestBody.contents?.[0]?.parts?.[0]?.text ?? '';
+
+    expect(prompt).toContain('Public Google Business (GMB) and other business-listing seeds to enrich');
+    expect(prompt).toContain('Austin Dental Studio');
+    expect(prompt).toContain('publicPhone');
+    expect(prompt).toContain('google.com/maps/search');
+    expect(requestConfig.headers?.['x-goog-api-key']).toBe('test-key');
   });
 });
