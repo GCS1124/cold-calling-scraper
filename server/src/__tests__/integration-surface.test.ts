@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const legacyHandler = vi.hoisted(() => vi.fn());
 
-vi.mock('../../search/index.js', () => ({
+vi.mock('../../../api/search/index.js', () => ({
   default: legacyHandler,
 }));
 
-import capabilitiesHandler from '../capabilities';
-import versionedSearchHandler from '../search/index';
+import capabilitiesHandler from '../../../api/v1/capabilities';
+import versionedSearchHandler from '../../../api/v1/search';
 
 const createResponse = () => {
   const state = {
