@@ -934,6 +934,8 @@ export function HomePage({ searchApi }: HomePageProps) {
                         ? 'Gemini expanded public search lenses and returned grounded research candidates. Public evidence and phone validation decide which records become exportable leads.'
                         : result.meta.progress.aiAssistance === 'failed'
                           ? 'Gemini assistance was unavailable; deterministic public expansion continued and no unverified details were promoted.'
+                          : isWaiting
+                            ? 'Gemini public research is running when configured; public discovery continues in parallel and retained candidates will remain reviewable.'
                           : 'Gemini was not configured; deterministic local category and role expansion continued.'}
                     </p>
                   </div>

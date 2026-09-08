@@ -66,6 +66,21 @@ const maxQueryAreaDegrees = Number(
   process.env.OSM_MAX_QUERY_AREA_DEGREES ?? 35,
 );
 
+const readPositiveInt = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value ?? fallback);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : fallback;
+};
+
+const maxConcurrentBoxRequests = Math.min(
+  4,
+  Math.max(1, readPositiveInt(process.env.OSM_MAX_CONCURRENT_REQUESTS, 3)),
+);
+
+const maxBroadLocationBoxes = Math.max(
+  maxConcurrentBoxRequests,
+  readPositiveInt(process.env.OSM_MAX_BROAD_LOCATION_BOXES, 12),
+);
+
 const ignoredNamePattern =
   /^(unknown|unnamed|no name|private|closed|permanently closed|vacant)$/i;
 
@@ -651,33 +666,46 @@ export const discoverUsLeadsFromOsm = async ({
   const elementsById = new Map<string, OverpassElement>();
   let lastError: Error | null = null;
 
-  for (const box of boxes) {
-    if (deadlineMs !== undefined && Date.now() >= deadlineMs) {
-      break;
-    }
+  // Broad timezone and nationwide searches produce many boxes. A small worker
+  // pool reaches more independent Overpass replicas before the shared deadline
+  // without flooding a public endpoint or serially losing the whole window.
+  const searchBoxes =
+    location.mode === 'local' ? boxes : boxes.slice(0, maxBroadLocationBoxes);
+  let nextBoxIndex = 0;
+  const fetchNextBox = async () => {
+    while (true) {
+      const boxIndex = nextBoxIndex;
+      nextBoxIndex += 1;
 
-    if (elementsById.size >= targetCount * 2) {
-      break;
-    }
+      const box = searchBoxes[boxIndex];
+      if (!box) return;
+      if (deadlineMs !== undefined && Date.now() >= deadlineMs) return;
+      if (elementsById.size >= targetCount * 2) return;
 
-    const query = buildOverpassQuery(profile, box, targetCount);
+      const query = buildOverpassQuery(profile, box, targetCount);
 
-    try {
-      const response = await fetchOverpass(query, deadlineMs);
+      try {
+        const response = await fetchOverpass(query, deadlineMs);
 
-      for (const element of response.elements ?? []) {
-        const id = getElementStableId(element);
-        elementsById.set(id, element);
+        for (const element of response.elements ?? []) {
+          const id = getElementStableId(element);
+          elementsById.set(id, element);
+        }
+      } catch (error) {
+        lastError =
+          error instanceof Error
+            ? error
+            : new Error('Overpass discovery failed');
       }
-    } catch (error) {
-      lastError =
-        error instanceof Error
-          ? error
-          : new Error('Overpass discovery failed');
-
-      continue;
     }
-  }
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(maxConcurrentBoxRequests, searchBoxes.length) },
+      () => fetchNextBox(),
+    ),
+  );
 
   if (!elementsById.size && lastError) {
     throw lastError;

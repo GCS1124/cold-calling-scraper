@@ -177,6 +177,9 @@ const getDiscoveryStallMs = (requestedCount: number) =>
 const getDiscoveryStallLabel = (requestedCount: number) =>
   requestedCount >= 50 ? '45 seconds' : '20 seconds';
 
+const isTimeoutFailure = (error: unknown) =>
+  error instanceof Error && /deadline|timed out|timeout/i.test(error.message);
+
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: string) => {
   let timer: NodeJS.Timeout | undefined;
 
@@ -437,6 +440,7 @@ const runLinkedinDiscovery = async (
   const discoveryDeadlineMs = Date.now() + linkedinProfileDiscoveryWindowMs;
   let linkedinFailed = false;
   let publicListingsFailed = false;
+  let publicListingsTimedOut = false;
   const assistancePromise = runGeminiQueryAssistance({
     request,
     locationLabel: location.label,
@@ -477,7 +481,7 @@ const runLinkedinDiscovery = async (
         discoverPublicListings({
           request: {
             companyType: request.companyType,
-            count: getLeadDiscoveryCandidateTarget(request.count, 3),
+            count: request.count,
           },
           location,
           profile: resolveCategoryProfile(request.companyType),
@@ -490,6 +494,7 @@ const runLinkedinDiscovery = async (
         'Public business-listing discovery timed out before the batch completed',
       ).catch((error): Lead[] => {
         publicListingsFailed = true;
+        publicListingsTimedOut = isTimeoutFailure(error);
         appendUniqueWarnings(job, [
           {
             providerId: 'public-business-listings',
@@ -544,7 +549,9 @@ const runLinkedinDiscovery = async (
       providerId: 'public-business-listings',
       providerName: 'Public Business Listings',
       status: publicListingsFailed
-        ? 'failed'
+        ? publicListingsTimedOut
+          ? 'partial'
+          : 'failed'
         : publicListingLeads.length
           ? 'returned'
           : discoverPublicListings
@@ -836,9 +843,15 @@ const runRegionalDiscovery = async (
       try {
         const osmLeads = await withTimeout(
           discoverOsmLeads({
-            request: discoveryRequest,
+            request: {
+              ...discoveryRequest,
+              // OSM adds its own bounded headroom. Avoid multiplying the
+              // already-expanded Google discovery target for broad regions.
+              count: request.count,
+            },
             location: discoveryLocation,
             profile,
+            deadlineMs: now() + osmDiscoveryTimeoutMs,
           }),
           osmDiscoveryTimeoutMs,
           'OpenStreetMap discovery timed out before the batch completed',
@@ -860,7 +873,7 @@ const runRegionalDiscovery = async (
           {
             providerId: 'public-business-listings',
             providerName: 'OpenStreetMap',
-            status: 'failed',
+            status: isTimeoutFailure(error) ? 'partial' : 'failed',
             leadCount: 0,
             message: error instanceof Error ? error.message : 'OpenStreetMap discovery failed.',
           },

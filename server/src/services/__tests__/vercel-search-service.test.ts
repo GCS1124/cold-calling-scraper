@@ -593,7 +593,7 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(discoverLinkedinLeads).toHaveBeenCalledTimes(1);
     expect(discoverLinkedinListings).toHaveBeenCalledWith(
       expect.objectContaining({
-        request: { companyType: 'Dentist', count: 150 },
+        request: { companyType: 'Dentist', count: 50 },
       }),
     );
     expect(completed?.meta.status).toBe('complete');

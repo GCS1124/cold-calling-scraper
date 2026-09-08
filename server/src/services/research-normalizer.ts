@@ -588,19 +588,25 @@ const runNormalizedPersistence = async (runner: QueryRunner, job: SearchJobRecor
   await runner.query('begin');
 
   try {
-    await runner.query(
+    // node-postgres rejects multiple parameterized commands in one prepared
+    // statement. Keep each cleanup query separate while retaining the single
+    // transaction so retries still replace the normalized view atomically.
+    const cleanupQueries = [
       `
         delete from research_claim_evidence evidence
         using research_claims claims
-        where evidence.claim_id = claims.id and claims.search_id = $1;
-        delete from research_claims where search_id = $1;
-        delete from research_contact_points where search_id = $1;
-        delete from research_verification_events where search_id = $1;
-        delete from research_opportunity_signals where search_id = $1;
-        delete from research_job_steps where search_id = $1 and step_key = 'normalized-persistence';
+        where evidence.claim_id = claims.id and claims.search_id = $1
       `,
-      [job.searchId],
-    );
+      'delete from research_claims where search_id = $1',
+      'delete from research_contact_points where search_id = $1',
+      'delete from research_verification_events where search_id = $1',
+      'delete from research_opportunity_signals where search_id = $1',
+      "delete from research_job_steps where search_id = $1 and step_key = 'normalized-persistence'",
+    ];
+
+    for (const query of cleanupQueries) {
+      await runner.query(query, [job.searchId]);
+    }
 
     const stepStatus = job.status === 'cancelled' ? 'cancelled' : 'complete';
     await runner.query(

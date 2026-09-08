@@ -181,6 +181,9 @@ const getMaxTickDurationMs = (requestedCount: number) =>
   requestedCount >= 50 ? 45_000 : 30_000;
 const processingLeaseMs = 70_000;
 
+const isTimeoutFailure = (error: unknown) =>
+  error instanceof Error && /deadline|timed out|timeout/i.test(error.message);
+
 const isVercelRuntime = () =>
   process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV);
 
@@ -337,6 +340,7 @@ const runLinkedinDiscovery = async (
 
   const discoveryDeadlineMs = now() + getLinkedinProfileDiscoveryWindowMs(request.count);
   let publicListingsFailed = false;
+  let publicListingsTimedOut = false;
   const assistancePromise = runGeminiQueryAssistance({
     request,
     locationLabel: location.label,
@@ -359,7 +363,7 @@ const runLinkedinDiscovery = async (
     ? discoverPublicListings({
         request: {
           companyType: request.companyType,
-          count: getLeadDiscoveryCandidateTarget(request.count, 3),
+          count: request.count,
         },
         location,
         profile: resolveCategoryProfile(request.companyType),
@@ -369,6 +373,7 @@ const runLinkedinDiscovery = async (
         ),
       }).catch((error): Lead[] => {
         publicListingsFailed = true;
+        publicListingsTimedOut = isTimeoutFailure(error);
         appendWarningOnce(job, {
           providerId: 'public-business-listings',
           providerName: 'Public Business Listings',
@@ -404,7 +409,9 @@ const runLinkedinDiscovery = async (
       providerId: 'public-business-listings',
       providerName: 'Public Business Listings',
       status: publicListingsFailed
-        ? 'failed'
+        ? publicListingsTimedOut
+          ? 'partial'
+          : 'failed'
         : publicListingLeads.length
           ? 'returned'
           : discoverPublicListings

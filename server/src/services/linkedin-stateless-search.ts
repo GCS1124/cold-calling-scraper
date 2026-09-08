@@ -20,7 +20,6 @@ import { enforcePhoneRequirement } from './phone-requirement';
 import { noUsableResultsWarning } from './search-finalization';
 import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { resolveCategoryProfile } from './us-category-mapping';
-import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 import {
   buildSearchExecutionContract,
   buildSearchResponseContract,
@@ -35,6 +34,9 @@ import { expandQueryWithGemini } from '../providers/gemini';
 // completed public-only response, so the client does not need a durable poll.
 const discoveryWindowMs = 25_000;
 const contactEnrichmentWindowMs = 18_000;
+
+const isTimeoutFailure = (error: unknown) =>
+  error instanceof Error && /deadline|timed out|timeout/i.test(error.message);
 
 type StatelessLinkedInSearchDeps = {
   discoverLinkedin?: typeof discoverUsLeadsFromLinkedinSearch;
@@ -232,6 +234,7 @@ export const createStatelessLinkedinSearch = (
     };
     let linkedinFailed = false;
     let publicListingsFailed = false;
+    let publicListingsTimedOut = false;
     let aiAssistance: 'enabled' | 'disabled' | 'failed' = 'disabled';
     const discoveryDeadlineMs = Date.now() + discoveryWindowMs;
     const assistancePromise = runGeminiQueryAssistance({
@@ -276,7 +279,7 @@ export const createStatelessLinkedinSearch = (
           const listings = await discoverPublicListings({
             request: {
               companyType: request.companyType,
-              count: getLeadDiscoveryCandidateTarget(request.count, 3),
+              count: request.count,
             },
             location,
             profile: resolveCategoryProfile(request.companyType),
@@ -298,6 +301,7 @@ export const createStatelessLinkedinSearch = (
           return listings;
         } catch (error) {
           publicListingsFailed = true;
+          publicListingsTimedOut = isTimeoutFailure(error);
           addWarnings(warnings, [
             {
               providerId: 'public-business-listings',
@@ -331,7 +335,9 @@ export const createStatelessLinkedinSearch = (
         providerId: 'public-business-listings',
         providerName: 'Public Business Listings',
         status: publicListingsFailed
-          ? 'failed'
+          ? publicListingsTimedOut
+            ? 'partial'
+            : 'failed'
           : discoverPublicListings
             ? 'returned'
             : 'not_configured',

@@ -57,6 +57,10 @@ type AiDiscoveryDeps = {
 
 const discoveryWindowMs = 24_000;
 const contactEnrichmentWindowMs = 18_000;
+// Keep the orchestration budget at least as large as Gemini's grounded request
+// budget so the wrapper does not discard a response that the provider is still
+// allowed to finish.
+const geminiDiscoveryTimeoutMs = 20_000;
 const withTimeout = async <T>(promise: Promise<T>, deadlineMs: number, message: string) => {
   const remainingMs = Math.max(1_000, deadlineMs - Date.now());
   let timer: NodeJS.Timeout | undefined;
@@ -74,6 +78,9 @@ const withTimeout = async <T>(promise: Promise<T>, deadlineMs: number, message: 
     }
   }
 };
+
+const isTimeoutFailure = (error: unknown) =>
+  error instanceof Error && /deadline|timed out|timeout/i.test(error.message);
 
 const addWarning = (warnings: ProviderWarning[], warning: ProviderWarning) => {
   if (
@@ -175,6 +182,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     const coverage = buildCoverage();
     let aiAssistance: AiDiscoveryResult['aiAssistance'] = 'disabled';
     let researchCandidates: ResearchCandidate[] = [];
+    let geminiDiscoveryFailed = false;
     let queryHints: string[] = request.researchBrief?.trim()
       ? [request.researchBrief.trim()]
       : [];
@@ -183,11 +191,12 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     // Gemini's candidate search does not depend on the query-lens response, so
     // start it immediately and keep it independent from LinkedIn's timeout.
     const geminiDiscoveryPromise: Promise<GeminiResearchDiscovery> = isGeminiLeadDiscoveryEnabled()
-      ? withTimeout(
+        ? withTimeout(
           discoverGemini(request, location.label),
-          Math.min(discoveryDeadlineMs, Date.now() + 14_000),
+          Math.min(discoveryDeadlineMs, Date.now() + geminiDiscoveryTimeoutMs),
           'Gemini public discovery timed out; other public sources were preserved.',
         ).catch((error): GeminiResearchDiscovery => {
+          geminiDiscoveryFailed = true;
           addWarning(warnings, {
             providerId: 'gemini-public-discovery',
             providerName: 'Gemini public discovery',
@@ -198,7 +207,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
             severity: 'warning',
           });
           updateCoverage(coverage, 'gemini-public-discovery', {
-            status: 'failed',
+            status: isTimeoutFailure(error) ? 'partial' : 'failed',
             message: error instanceof Error ? error.message : 'Gemini public discovery failed.',
           });
           return { candidates: [], groundingSources: [], leads: [] };
@@ -210,7 +219,10 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
           discoverPublicListings({
             request: {
               companyType: request.companyType,
-              count: getLeadDiscoveryCandidateTarget(request.count, 3),
+              // The OSM provider adds its own phone-gate headroom. Passing the
+              // already-expanded target multiplied broad timezone queries into
+              // unnecessarily large Overpass requests.
+              count: request.count,
             },
             location,
             profile: resolveCategoryProfile(request.companyType),
@@ -237,7 +249,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
                   : 'Public business-listing discovery failed. Other public results were preserved.',
             });
             updateCoverage(coverage, 'public-business-listings', {
-              status: 'failed',
+              status: isTimeoutFailure(error) ? 'partial' : 'failed',
               message:
                 error instanceof Error ? error.message : 'Public business-listing discovery failed.',
             });
@@ -306,11 +318,17 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
 
     researchCandidates = geminiResult.candidates;
     updateCoverage(coverage, 'gemini-public-discovery', {
-      status: isGeminiLeadDiscoveryEnabled() ? 'returned' : 'not_configured',
+      status: !isGeminiLeadDiscoveryEnabled()
+        ? 'not_configured'
+        : geminiDiscoveryFailed
+          ? 'partial'
+          : 'returned',
       leadCount: researchCandidates.length,
-      message: isGeminiLeadDiscoveryEnabled()
-        ? `Retained ${researchCandidates.length} Gemini public research candidate${researchCandidates.length === 1 ? '' : 's'}; candidates remain visible even when phone validation excludes them from export.`
-        : 'Grounded Gemini public discovery was not configured.',
+      message: !isGeminiLeadDiscoveryEnabled()
+        ? 'Grounded Gemini public discovery was not configured.'
+        : geminiDiscoveryFailed
+          ? 'Gemini public discovery was not available; public candidates from other sources were preserved.'
+          : `Retained ${researchCandidates.length} Gemini public research candidate${researchCandidates.length === 1 ? '' : 's'}; candidates remain visible even when phone validation excludes them from export.`,
     });
 
     let leads = deduplicateLeads(
