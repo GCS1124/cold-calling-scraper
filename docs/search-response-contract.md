@@ -1,8 +1,9 @@
 # Search response contract
 
-The three search modes share one additive response contract. It is an internal
-contract used by the web client, the durable worker, and the stateless fallback;
-it does not create a new public API product or expose a new provider endpoint.
+The three search modes share one additive response contract. It is used by the
+web client, the durable worker, the stateless fallback, and the versioned
+first-party integration preview under `/api/v1`; it does not expose a provider
+endpoint.
 
 ## Envelope
 
@@ -102,6 +103,13 @@ posture: production must set the flag and configure Supabase Auth, otherwise
 the deployment does not provide tenant isolation. Stateless LinkedIn and AI
 fallbacks still verify the caller before returning a response but cannot offer
 cross-instance replay or later owner-scoped polling without durable storage.
+
+The versioned `/api/v1` integration surface always requires an owner. Server-to-
+server clients may send `x-api-key: <integration key>`; the server compares a
+SHA-256 digest against `LEAD_FINDER_INTEGRATION_API_KEYS` and never stores or
+returns the raw key. A request must use either the integration key or a
+Supabase bearer token, not both. The unversioned application routes retain
+their existing authentication behavior for browser compatibility.
 
 ## Feedback and suppression
 

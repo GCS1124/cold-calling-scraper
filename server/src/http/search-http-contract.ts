@@ -9,7 +9,8 @@ import { isValidIdempotencyKey } from '../services/search-idempotency';
 
 export type RequestLike = {
   headers?: Record<string, string | string[] | undefined>;
-  [key: string]: unknown;
+  /** Internal marker used only by the versioned integration route wrappers. */
+  requireAuthenticatedOwner?: boolean;
 };
 
 type ResponseLike = {

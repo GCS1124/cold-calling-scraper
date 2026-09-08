@@ -1,5 +1,6 @@
 import cors from 'cors';
 import express from 'express';
+import type { NextFunction, Request, Response } from 'express';
 
 import { createSearchRouter, type SearchService } from './routes/search';
 import type {
@@ -7,6 +8,10 @@ import type {
   SearchFeedbackRequest,
   SearchStartContext,
 } from './types/search';
+import { buildIntegrationCapabilities } from '../../shared/integration-contract';
+import {
+  enforceIntegrationRateLimit,
+} from './http/integration-rate-limit';
 
 type AppDeps = {
   search?: SearchService;
@@ -56,12 +61,39 @@ const createLazySearchService = (): SearchService => {
 export const createApp = (deps: AppDeps = {}) => {
   const app = express();
 
+  const requireIntegrationOwner = (
+    req: Request,
+    _res: Response,
+    next: NextFunction,
+  ) => {
+    (req as Request & { requireAuthenticatedOwner?: boolean }).requireAuthenticatedOwner = true;
+    next();
+  };
+  const enforceIntegrationTrafficProtection = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    if (await enforceIntegrationRateLimit(req, res)) next();
+  };
+
   app.use(cors());
   app.use(express.json());
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
-  app.use('/api/search', createSearchRouter(deps.search ?? createLazySearchService()));
+  const search = deps.search ?? createLazySearchService();
+  app.get('/api/v1/capabilities', (_req, res) => {
+    res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=60');
+    res.json({ ...buildIntegrationCapabilities(), requestId: 'local-capabilities' });
+  });
+  app.use('/api/search', createSearchRouter(search));
+  app.use(
+    '/api/v1/search',
+    requireIntegrationOwner,
+    enforceIntegrationTrafficProtection,
+    createSearchRouter(search),
+  );
 
   return app;
 };

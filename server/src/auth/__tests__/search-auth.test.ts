@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 
 import {
   authenticateSearchRequest,
@@ -79,5 +80,46 @@ describe('search authentication', () => {
       code: 'AUTH_UNAVAILABLE',
       status: 503,
     });
+  });
+
+  it('authenticates an owner-scoped integration API key without exposing the raw key', async () => {
+    const rawKey = 'lfp_test_integration_secret';
+    vi.stubEnv(
+      'LEAD_FINDER_INTEGRATION_API_KEYS',
+      JSON.stringify([
+        {
+          id: 'crm-test',
+          ownerId: 'workspace-123',
+          sha256: createHash('sha256').update(rawKey).digest('hex'),
+        },
+      ]),
+    );
+
+    await expect(
+      authenticateSearchRequest({ headers: { 'x-api-key': rawKey } }),
+    ).resolves.toEqual({ ownerId: 'workspace-123', apiKeyId: 'crm-test' });
+  });
+
+  it('rejects an invalid integration API key', async () => {
+    vi.stubEnv(
+      'LEAD_FINDER_INTEGRATION_API_KEYS',
+      JSON.stringify([
+        {
+          id: 'crm-test',
+          ownerId: 'workspace-123',
+          sha256: createHash('sha256').update('expected-key').digest('hex'),
+        },
+      ]),
+    );
+
+    await expect(
+      authenticateSearchRequest({ headers: { 'x-api-key': 'wrong-key' } }),
+    ).rejects.toMatchObject({ code: 'AUTH_INVALID', status: 401 });
+  });
+
+  it('requires owner authentication for the versioned integration route', async () => {
+    await expect(
+      authenticateSearchRequest({ requireAuthenticatedOwner: true, headers: {} }),
+    ).rejects.toMatchObject({ code: 'AUTH_REQUIRED', status: 401 });
   });
 });

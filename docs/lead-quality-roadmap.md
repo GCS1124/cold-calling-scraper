@@ -1,6 +1,6 @@
 # Lead quality roadmap
 
-Updated: 2026-09-08. Scope: improve GMB, LinkedIn public discovery, and AI mode in the existing React/Vite product. No new public API product or endpoints are planned.
+Updated: 2026-09-08. Scope: improve GMB, LinkedIn public discovery, and AI mode in the existing React/Vite product. Provider APIs remain internal; a versioned first-party integration surface is now available in preview.
 
 ## Product outcome
 
@@ -38,7 +38,7 @@ Observed issues in the baseline:
 
 ## Architecture
 
-Existing UI -> validated search input -> bounded discovery by mode -> identity resolution -> public website research -> contact evidence -> qualification -> ranking -> result snapshot -> dossier/export. A versioned internal response contract now carries the source mode, mandatory public-phone policy, limitations, provider coverage, execution lifecycle, and phone-qualified quality summary through local, durable, and stateless responses without creating a new public API product.
+Existing UI or versioned integration client -> validated search input -> bounded discovery by mode -> identity resolution -> public website research -> contact evidence -> qualification -> ranking -> result snapshot -> dossier/export. A versioned response contract now carries the source mode, mandatory public-phone policy, limitations, provider coverage, execution lifecycle, and phone-qualified quality summary through local, durable, stateless, and integration responses. Provider APIs are not exposed as customer-facing endpoints.
 
 Shared types describe evidence and quality. Server services own qualification and scoring. UI components render the assessment and offer filters; they do not reinterpret provider data or silently promote legacy records. Existing routes remain internal application transport.
 
@@ -96,6 +96,29 @@ Record company and domain precision, phone-business association, duplicate rate,
 
 Run automated unit/integration checks, recorded provider contract fixtures, queue recovery tests, desktop/mobile Playwright checks, and a small real-provider smoke matrix. Publish only after reviewing the actual changes and confirming deployment/readback separately from Git publication. Remove temporary browser artifacts from the repository before publication.
 
+### 7. Integration productization (preview surface implemented; production gates pending)
+
+Expose one provider-agnostic `/api/v1` contract for start, poll, evidence,
+cancel, resume, reverify, and owner-scoped feedback. Require an owner on every
+versioned search operation, support hashed server-side integration keys, keep
+Supabase bearer authentication compatible, apply per-credential rate limits,
+and publish capabilities so clients can discover modes and lifecycle behavior
+without coupling to the UI. Preserve the same mandatory phone gate, evidence
+provenance, limitations, idempotency, request IDs, and error codes that the web
+client uses.
+
+Before production integration access, add audit-log retention, rotation/revocation
+controls, a durable worker completion callback, typed SDK generation, and
+contract compatibility tests. Do not promise webhooks, SLAs, personal mobile
+data, email deliverability, or all-internet coverage until the corresponding
+evidence and operational measurements exist.
+
+Acceptance: an external client can discover capabilities, authenticate without
+sharing a browser session, start one of all three modes, safely retry a lost
+start, poll only when the response says polling is supported, retrieve evidence,
+and distinguish provider failure from zero yield. Two integration owners cannot
+read or suppress each other's leads.
+
 ## Customer validation
 
 Invite willing pilot users to evaluate blind samples from each mode against their current workflow. Measure accepted leads per hour, wrong-company rate, time saved verifying contacts, repeat searches, exports actually used, and stated willingness to pay. Do not send outreach or place calls automatically. Treat paid conversion and repeat usage as market evidence, not something that can be guaranteed by code.
@@ -105,11 +128,12 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 | Deliverable | State | Evidence required |
 | --- | --- | --- |
 | Detailed implementation roadmap | Written | This document and source audit |
-| Trust foundation | Local regression and browser checks pass | 286 server tests, 56 client tests, 9 shared tests, both builds, runtime boot, lint, and mocked browser flow |
+| Trust foundation | Local regression and browser checks pass | 292 server tests, 56 client tests, 9 shared tests, 13 integration tests, both builds, runtime boot, lint, and mocked browser flow |
 | Crawler/domain checks | Partial: unrelated redirects and robots/parked pages rejected locally | Official-domain validation and bounded live checks still pending; unchanged-document reuse is not yet persistent |
 | Discovery reliability across three modes | Partial: GMB free-source merge, bounded public-phone recovery, shared provider-coverage contract, and durable replay-safe starts implemented locally | Recovery, retention reuse, and real-source smoke matrix still pending; stateless fallback cannot guarantee cross-instance replay |
 | Typed qualification / role and signal research | Partial: source-family trust, authority tiers, role normalization, organization hints, relationship persistence, opportunity taxonomy, and contradiction penalties implemented | Calibrated weights and independently reviewed multi-industry acceptance labels |
 | Dossiers / feedback / suppression | Partial: search responses and evidence dossiers expose lifecycle, contract, coverage, and quality summaries; source-family metadata, person-to-organization links, role fields, idempotent observation persistence, owner-scoped jobs, feedback storage, correction UI, and response/export suppression are implemented | Shared-workspace authorization, reviewed correction policy, and live export checks remain pending |
+| Versioned integration surface | Preview: `/api/v1` capabilities, owner-required route aliases, hashed API-key authentication, per-credential rate limiting, lifecycle/idempotency/error contract, and integration documentation are implemented | Customer-specific quotas, audit logs, SDK generation, worker callbacks, production key operations, and live client interoperability |
 | Commercial quality benchmark | Pending | Reviewed dataset and measured results |
 | Production release | Pending | Commit, remote SHA, deployment, live readback |
 | Customer willingness to pay | Unproven | Pilot usage and customer feedback |
@@ -128,7 +152,7 @@ The three-mode UI now includes common quality filters, evidence explanations, so
 
 All three modes now render a shared provider-coverage panel. `configured`, `not_configured`, `returned`, `failed`, and `partial` are distinguished in the UI; provider observation counts are explicitly not treated as unique final leads. The internal response contract is documented in `docs/search-response-contract.md` and is covered by server contract/merge tests.
 
-The normalized evidence graph now distinguishes source families and authority tiers, so repeated search providers or repeated URLs cannot inflate corroboration. Public profile leads retain organization and role metadata, and persisted research links a person to the publicly inferred organization with an observed relationship status and source document. Contact observations retain their source observation date, and phone/email verification writes are idempotent. Search responses now expose the same lifecycle and quality rollup used by dossiers, so an integration can decide whether to poll, resume, review, or export without a second quality request. Search and evidence errors now carry stable codes, retryability, request IDs, and a versioned error contract; durable search starts also deduplicate retries with a request fingerprint and bounded `Idempotency-Key`. The browser client now sends an idempotency key for every start and propagates the active Supabase access token when one exists. When `LEAD_FINDER_AUTH_REQUIRED=true`, server verification and owner-scoped job access are enforced across all search routes. These changes improve downstream integration reliability but do not prove mobile line type, reachability, personal ownership, email deliverability, or commercial lead quality.
+The normalized evidence graph now distinguishes source families and authority tiers, so repeated search providers or repeated URLs cannot inflate corroboration. Public profile leads retain organization and role metadata, and persisted research links a person to the publicly inferred organization with an observed relationship status and source document. Contact observations retain their source observation date, and phone/email verification writes are idempotent. Search responses now expose the same lifecycle and quality rollup used by dossiers, so an integration can decide whether to poll, resume, review, or export without a second quality request. Search and evidence errors now carry stable codes, retryability, request IDs, and a versioned error contract; durable search starts also deduplicate retries with a request fingerprint and bounded `Idempotency-Key`. The browser client now sends an idempotency key for every start and propagates the active Supabase access token when one exists. When `LEAD_FINDER_AUTH_REQUIRED=true`, server verification and owner-scoped job access are enforced across all search routes. The preview `/api/v1` surface additionally requires an owner even when anonymous UI compatibility is enabled and accepts hashed server-side integration API keys. These changes improve downstream integration reliability but do not prove mobile line type, reachability, personal ownership, email deliverability, or commercial lead quality.
 
 The public Google Maps fallback now skips detail-page navigation when a result card already contains a public phone and blocks non-essential browser resources. This reduces the resource-limit failure mode without weakening the public-phone evidence gate. Research scoring now distinguishes positive opportunity signals from neutral conversion gaps and negative status signals, and exposes contradiction flags and penalties for review; these are deterministic prioritization aids, not accuracy probabilities.
 
@@ -147,7 +171,7 @@ E2E_ARTIFACT_DIR=/tmp/lead-quality-browser-20260908 npm run test:e2e
 git diff --check
 ```
 
-Browser acceptance uses explicit synthetic search/health responses. It covers the three mode choices, source/evidence display, quality filters, Excel download, failure/retry, mobile selector/panel bounds and JavaScript page errors. Screenshots were also inspected. These are UI contract checks, not live-provider yield or commercial-quality measurements. No new provider calls, paid sources, public API endpoints, deployments or customer outreach were performed for this checkpoint. Vite still reports a main-bundle size warning; it was not hidden.
+Browser acceptance uses explicit synthetic search/health responses. It covers the three mode choices, source/evidence display, quality filters, Excel download, failure/retry, mobile selector/panel bounds and JavaScript page errors. Screenshots were also inspected. These are UI contract checks, not live-provider yield or commercial-quality measurements. No new provider calls, paid sources, customer outreach, or production API promotion were performed for this checkpoint. Vite still reports a main-bundle size warning; it was not hidden.
 
 The root `npm test` wrapper was not used for this checkpoint because it did not
 terminate in a bounded run; the server unit suite, server runtime boot check, and

@@ -1,7 +1,10 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
+
 import type { RequestLike } from '../http/search-http-contract';
 
 export type SearchAuthContext = {
   ownerId?: string;
+  apiKeyId?: string;
 };
 
 type SearchAuthErrorCode = 'AUTH_REQUIRED' | 'AUTH_INVALID' | 'AUTH_UNAVAILABLE';
@@ -53,6 +56,78 @@ const getBearerToken = (request: RequestLike) => {
   return token;
 };
 
+const getIntegrationApiKey = (request: RequestLike) => {
+  const value = getHeaderValue(request, 'x-api-key')?.trim();
+  if (!value) return undefined;
+  if (value.length > 4096) {
+    throw new SearchAuthorizationError(
+      'AUTH_INVALID',
+      'Invalid integration API key',
+      401,
+    );
+  }
+  return value;
+};
+
+type IntegrationApiKeyRecord = {
+  id: string;
+  ownerId: string;
+  sha256: string;
+};
+
+const apiKeyHashPattern = /^[a-f0-9]{64}$/i;
+
+const parseIntegrationApiKeys = (raw: string): IntegrationApiKeyRecord[] => {
+  if (!raw) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+
+    const id = (entry as { id?: unknown }).id;
+    const ownerId = (entry as { ownerId?: unknown }).ownerId;
+    const sha256 = (entry as { sha256?: unknown }).sha256;
+    if (
+      typeof id !== 'string' ||
+      typeof ownerId !== 'string' ||
+      typeof sha256 !== 'string' ||
+      !id.trim() ||
+      !ownerId.trim() ||
+      !apiKeyHashPattern.test(sha256.trim())
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: id.trim().slice(0, 128),
+        ownerId: ownerId.trim().slice(0, 256),
+        sha256: sha256.trim().toLowerCase(),
+      },
+    ];
+  });
+};
+
+const hashIntegrationApiKey = (apiKey: string) =>
+  createHash('sha256').update(apiKey, 'utf8').digest('hex');
+
+const matchesHash = (candidate: string, expected: string) => {
+  const candidateBuffer = Buffer.from(candidate, 'hex');
+  const expectedBuffer = Buffer.from(expected, 'hex');
+  return (
+    candidateBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(candidateBuffer, expectedBuffer)
+  );
+};
+
 const isTrue = (value: string | undefined) => value?.trim().toLowerCase() === 'true';
 
 const getAuthConfig = () => ({
@@ -62,6 +137,7 @@ const getAuthConfig = () => ({
     process.env.SUPABASE_PUBLISHABLE_KEY?.trim() ||
     process.env.SUPABASE_ANON_KEY?.trim() ||
     '',
+  integrationApiKeysRaw: process.env.LEAD_FINDER_INTEGRATION_API_KEYS?.trim() ?? '',
 });
 
 export const isSearchAuthRequired = () => getAuthConfig().required;
@@ -79,10 +155,51 @@ export const authenticateSearchRequest = async (
   request: RequestLike,
 ): Promise<SearchAuthContext> => {
   const config = getAuthConfig();
+  const apiKey = getIntegrationApiKey(request);
   const token = getBearerToken(request);
+  const ownerRequired = config.required || request.requireAuthenticatedOwner === true;
+
+  if (apiKey && token) {
+    throw new SearchAuthorizationError(
+      'AUTH_INVALID',
+      'Use either a bearer token or an integration API key, not both.',
+      401,
+    );
+  }
+
+  if (apiKey) {
+    if (!config.integrationApiKeysRaw) {
+      throw new SearchAuthorizationError(
+        'AUTH_UNAVAILABLE',
+        'Integration API-key authentication is not configured for this deployment.',
+        503,
+      );
+    }
+
+    const records = parseIntegrationApiKeys(config.integrationApiKeysRaw);
+    if (!records.length) {
+      throw new SearchAuthorizationError(
+        'AUTH_UNAVAILABLE',
+        'Integration API-key authentication is misconfigured for this deployment.',
+        503,
+      );
+    }
+
+    const hashed = hashIntegrationApiKey(apiKey);
+    const record = records.find((candidate) => matchesHash(hashed, candidate.sha256));
+    if (!record) {
+      throw new SearchAuthorizationError(
+        'AUTH_INVALID',
+        'Invalid integration API key.',
+        401,
+      );
+    }
+
+    return { ownerId: record.ownerId, apiKeyId: record.id };
+  }
 
   if (!token) {
-    if (config.required) {
+    if (ownerRequired) {
       throw new SearchAuthorizationError(
         'AUTH_REQUIRED',
         'Sign in is required to use lead search.',
