@@ -128,7 +128,7 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 | Deliverable | State | Evidence required |
 | --- | --- | --- |
 | Detailed implementation roadmap | Written | This document and source audit |
-| Trust foundation | Local regression and browser checks pass | 292 server tests, 56 client tests, 9 shared tests, 13 integration tests, both builds, runtime boot, lint, and mocked browser flow |
+| Trust foundation | Local regression and browser checks pass | 294 server tests, 56 client tests, 9 shared tests, 13 integration tests, both builds, runtime boot, lint, and mocked browser flow |
 | Crawler/domain checks | Partial: unrelated redirects and robots/parked pages rejected locally | Official-domain validation and bounded live checks still pending; unchanged-document reuse is not yet persistent |
 | Discovery reliability across three modes | Partial: GMB free-source merge, bounded public-phone recovery, shared provider-coverage contract, and durable replay-safe starts implemented locally | Recovery, retention reuse, and real-source smoke matrix still pending; stateless fallback cannot guarantee cross-instance replay |
 | Typed qualification / role and signal research | Partial: source-family trust, authority tiers, role normalization, organization hints, relationship persistence, opportunity taxonomy, and contradiction penalties implemented | Calibrated weights and independently reviewed multi-industry acceptance labels |
