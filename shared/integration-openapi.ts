@@ -4,7 +4,7 @@ export const buildIntegrationOpenApi = () => ({
     title: 'Lead Finder Integration API',
     version: '1.0.0',
     description:
-      'Provider-agnostic public lead discovery for Google Business, public LinkedIn, and free AI-assisted research. Every returned lead must satisfy the public-phone evidence policy.',
+      'Provider-agnostic public lead discovery for Google Business and AI-mode public-source fusion. Every returned lead must satisfy the public-phone evidence policy.',
   },
   servers: [{ url: '/', description: 'Current Lead Finder deployment' }],
   security: [{ apiKey: [] }, { bearerAuth: [] }],
@@ -31,7 +31,7 @@ export const buildIntegrationOpenApi = () => ({
     '/api/v1/search': {
       post: {
         operationId: 'startSearch',
-        summary: 'Start one GMB, public LinkedIn, or free AI search.',
+        summary: 'Start one GMB or AI public-source-fusion search.',
         requestBody: {
           required: true,
           content: {
@@ -159,7 +159,7 @@ export const buildIntegrationOpenApi = () => ({
         required: ['companyType', 'location', 'count', 'phoneRequired'],
         properties: {
           companyType: { type: 'string', minLength: 2, maxLength: 120 },
-          sourceMode: { type: 'string', enum: ['gmb', 'linkedin', 'ai'], default: 'gmb' },
+          sourceMode: { type: 'string', enum: ['gmb', 'ai'], default: 'gmb' },
           researchDepth: { type: 'string', enum: ['quick', 'verified', 'pro'], default: 'verified' },
           researchBrief: { type: 'string', maxLength: 1_000 },
           location: {

@@ -182,8 +182,9 @@ const matchLinkedInPeopleToPublicListings = (
 };
 
 /**
- * Bridge only corroborated listing data into LinkedIn profiles. Unmatched
- * listings stay out of LinkedIn mode so its result set remains profile-led.
+ * Bridge only corroborated listing data into public professional profiles.
+ * Unmatched listings remain in the AI fusion pool as independent business
+ * candidates rather than being attached to an unrelated person.
  */
 export const bridgeLinkedInWithPublicListings = (
   linkedinLeads: Lead[],

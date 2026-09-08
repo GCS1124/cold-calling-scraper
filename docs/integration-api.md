@@ -139,7 +139,8 @@ Content-Type: application/json
 }
 ```
 
-Allowed `sourceMode` values are `gmb`, `linkedin`, and `ai`. Allowed research
+Allowed `sourceMode` values are `gmb` and `ai`. The retired `linkedin` value is
+accepted only as a migration alias and is canonicalized to `ai`. Allowed research
 depths are `quick`, `verified`, and `pro`. `count` is bounded to 50 through 500
 and `phoneRequired` cannot be disabled. The location is either one of `EST`,
 `CST`, `MST`, `PST` or an exact US city/state pair.

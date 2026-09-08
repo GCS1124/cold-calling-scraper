@@ -1,4 +1,4 @@
-import type { Lead, ResearchCandidate } from '../types/lead';
+import type { Lead, PublicSocialLink, ResearchCandidate } from '../types/lead';
 import {
   discoverLeadsWithGemini,
   type GeminiLeadDiscoveryResult,
@@ -101,6 +101,31 @@ export const mergeGroundingSources = (
 
 const decisionMakerRole = /\b(owner|founder|co[- ]?founder|chief|ceo|president|partner|principal|director|manager|operator|practice administrator|general manager|managing member)\b/i;
 
+const supportedSocialPlatforms = new Map<string, PublicSocialLink['platform']>([
+  ['facebook', 'Facebook'],
+  ['instagram', 'Instagram'],
+  ['linkedin', 'LinkedIn'],
+  ['tiktok', 'TikTok'],
+  ['x', 'X'],
+  ['twitter', 'X'],
+  ['youtube', 'YouTube'],
+  ['google business', 'Google Business'],
+  ['yelp', 'Yelp'],
+]);
+
+const toPublicSocialLinks = (candidate: ResearchCandidate): PublicSocialLink[] => {
+  const links = (candidate.socialLinks ?? [])
+    .map((link) => {
+      const url = link.url.trim();
+      const platform = supportedSocialPlatforms.get(link.platform.trim().toLowerCase());
+
+      return url && platform ? { platform, url } : undefined;
+    })
+    .filter((link): link is PublicSocialLink => Boolean(link));
+
+  return [...new Map(links.map((link) => [link.url, link])).values()].slice(0, 12);
+};
+
 const titleForCandidate = (candidate: ResearchCandidate) =>
   [candidate.personName || candidate.name, candidate.originalRole, candidate.organizationName]
     .filter(Boolean)
@@ -130,6 +155,7 @@ const toLead = (
   const now = candidate.discoveredAt || new Date().toISOString();
   const sourceTitles = candidate.sourceTitles ?? [];
   const sourceName = 'Gemini, Grounded Public Search';
+  const publicSocialLinks = toPublicSocialLinks(candidate);
 
   return {
     id: `gemini-lead-${index + 1}-${candidate.id.slice(-16)}`,
@@ -146,6 +172,7 @@ const toLead = (
     mobile: '',
     email: '',
     ...(candidate.website ? { website: candidate.website } : {}),
+    ...(publicSocialLinks.length ? { publicSocialLinks } : {}),
     address: candidate.location || locationLabel,
     category: request.companyType,
     city: locationLabel,

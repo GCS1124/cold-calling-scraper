@@ -135,10 +135,7 @@ const normalizeRequest = (request: SearchRequest): SearchRequest => ({
   ...(request.researchDepth ? { researchDepth: request.researchDepth } : {}),
 });
 
-const getSearchServiceError = (sourceMode?: SearchRequest['sourceMode']) =>
-  sourceMode === 'linkedin'
-    ? 'Unable to reach LinkedIn public-profile search. Please try again.'
-    : genericSearchServiceError;
+const getSearchServiceError = () => genericSearchServiceError;
 
 const isLegacyGenericError = (message: string) =>
   /^(?:Failed to fetch US lead results|Search failed)$/i.test(message.trim());
@@ -329,7 +326,7 @@ const createIdempotencyKey = () => {
 export const searchApi: SearchApi = {
   async startSearch(request, options) {
     const normalized = normalizeRequest(request);
-    await waitForLocalApi(getSearchServiceError(normalized.sourceMode));
+    await waitForLocalApi(getSearchServiceError());
     const response = await fetchFromApi(
       '/api/search',
       {
@@ -340,7 +337,7 @@ export const searchApi: SearchApi = {
         },
         body: JSON.stringify(normalized),
       },
-      getSearchServiceError(normalized.sourceMode),
+      getSearchServiceError(),
     );
 
     return response.json() as Promise<SearchResponse>;

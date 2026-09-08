@@ -39,23 +39,28 @@ const waitForDevServer = async () => {
 const makeLead = (mode, index = 1) => ({
   id: `e2e-${mode}-${index}`,
   name: `${mode} Public Lead`,
-  headline: mode === 'linkedin' ? 'Owner at Austin Public Business' : undefined,
+  headline: mode === 'ai' ? 'Owner at Austin Public Business' : undefined,
   organizationName: 'Austin Public Business',
   decisionMakerName: `${mode} Decision Maker`,
-  decisionMakerRole: mode === 'linkedin' ? 'Owner' : 'Principal',
+  decisionMakerRole: mode === 'ai' ? 'Owner' : 'Principal',
   decisionMakerSourceUrl: 'https://public-business.example/about',
   mobile: '+1 512 555 0101',
   email: mode === 'ai' ? 'hello@public-business.example' : '',
   website: 'https://public-business.example',
   contactSourceUrl: 'https://public-business.example/contact',
   listingUrl:
-    mode === 'linkedin'
+    mode === 'ai'
       ? 'https://www.linkedin.com/in/public-business-owner'
       : 'https://www.google.com/maps/search/?api=1&query=Public%20Lead',
   address: 'Austin, TX',
   category: 'HVAC contractor',
   city: 'Austin, TX',
-  source: mode === 'linkedin' ? 'LinkedIn, Public Profile' : mode === 'ai' ? 'OpenStreetMap' : 'Google Places',
+  source: mode === 'ai'
+    ? 'Public LinkedIn, Google Business, Public Website'
+    : 'Google Places',
+  publicSocialLinks: mode === 'ai'
+    ? [{ platform: 'LinkedIn', url: 'https://www.linkedin.com/in/public-business-owner' }]
+    : undefined,
   confidence: 90,
   sourceScore: 90,
   hasEmail: mode === 'ai',
@@ -94,8 +99,8 @@ const makeResponse = (mode, failed = false) => ({
       discovered: failed ? 0 : 1,
       enriched: failed ? 0 : 1,
       publicContactsFound: failed ? 0 : 1,
-      publicQueriesAttempted: mode === 'linkedin' ? 4 : 1,
-      publicProvidersChecked: mode === 'linkedin' ? 4 : 1,
+      publicQueriesAttempted: mode === 'ai' ? 4 : 1,
+      publicProvidersChecked: mode === 'ai' ? 4 : 1,
       providerCoverage: mode === 'gmb'
         ? [{
             providerId: 'google-places',
@@ -103,20 +108,23 @@ const makeResponse = (mode, failed = false) => ({
             status: 'returned',
             leadCount: 1,
           }]
-        : mode === 'linkedin'
-          ? [{
-              providerId: 'linkedin-public-search',
-              providerName: 'Public LinkedIn Search',
-              status: 'returned',
-              leadCount: 1,
-            }]
-          : [{
-              providerId: 'public-business-listings',
-              providerName: 'Public Business Listings',
-              status: 'returned',
-              leadCount: 1,
-            }],
-      aiAssistance: mode === 'ai' ? 'disabled' : undefined,
+        : [{
+            providerId: 'linkedin-public-search',
+            providerName: 'Public LinkedIn Search',
+            status: 'returned',
+            leadCount: 1,
+          }, {
+            providerId: 'public-business-listings',
+            providerName: 'Public Business Listings',
+            status: 'returned',
+            leadCount: 1,
+          }, {
+            providerId: 'gemini-public-discovery',
+            providerName: 'Gemini public discovery',
+            status: 'returned',
+            leadCount: 1,
+          }],
+      aiAssistance: mode === 'ai' ? 'enabled' : undefined,
       totalCandidates: failed ? 0 : 1,
       requestedCount: 50,
       foundCount: failed ? 0 : 1,
@@ -152,6 +160,7 @@ const makeResponse = (mode, failed = false) => ({
 const fillSearch = async (page, mode, locationMode) => {
   await page.goto(baseUrl);
   await page.getByRole('heading', { name: 'Build your lead list' }).waitFor();
+  assert(await page.getByRole('button', { name: /^LinkedIn\b/i }).count() === 0, 'Standalone LinkedIn mode is still rendered');
   await page.getByRole('button', { name: new RegExp(`^${mode === 'ai' ? 'AI mode' : mode}`, 'i') }).click();
   await page.locator('input[list="company-type-options"]').fill('HVAC contractor');
 
@@ -199,7 +208,7 @@ const run = async () => {
     assert(await page.getByRole('button', { name: new RegExp(`^(Inspect|Hide) ${mode} Public Lead$`) }).count() === 0, 'Quality filter did not hide the row');
     await page.getByRole('button', { name: 'All public-phone leads 1', exact: true }).click();
   };
-  let linkedinFailureNext = false;
+  let aiFailureNext = false;
 
   await page.route('**/api/health', (route) => route.fulfill({
     status: 200, contentType: 'application/json', body: '{"status":"ok"}',
@@ -208,9 +217,9 @@ const run = async () => {
   await page.route('**/api/search', async (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}');
     const mode = body.sourceMode ?? 'gmb';
-    const failed = mode === 'linkedin' && linkedinFailureNext;
+    const failed = mode === 'ai' && aiFailureNext;
     if (failed) {
-      linkedinFailureNext = false;
+      aiFailureNext = false;
     }
 
     await route.fulfill({
@@ -227,15 +236,9 @@ const run = async () => {
     assert(await page.getByText('gmb Public Lead').count() === 1, 'GMB lead was not rendered');
     await inspectQuality('gmb');
 
-    await fillSearch(page, 'linkedin', 'timezone');
-    await page.getByRole('heading', { name: 'Public LinkedIn discovery complete' }).waitFor();
-    await page.getByText('LinkedIn source coverage', { exact: true }).waitFor();
-    assert(await page.getByText('linkedin Public Lead').count() === 1, 'LinkedIn lead was not rendered');
-    await inspectQuality('linkedin');
-
     await fillSearch(page, 'ai', 'cityState');
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
-    await page.getByText('Free AI mode coverage', { exact: true }).waitFor();
+    await page.getByText('AI mode coverage', { exact: true }).waitFor();
     assert(await page.getByText('AI interpretation preview').count() === 1, 'AI preview is missing');
     assert(await page.getByText('Public Business Listings').count() === 1, 'AI public listing coverage is missing');
     await inspectQuality('ai');
@@ -249,11 +252,11 @@ const run = async () => {
     await page.getByRole('button', { name: 'Download file' }).click();
     await downloadPromise;
 
-    linkedinFailureNext = true;
-    await fillSearch(page, 'linkedin', 'timezone');
+    aiFailureNext = true;
+    await fillSearch(page, 'ai', 'timezone');
     await page.getByRole('heading', { name: 'Search failed' }).waitFor();
-    await page.getByRole('button', { name: 'Try public search again' }).click();
-    await page.getByRole('heading', { name: 'Public LinkedIn discovery complete' }).waitFor();
+    await page.getByRole('button', { name: 'Try free search again' }).click();
+    await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     await fillSearch(page, 'ai', 'cityState');
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
@@ -261,7 +264,7 @@ const run = async () => {
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'Mobile page overflows horizontally');
     const evidenceBox = await page.getByRole('region', { name: 'Contact evidence for ai Public Lead' }).boundingBox();
     assert(evidenceBox && evidenceBox.width < 390, 'Contact evidence panel is clipped on mobile');
-    const modeBox = await page.getByRole('button', { name: /^AI mode Free public discovery/i }).boundingBox();
+    const modeBox = await page.getByRole('button', { name: /^AI mode/i }).boundingBox();
     assert(modeBox && modeBox.x + modeBox.width <= 390, 'Source selector is clipped on mobile');
     if (process.env.E2E_ARTIFACT_DIR) {
       await page.screenshot({ path: path.join(process.env.E2E_ARTIFACT_DIR, 'quality-mobile.png'), fullPage: true });
@@ -282,7 +285,7 @@ const run = async () => {
 
 try {
   await run();
-  console.log('Mocked browser acceptance passed: three modes, contact evidence, quality filters, export, retry, mobile layout, and no page errors. This does not measure live provider yield.');
+  console.log('Mocked browser acceptance passed: two modes, AI public-source fusion, contact evidence, quality filters, export, retry, mobile layout, and no page errors. This does not measure live provider yield.');
 } finally {
   if (devServer && !devServer.killed) {
     devServer.kill('SIGTERM');

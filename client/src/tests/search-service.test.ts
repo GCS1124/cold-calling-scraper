@@ -239,8 +239,8 @@ describe('searchApi', () => {
       ok: false,
       status: 502,
       json: vi.fn().mockResolvedValue({
-        error: 'Public LinkedIn search could not be completed. Please try again.',
-        code: 'PUBLIC_LINKEDIN_SEARCH_UNAVAILABLE',
+        error: 'Free AI search could not be completed. Please try again.',
+        code: 'FREE_AI_SEARCH_UNAVAILABLE',
         retryable: true,
         requestId: 'request-42',
         contractVersion: 1,
@@ -249,7 +249,7 @@ describe('searchApi', () => {
 
     const failure = searchApi.startSearch({
       companyType: 'Dentist',
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
       location: {
         mode: 'timezone',
         timeZone: 'EST',
@@ -259,8 +259,8 @@ describe('searchApi', () => {
 
     await expect(failure).rejects.toMatchObject({
       retryable: true,
-      message: 'Public LinkedIn search could not be completed. Please try again.',
-      code: 'PUBLIC_LINKEDIN_SEARCH_UNAVAILABLE',
+      message: 'Free AI search could not be completed. Please try again.',
+      code: 'FREE_AI_SEARCH_UNAVAILABLE',
       requestId: 'request-42',
       contractVersion: 1,
       status: 502,
@@ -346,7 +346,7 @@ describe('searchApi', () => {
     await expect(
       searchApi.startSearch({
         companyType: 'Dental Clinics',
-        sourceMode: 'linkedin',
+        sourceMode: 'ai',
         location: {
           mode: 'timezone',
           timeZone: 'EST',
@@ -354,7 +354,7 @@ describe('searchApi', () => {
         count: 50,
       }),
     ).rejects.toMatchObject({
-      message: 'Unable to reach LinkedIn public-profile search. Please try again.',
+      message: 'Unable to reach the lead search service. Please try again.',
       retryable: true,
     });
   });
@@ -368,7 +368,7 @@ describe('searchApi', () => {
     await expect(
       searchApi.startSearch({
         companyType: 'HVAC Contractors',
-        sourceMode: 'linkedin',
+        sourceMode: 'ai',
         location: {
           mode: 'cityState',
           city: 'Austin',
@@ -376,7 +376,7 @@ describe('searchApi', () => {
         },
         count: 50,
       }),
-    ).rejects.toThrow('Unable to reach LinkedIn public-profile search. Please try again.');
+    ).rejects.toThrow('Unable to reach the lead search service. Please try again.');
   });
 
   it('uses a safe message when an API error is not JSON', async () => {

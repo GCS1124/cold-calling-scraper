@@ -1,6 +1,6 @@
 # Search response contract
 
-The three search modes share one additive response contract. It is used by the
+The two public search modes share one additive response contract. It is used by the
 web client, the durable worker, the stateless fallback, and the versioned
 first-party integration preview under `/api/v1`; it does not expose a provider
 endpoint.
@@ -10,7 +10,8 @@ endpoint.
 Every runtime response includes:
 
 - `contractVersion`: currently `2`.
-- `meta.sourceMode`: `gmb`, `linkedin`, or `ai`.
+- `meta.sourceMode`: `gmb` or `ai`. Older `linkedin` start payloads are
+  canonicalized to `ai` before execution.
 - `meta.phonePolicy`: a mandatory `public_phone_evidence` gate. The contract
   deliberately reports line type, reachability, personal ownership, and email
   deliverability as `not_checked`; a published business phone is not proof of
@@ -18,8 +19,8 @@ Every runtime response includes:
 - `meta.limitations`: mode-specific limitations that must be shown or retained
   by downstream integrations.
 - `meta.execution`: lifecycle metadata. `durable` responses are pollable and
-  resumable; `stateless` LinkedIn and AI fallback responses are already
-  complete and must not be polled. `lastProgressAt` is the latest progress
+  resumable; stateless AI fallback responses are already complete and must not
+  be polled. `lastProgressAt` is the latest progress
   timestamp, and `completedAt` is present for terminal responses.
 - `meta.qualitySummary`: the same phone-qualified quality rollup used by the
   evidence dossier, including eligible leads, review count, fresh phone
@@ -126,7 +127,7 @@ phone-qualified lead. Supported events are `wrong_phone`, `wrong_business`,
 `wrong_person`, `former_employee`, `duplicate`, `do_not_contact`, and `useful`.
 
 Feedback requires an authenticated owner even when anonymous search compatibility
-is enabled. Suppression is owner-scoped and is applied to all three modes after
+is enabled. Suppression is owner-scoped and is applied to both public modes after
 the mandatory phone gate and before response totals, quality summaries, evidence
 dossiers, and export rows. Responses expose `meta.progress.suppressedCount` and
 a `workspace-suppression` provider notice when a result is intentionally hidden.

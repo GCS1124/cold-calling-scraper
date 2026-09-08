@@ -11,7 +11,6 @@ import {
   Search,
   Sparkles,
   Zap,
-  BriefcaseBusiness,
   RefreshCw,
 } from 'lucide-react';
 import {
@@ -94,7 +93,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     contactReadyOnly: false,
     evidenceBackedOnly: false,
   });
-  const [linkedinSortMode, setLinkedinSortMode] = useState<LinkedInSortMode>('best-match');
+  const [aiSortMode, setAiSortMode] = useState<LinkedInSortMode>('best-match');
   const [qualityFilter, setQualityFilter] = useState<QualityFilter>('all');
 
   const auth = useAuth();
@@ -117,7 +116,7 @@ export function HomePage({ searchApi }: HomePageProps) {
       contactReadyOnly: false,
       evidenceBackedOnly: false,
     });
-    setLinkedinSortMode('best-match');
+    setAiSortMode('best-match');
     setQualityFilter('all');
 
     if (sourceMode !== search.sourceMode) {
@@ -136,28 +135,28 @@ export function HomePage({ searchApi }: HomePageProps) {
         if (!lead.hasPhone || !lead.verifiedPhone || !matchesQualityFilter(lead, qualityFilter)) return false;
         if (filters.hasWebsite && !lead.hasWebsite) return false;
         if (
-          activeSourceMode === 'linkedin' &&
+          activeSourceMode === 'ai' &&
           filters.highFitOnly &&
           !isHighFitLinkedInLead(lead)
         ) {
           return false;
         }
         if (
-          activeSourceMode === 'linkedin' &&
+          activeSourceMode === 'ai' &&
           filters.crossSourceOnly &&
           (lead.matchSignals?.publicSources ?? 0) < 2
         ) {
           return false;
         }
         if (
-          activeSourceMode === 'linkedin' &&
+          activeSourceMode === 'ai' &&
           filters.contactReadyOnly &&
           !isContactReadyLinkedInLead(lead)
         ) {
           return false;
         }
         if (
-          activeSourceMode === 'linkedin' &&
+          activeSourceMode === 'ai' &&
           filters.evidenceBackedOnly &&
           !isEvidenceBackedLinkedInLead(lead)
         ) {
@@ -168,10 +167,10 @@ export function HomePage({ searchApi }: HomePageProps) {
       .sort((left, right) => {
         const qualityOrder = compareLeadQuality(left, right);
         if (qualityOrder) return qualityOrder;
-        if (activeSourceMode === 'linkedin') {
+        if (activeSourceMode === 'ai') {
           return (
-            getLinkedInRankingScore(right, linkedinSortMode) -
-              getLinkedInRankingScore(left, linkedinSortMode) ||
+            getLinkedInRankingScore(right, aiSortMode) -
+              getLinkedInRankingScore(left, aiSortMode) ||
             right.confidence - left.confidence ||
             left.name.localeCompare(right.name)
           );
@@ -187,7 +186,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     filters.hasEmail,
     filters.hasWebsite,
     filters.highFitOnly,
-    linkedinSortMode,
+    aiSortMode,
     qualityFilter,
     result?.leads,
   ]);
@@ -256,14 +255,14 @@ export function HomePage({ searchApi }: HomePageProps) {
   const providerNoticesAreInformational =
     displayedProviderWarnings.length > 0 &&
     displayedProviderWarnings.every((warning) => warning.severity === 'info');
-  const linkedinDiscoveryBlocked = Boolean(
+  const publicDiscoveryBlocked = Boolean(
     result &&
-      activeSourceMode === 'linkedin' &&
+      activeSourceMode === 'ai' &&
       (result.meta.status === 'complete' || result.meta.status === 'failed') &&
       result.leads.length === 0 &&
       result.meta.providerWarnings.some(
         (warning) =>
-          warning.providerId === 'linkedin-search' &&
+          ['linkedin-search', 'linkedin-public-search'].includes(warning.providerId) &&
           /blocked|rate-limited/i.test(warning.message),
       ),
   );
@@ -278,9 +277,9 @@ export function HomePage({ searchApi }: HomePageProps) {
     result !== null &&
     result.meta.status === 'complete' &&
     result.meta.progress.foundCount < result.meta.progress.requestedCount;
-  const canRetryEmptyLinkedInSearch = Boolean(
+  const canRetryEmptyAiSearch = Boolean(
     result &&
-      activeSourceMode === 'linkedin' &&
+      activeSourceMode === 'ai' &&
       (result.meta.status === 'complete' || result.meta.status === 'failed') &&
       result.leads.length === 0,
   );
@@ -299,22 +298,20 @@ export function HomePage({ searchApi }: HomePageProps) {
     ? result.meta.status === 'queued'
       ? `Queued ${result.meta.progress.requestedCount} leads`
       : result.meta.status === 'discovering'
-        ? `Finding ${activeSourceMode === 'linkedin' ? 'prospects' : activeSourceMode === 'ai' ? 'AI-matched leads' : 'leads'} in ${result.meta.locationLabel}`
+        ? `Finding ${activeSourceMode === 'ai' ? 'AI-fused leads' : 'leads'} in ${result.meta.locationLabel}`
       : result.meta.status === 'enriching'
         ? 'Collecting contact details'
         : result.meta.status === 'cancelled'
           ? 'Search cancelled'
         : phoneGateFailure
           ? 'No eligible leads after phone validation'
-        : linkedinDiscoveryBlocked
-              ? 'LinkedIn discovery blocked'
+        : publicDiscoveryBlocked
+              ? 'Public discovery constrained'
               : result.meta.status === 'failed'
                 ? 'Search failed'
                 : providerFailureNotice
                   ? 'Search finished with provider limits'
-              : activeSourceMode === 'linkedin'
-                ? 'Public LinkedIn discovery complete'
-                : resultsExhausted
+              : resultsExhausted
                   ? 'Discovery complete'
                   : 'Search complete'
     : '';
@@ -323,17 +320,15 @@ export function HomePage({ searchApi }: HomePageProps) {
     ? result.meta.status === 'queued'
       ? `Your ${activeSourceLabel} search is waiting to begin.`
       : result.meta.status === 'discovering'
-        ? activeSourceMode === 'linkedin'
-          ? 'Searching public LinkedIn profiles, using multiple public search lenses, and removing duplicates.'
-          : activeSourceMode === 'ai'
-            ? 'Running Gemini public research and deterministic discovery in parallel, merging duplicates, and retaining every research candidate.'
-            : 'Scanning matching businesses and removing duplicates.'
+        ? activeSourceMode === 'ai'
+          ? 'Running Gemini grounding, public profile discovery, GMB corroboration, and website checks in parallel while retaining every research candidate.'
+          : 'Scanning matching businesses and removing duplicates.'
       : result.meta.status === 'enriching'
               ? 'Adding emails, phone numbers, websites, and source details.'
               : result.meta.status === 'cancelled'
                 ? 'The partial research snapshot is preserved. Resume when you want to continue public-source discovery.'
-              : linkedinDiscoveryBlocked
-                      ? 'Free public-search providers temporarily blocked this request. No unverified or fabricated leads were added.'
+              : publicDiscoveryBlocked
+                      ? 'A public profile-search provider was blocked or rate-limited. Other public layers were preserved; no unverified or fabricated leads were added.'
                       : phoneGateFailure
                         ? `${phoneExcludedCount} public candidate${phoneExcludedCount === 1 ? '' : 's'} were discovered, but none exposed a validated public phone/mobile number. AI research references remain below for review; they were not accepted as exportable leads.`
                       : result.meta.status === 'failed'
@@ -342,8 +337,6 @@ export function HomePage({ searchApi }: HomePageProps) {
                           ? 'Some public providers were unavailable. Only verified results were retained; review the provider notices before exporting.'
                         : phoneRequirementWarning
                           ? 'Only leads with a validated publicly listed phone/mobile number were retained. Private or Premium contact data is not accessed.'
-                        : activeSourceMode === 'linkedin'
-                          ? 'Profiles were ranked using public category, role, location, and cross-source signals. Contact fields are populated only from public websites.'
                         : activeSourceMode === 'ai'
                           ? 'Free public AI research finished. Gemini candidates and cited details were retained for review; only independently validated public phone leads are exportable.'
                           : resultsExhausted
@@ -353,8 +346,8 @@ export function HomePage({ searchApi }: HomePageProps) {
 
   const emptyStateMessage =
     result && result.leads.length === 0
-      ? linkedinDiscoveryBlocked
-        ? 'LinkedIn discovery was blocked by the free public-search providers. Try again later or switch location.'
+      ? publicDiscoveryBlocked
+        ? 'A public profile-search provider was blocked by its free search endpoint. Try again later or broaden the location; the other AI layers remain available.'
         : result.meta.status === 'failed'
           ? phoneGateFailure
             ? `${phoneExcludedCount} public candidates were found, but none had a validated publicly listed phone/mobile number. Broaden the category or location and try again.`
@@ -686,14 +679,12 @@ export function HomePage({ searchApi }: HomePageProps) {
                   Build your lead list
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Choose GMB, LinkedIn, or free AI mode, then enter a business type, location, and lead count.
+                  Choose GMB or AI mode, then enter a business type, location, and lead count.
                 </p>
               </div>
 
               <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700 sm:flex">
-                {activeSourceMode === 'linkedin' ? (
-                  <BriefcaseBusiness className="h-6 w-6" />
-                ) : activeSourceMode === 'ai' ? (
+                {activeSourceMode === 'ai' ? (
                   <Sparkles className="h-6 w-6" />
                 ) : (
                   <MapPin className="h-6 w-6" />
@@ -760,7 +751,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                     ? 'border-amber-200 bg-amber-50/90'
                   : result.meta.status === 'cancelled'
                     ? 'border-slate-300 bg-slate-100/90'
-                  : linkedinDiscoveryBlocked
+                  : publicDiscoveryBlocked
                     ? 'border-amber-200 bg-amber-50/90'
                   : result.meta.status === 'complete'
                     ? 'border-emerald-200 bg-emerald-50/70'
@@ -777,7 +768,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                           ? 'bg-amber-100 text-amber-700'
                         : result.meta.status === 'cancelled'
                           ? 'bg-slate-200 text-slate-700'
-                        : linkedinDiscoveryBlocked
+                        : publicDiscoveryBlocked
                           ? 'bg-amber-100 text-amber-700'
                         : result.meta.status === 'complete'
                           ? 'bg-emerald-100 text-emerald-700'
@@ -786,7 +777,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                   >
                     {isWaiting ? (
                       <LoaderCircle className="h-6 w-6 animate-spin" />
-                    ) : linkedinDiscoveryBlocked || phoneGateFailure ? (
+                    ) : publicDiscoveryBlocked || phoneGateFailure ? (
                       <AlertTriangle className="h-6 w-6" />
                     ) : result.meta.status === 'complete' ? (
                       <CheckCircle2 className="h-6 w-6" />
@@ -866,16 +857,16 @@ export function HomePage({ searchApi }: HomePageProps) {
                   </div>
                 </div>
 
-                {activeSourceMode === 'linkedin' ? (
+                {activeSourceMode === 'ai' ? (
                   <div>
                     <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/75 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
-                          Public contact coverage
+                          AI contact coverage
                         </p>
                         <p className="mt-1 text-sm leading-5 text-slate-600">
-                          Validated emails or phone numbers found in public web results. Private or
-                          Premium LinkedIn data is not accessed.
+                          Validated business phone or email evidence from the fused public-source
+                          run. LinkedIn profile signals are public discovery evidence only.
                         </p>
                       </div>
                       <p className="shrink-0 text-lg font-black text-slate-950">
@@ -990,8 +981,8 @@ export function HomePage({ searchApi }: HomePageProps) {
                     )}
                     <div>
                       <p className="font-bold">
-                        {linkedinDiscoveryBlocked
-                          ? 'Provider access blocked'
+                        {publicDiscoveryBlocked
+                          ? 'Public source access constrained'
                           : activeSourceMode === 'ai'
                             ? 'Public source notices'
                             : providerNoticesAreInformational
@@ -1026,12 +1017,12 @@ export function HomePage({ searchApi }: HomePageProps) {
                 </div>
               ) : null}
 
-              {canRetryEmptyLinkedInSearch && !displayedProviderWarnings.length ? (
+              {canRetryEmptyAiSearch && !displayedProviderWarnings.length ? (
                 <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-blue-200 bg-blue-50/80 p-4 text-sm text-blue-950 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="font-bold">No public profiles returned</p>
+                    <p className="font-bold">No public matches returned</p>
                     <p className="mt-1 leading-5 text-blue-900/80">
-                      Public search results can change. Try the same search again or adjust the category.
+                      Public results can change. Try the AI fusion again or adjust the category and location.
                     </p>
                   </div>
                   <button
@@ -1040,7 +1031,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                     type="button"
                   >
                     <Search className="h-4 w-4" />
-                    Try public search again
+                    Try AI search again
                   </button>
                 </div>
               ) : null}
@@ -1154,15 +1145,15 @@ export function HomePage({ searchApi }: HomePageProps) {
                   </div>
 
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    {activeSourceMode === 'linkedin' ? (
+                    {activeSourceMode === 'ai' ? (
                       <label className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600">
                         Rank by
                         <select
-                          aria-label="Rank LinkedIn results"
+                          aria-label="Rank AI discovery results"
                           className="bg-transparent text-xs font-bold text-slate-950 outline-none"
-                          value={linkedinSortMode}
+                          value={aiSortMode}
                           onChange={(event) =>
-                            setLinkedinSortMode(event.target.value as LinkedInSortMode)
+                            setAiSortMode(event.target.value as LinkedInSortMode)
                           }
                         >
                           <option value="best-match">Best match</option>

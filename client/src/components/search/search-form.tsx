@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, Building2, LoaderCircle, Search, Sparkles } from 'lucide-react';
+import { Building2, LoaderCircle, Search, Sparkles } from 'lucide-react';
 import type { Dispatch, FormEvent, SetStateAction } from 'react';
 
 import {
@@ -27,16 +27,13 @@ export function SearchForm({
   onSourceModeChange,
   onSubmit,
 }: SearchFormProps) {
-  const isLinkedInMode = value.sourceMode === 'linkedin';
   const isAiMode = value.sourceMode === 'ai';
-  const companyTypePlaceholder = isLinkedInMode || isAiMode
+  const companyTypePlaceholder = isAiMode
     ? 'dentist, HVAC contractor, dental clinic'
     : 'dentist, plumber, roofer, HVAC contractor';
-  const companyTypeHelp = isLinkedInMode
-    ? 'Enter a business category. Public LinkedIn discovery expands it across founders, owners, CEOs, and relevant decision-makers.'
-    : isAiMode
-      ? 'Free AI mode expands the category into decision-maker searches, merges public results, and checks only publicly listed business contacts.'
-      : 'Tailored to Google Business listings: try dentist, orthodontist, plumber, roofer, HVAC contractor, real estate agent, attorney, urgent care, mechanic, or commercial cleaning.';
+  const companyTypeHelp = isAiMode
+    ? 'AI mode expands the category into owner and decision-maker searches, fuses public GMB, profile, website, and social evidence, and checks only publicly listed business contacts.'
+    : 'Tailored to Google Business listings: try dentist, orthodontist, plumber, roofer, HVAC contractor, real estate agent, attorney, urgent care, mechanic, or commercial cleaning.';
   const locationSummary = value.locationMode === 'timezone'
     ? timeZoneOptions.find((option) => option.code === value.timeZone)?.label ?? 'Choose a time zone'
     : value.city.trim() && value.stateCode
@@ -85,9 +82,7 @@ export function SearchForm({
                     <Building2 className="h-4 w-4" />
                   ) : option.code === 'ai' ? (
                     <Sparkles className="h-4 w-4" />
-                  ) : (
-                    <BriefcaseBusiness className="h-4 w-4" />
-                  )}
+                  ) : null}
                   {option.label}
                 </span>
                 <span className="mt-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
@@ -99,11 +94,9 @@ export function SearchForm({
         </div>
 
         <p className="text-xs font-normal leading-5 text-slate-500">
-          {isLinkedInMode
-            ? `${sourceModeLabelsByCode.linkedin} searches public profiles only, with Gemini expanding multiple public search lenses when configured. Phone numbers and emails come from public business websites, listings, or attributed search snippets.`
-            : isAiMode
-              ? 'AI mode searches public sources only. Gemini can expand search lenses and return grounded public research candidates; no paid databases, private profiles, login sessions, or contact-reveal credits are used.'
-              : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
+          {isAiMode
+            ? 'AI mode is the complete public-source workflow: Gemini plans and grounds research, public LinkedIn discovery finds people, GMB/listing sources corroborate businesses, and public websites verify contacts. No paid databases, private profiles, login sessions, or contact-reveal credits are used.'
+            : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
         </p>
 
         <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-xs font-normal leading-5 text-slate-600">
@@ -114,39 +107,45 @@ export function SearchForm({
           </p>
         </div>
 
-        {isLinkedInMode ? (
+        {isAiMode ? (
           <div className="overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-4 text-white shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-200">
-                  LinkedIn discovery recipe
+                  AI public-source fusion
                 </p>
                 <p className="mt-1 text-sm leading-5 text-slate-300">
-                  A focused public-web workflow for finding the people behind the category.
+                  One advanced mode that searches for businesses and the people behind them without a separate LinkedIn workflow.
                 </p>
               </div>
               <span className="shrink-0 rounded-full border border-blue-300/30 bg-blue-300/10 px-3 py-1 text-[11px] font-bold text-blue-100">
-                Public signals
+                Four public layers
               </span>
             </div>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">Role expansion</p>
+                <p className="text-sm font-bold">Public profiles</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Owners, founders, and decision-makers
+                  LinkedIn and professional profile signals
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">Location precision</p>
+                <p className="text-sm font-bold">GMB corroboration</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  City, state, and regional signals
+                  Business identity and public phone evidence
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">Public-site enrichment</p>
+                <p className="text-sm font-bold">Gemini grounding</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Up to 14 public business pages
+                  Multi-lens public research and named people
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-sm font-bold">Contact proof</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  Websites, social links, and a required public phone
                 </p>
               </div>
             </div>
@@ -177,9 +176,9 @@ export function SearchForm({
                 </div>
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    Intent
+                    Decision-maker intent
                   </p>
-                  <p className="mt-1 truncate text-sm font-semibold text-white">Decision-makers</p>
+                  <p className="mt-1 truncate text-sm font-semibold text-white">Owners, founders, heads</p>
                 </div>
               </div>
             </div>

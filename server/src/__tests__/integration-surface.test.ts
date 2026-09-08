@@ -50,8 +50,25 @@ describe('versioned integration surface', () => {
       apiVersion: 'v1',
       responseContractVersion: 2,
       authentication: { ownerRequired: true },
-      modes: [{ id: 'gmb' }, { id: 'linkedin' }, { id: 'ai' }],
+      modes: [
+        { id: 'gmb' },
+        {
+          id: 'ai',
+          contract: {
+            meta: {
+              sourceMode: 'ai',
+              limitations: expect.arrayContaining([
+                expect.stringContaining('including LinkedIn result signals'),
+              ]),
+            },
+          },
+        },
+      ],
     });
+    expect((state.body as { modes: Array<{ id: string }> }).modes.map((mode) => mode.id)).toEqual([
+      'gmb',
+      'ai',
+    ]);
     const serialized = JSON.stringify(state.body);
     expect(serialized).not.toContain('GOOGLE_PLACES_API_KEY');
     expect(serialized).not.toContain('GEMINI_API_KEY');

@@ -25,14 +25,8 @@ export const buildIntegrationCapabilities = () => ({
       contract: buildSearchResponseContract('gmb'),
     },
     {
-      id: 'linkedin' as const,
-      name: 'LinkedIn public profiles',
-      executionPaths: ['durable', 'stateless'] as const,
-      contract: buildSearchResponseContract('linkedin'),
-    },
-    {
       id: 'ai' as const,
-      name: 'Free AI-assisted public discovery',
+      name: 'AI mode: public-source fusion',
       executionPaths: ['durable', 'stateless'] as const,
       contract: buildSearchResponseContract('ai'),
     },

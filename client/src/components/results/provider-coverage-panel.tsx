@@ -4,7 +4,7 @@ import type { ProviderCoverage } from '../../types/lead';
 
 type ProviderCoveragePanelProps = {
   coverage: ProviderCoverage[];
-  mode: 'gmb' | 'linkedin' | 'ai';
+  mode: 'gmb' | 'ai';
 };
 
 const modeCopy = {
@@ -14,17 +14,11 @@ const modeCopy = {
       'Google Places and free public listings are reported separately. Website recovery stays bounded and only adds public contact evidence.',
     badge: 'Phone-qualified only',
   },
-  linkedin: {
-    title: 'LinkedIn source coverage',
-    description:
-      'Public profile discovery is merged with free listings and bounded website evidence. Private profiles, Premium data, and authenticated sessions are not accessed.',
-    badge: 'Public profiles only',
-  },
   ai: {
-    title: 'Free AI mode coverage',
+    title: 'AI mode coverage',
     description:
-      'Gemini expands public search lenses and enriches Google Business listing seeds with grounded company and decision-maker details. Public evidence and the required phone gate decide which records become exportable leads. Commercial lead databases are audited but never called.',
-    badge: 'No paid lead databases',
+      'One public-source fusion pass combines GMB listings, public LinkedIn discovery, Gemini grounded research, public websites, and published social links. Evidence and the required phone gate decide which records become exportable leads. Commercial lead databases are audited but never called.',
+    badge: 'Public-source fusion',
   },
 } as const;
 

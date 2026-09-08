@@ -4,7 +4,7 @@ import { usStateCodes } from '../../server/src/data/us-states.js';
 import { isPublicHttpsCallbackUrl } from '../../server/src/utils/public-url.js';
 
 const publicTimeZoneCodes = ['EST', 'CST', 'MST', 'PST'] as const;
-const publicSearchSourceModes = ['gmb', 'linkedin', 'ai'] as const;
+const publicSearchSourceModes = ['gmb', 'ai'] as const;
 const publicResearchDepths = ['quick', 'verified', 'pro'] as const;
 
 const cityPattern = /^[\p{L}][\p{L}\s.'-]*$/u;
@@ -44,7 +44,11 @@ export const searchLocationSchema = z.discriminatedUnion('mode', [
 
 export const searchRequestSchema = z.object({
   companyType: z.string().trim().min(2).max(80),
-  sourceMode: z.enum(publicSearchSourceModes).optional(),
+  // Accept the retired value as a migration alias, but canonicalize it to AI
+  // mode so there is no longer a standalone LinkedIn execution path.
+  sourceMode: z
+    .union([z.enum(publicSearchSourceModes), z.literal('linkedin').transform(() => 'ai' as const)])
+    .optional(),
   researchDepth: z.enum(publicResearchDepths).optional(),
   researchBrief: z.string().trim().max(1_000).optional(),
   location: searchLocationSchema,

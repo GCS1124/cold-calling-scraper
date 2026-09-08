@@ -138,20 +138,20 @@ export function LinkedInQualityPanel({
           </div>
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-700">
-              Match intelligence · LinkedIn research brief
+              Match intelligence · AI fusion brief
             </p>
             <h3 className="mt-1 text-lg font-black tracking-[-0.02em] text-slate-950">
               {averageConfidence}% average public match strength
             </h3>
             <p className="mt-1 max-w-2xl text-sm leading-5 text-slate-600">
-              A ranked shortlist built from public profile identity, role, category, location, and corroborating search signals.
+              A ranked shortlist built from public profile identity, role, category, location, GMB corroboration, and contact evidence.
             </p>
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">
           <ShieldCheck className="h-4 w-4" />
-          Public signal stack
+          Multi-source evidence stack
         </div>
       </div>
 
@@ -234,7 +234,7 @@ export function LinkedInQualityPanel({
                 Discovery lenses
               </p>
               <p className="mt-1 text-xs leading-5 text-slate-600">
-                Public query families that completed at least one search batch.
+                Public profile query families that completed at least one search batch.
               </p>
             </div>
             <span className="text-xs font-black text-blue-800">
@@ -246,7 +246,7 @@ export function LinkedInQualityPanel({
               <span
                 className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
                 key={family}
-                title={queryFamilyDescriptions[family] ?? 'Public LinkedIn search pattern.'}
+                title={queryFamilyDescriptions[family] ?? 'Public professional-profile search pattern.'}
               >
                 <span>{queryFamilyLabels[family] ?? family}</span>
                 {typeof publicQueryFamilyCounts[family] === 'number' ? (

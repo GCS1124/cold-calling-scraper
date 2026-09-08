@@ -560,12 +560,12 @@ describe('App', () => {
 
     const { container, unmount } = await renderApp(['/search'], searchApi);
 
-    await clickElement(getButton(container, /linkedin/i));
+    await clickElement(getButton(container, /ai mode/i));
     await typeValue(getCompanyTypeInput(container), 'Dental Clinics');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
 
-    await waitForText(container, /public linkedin discovery complete/i, 6000);
+    await waitForText(container, /discovery complete/i, 6000);
     await waitForText(container, /Format checked/i, 1000);
     expect(normalizedText(container)).toContain('Public LinkedIn Northstar Labs');
     expect(normalizedText(container)).toContain('Profile / Website');
@@ -727,24 +727,26 @@ describe('App', () => {
     await unmount();
   });
 
-  it('submits a LinkedIn search with the alternate source mode', async () => {
+  it('submits the AI fusion search with public profile discovery included', async () => {
     const searchApi: SearchApi = {
-      startSearch: vi.fn().mockResolvedValue(completedResponse),
-      getSearch: vi.fn().mockResolvedValue(completedResponse),
+      startSearch: vi.fn().mockResolvedValue(aiModeResponse),
+      getSearch: vi.fn().mockResolvedValue(aiModeResponse),
     };
 
     const { container, unmount } = await renderApp(['/search'], searchApi);
 
-    await clickElement(getButton(container, /linkedin/i));
-    expect(normalizedText(container)).toContain('Free public profiles');
-    expect(normalizedText(container)).toContain('LinkedIn discovery recipe');
-    expect(normalizedText(container)).toContain('Role expansion');
-    expect(normalizedText(container)).toContain('Public-site enrichment');
+    await clickElement(getButton(container, /ai mode/i));
+    expect(normalizedText(container)).toContain('All public sources');
+    expect(normalizedText(container)).toContain('AI public-source fusion');
+    expect(normalizedText(container)).toContain('Public profiles');
+    expect(normalizedText(container)).toContain('GMB corroboration');
+    expect(normalizedText(container)).toContain('Gemini grounding');
+    expect(normalizedText(container)).toContain('Contact proof');
     expect(normalizedText(container)).toContain('Live search blueprint');
     expect(normalizedText(container)).toContain('Category');
     expect(normalizedText(container)).toContain('Your business type');
-    expect(normalizedText(container)).toContain('Intent');
-    expect(normalizedText(container)).toContain('Decision-makers');
+    expect(normalizedText(container)).toContain('Decision-maker intent');
+    expect(normalizedText(container)).toContain('Owners, founders, heads');
     await typeValue(getCompanyTypeInput(container), 'Founders');
     expect(normalizedText(container)).toContain('Founders');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
@@ -752,7 +754,7 @@ describe('App', () => {
 
     expect(searchApi.startSearch).toHaveBeenCalledWith({
       companyType: 'Founders',
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
       location: {
         mode: 'timezone',
         timeZone: 'EST',
@@ -762,7 +764,7 @@ describe('App', () => {
     });
 
     await waitForText(container, /discovery complete/i, 6000);
-    expect(normalizedText(container)).toContain('LinkedIn');
+    expect(normalizedText(container)).toContain('Public LinkedIn Search');
 
     await unmount();
   });
@@ -776,8 +778,8 @@ describe('App', () => {
     const { container, unmount } = await renderApp(['/search'], searchApi);
 
     await clickElement(getButton(container, /ai mode/i));
-    expect(normalizedText(container)).toContain('Free public discovery');
-    expect(normalizedText(container)).toContain('no paid databases');
+    expect(normalizedText(container)).toContain('All public sources');
+    expect(normalizedText(container)).toContain('No paid databases');
     expect(normalizedText(container)).toContain('AI interpretation preview');
     expect(normalizedText(container)).toContain('Listings, profiles, websites, social links');
     await typeValue(getCompanyTypeInput(container), 'Dentist');
@@ -795,9 +797,9 @@ describe('App', () => {
       phoneRequired: true,
     });
 
-    await waitForText(container, /free ai mode coverage/i, 6000);
+    await waitForText(container, /ai mode coverage/i, 6000);
     const content = normalizedText(container);
-    expect(content).toContain('No paid lead databases');
+    expect(content).toContain('Commercial lead databases are audited but never called');
     expect(content).toContain('Public LinkedIn Search');
     expect(content).toContain('Apollo');
     expect(content).toContain('Not configured');
@@ -824,15 +826,15 @@ describe('App', () => {
     await waitForText(container, /Northstar Labs/i, 6000);
     expect(normalizedText(container)).toContain('Northstar Labs');
 
-    await clickElement(getButton(container, /linkedin/i));
+    await clickElement(getButton(container, /ai mode/i));
 
     expect(normalizedText(container)).not.toContain('Northstar Labs');
-    expect(normalizedText(container)).toContain('Public LinkedIn discovery');
+    expect(normalizedText(container)).toContain('AI public-source fusion');
 
     await unmount();
   });
 
-  it('shows an honest blocked state and provider details when free LinkedIn discovery is unavailable', async () => {
+  it('shows an honest constrained state and provider details when public profile discovery is unavailable', async () => {
     const searchApi: SearchApi = {
       startSearch: vi.fn().mockResolvedValue(blockedLinkedinResponse),
       getSearch: vi.fn().mockResolvedValue(blockedLinkedinResponse),
@@ -840,17 +842,17 @@ describe('App', () => {
 
     const { container, unmount } = await renderApp(['/search'], searchApi);
 
-    await clickElement(getButton(container, /linkedin/i));
+    await clickElement(getButton(container, /ai mode/i));
     await typeValue(getCompanyTypeInput(container), 'Dentist');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
 
-    await waitForText(container, /linkedin discovery blocked/i, 6000);
+    await waitForText(container, /public discovery constrained/i, 6000);
 
     const content = normalizedText(container);
-    expect(content).toContain('Provider access blocked');
+    expect(content).toContain('Public source access constrained');
     expect(content).toContain('Brave Search was paused after repeated failures');
-    expect(content).toContain('No unverified or fabricated leads were added');
+    expect(content).toContain('no unverified or fabricated leads were added');
     expect(content).not.toContain(
       'We verified the available businesses and stopped once the discovery sources stopped returning new results',
     );
@@ -858,7 +860,7 @@ describe('App', () => {
     await unmount();
   });
 
-  it('lets users retry a failed empty LinkedIn search with the same request', async () => {
+  it('lets users retry a failed empty AI search with the same request', async () => {
     const searchApi: SearchApi = {
       startSearch: vi.fn().mockResolvedValue(blockedLinkedinResponse),
       getSearch: vi.fn().mockResolvedValue(blockedLinkedinResponse),
@@ -866,18 +868,18 @@ describe('App', () => {
 
     const { container, unmount } = await renderApp(['/search'], searchApi);
 
-    await clickElement(getButton(container, /linkedin/i));
+    await clickElement(getButton(container, /ai mode/i));
     await typeValue(getCompanyTypeInput(container), 'Dentist');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
-    await waitForText(container, /linkedin discovery blocked/i, 6000);
+    await waitForText(container, /public discovery constrained/i, 6000);
 
-    await clickElement(getButton(container, /try public search again/i));
+    await clickElement(getButton(container, /try free search again/i));
 
     expect(searchApi.startSearch).toHaveBeenCalledTimes(2);
     expect(searchApi.startSearch).toHaveBeenLastCalledWith({
       companyType: 'Dentist',
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
       location: {
         mode: 'timezone',
         timeZone: 'EST',
@@ -889,7 +891,7 @@ describe('App', () => {
     await unmount();
   });
 
-  it('offers a retry for an empty LinkedIn search without provider warnings', async () => {
+  it('offers a retry for an empty AI search without provider warnings', async () => {
     const searchApi: SearchApi = {
       startSearch: vi.fn().mockResolvedValue(emptyLinkedinResponse),
       getSearch: vi.fn().mockResolvedValue(emptyLinkedinResponse),
@@ -897,13 +899,13 @@ describe('App', () => {
 
     const { container, unmount } = await renderApp(['/search'], searchApi);
 
-    await clickElement(getButton(container, /linkedin/i));
+    await clickElement(getButton(container, /ai mode/i));
     await typeValue(getCompanyTypeInput(container), 'Dentist');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
     await waitForText(container, /search failed/i, 6000);
 
-    await clickElement(getButton(container, /try public search again/i));
+    await clickElement(getButton(container, /try ai search again/i));
     expect(searchApi.startSearch).toHaveBeenCalledTimes(2);
 
     await unmount();
@@ -1033,7 +1035,7 @@ describe('App', () => {
 
     const { container, unmount } = await renderApp(['/search'], searchApi);
 
-    await clickElement(getButton(container, /linkedin/i));
+    await clickElement(getButton(container, /ai mode/i));
     await typeValue(getCompanyTypeInput(container), 'Dentist');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
@@ -1041,7 +1043,7 @@ describe('App', () => {
     await waitForText(container, /discovery complete/i, 6000);
     await waitForText(container, /Public match/i, 1000);
     const content = normalizedText(container);
-    expect(content).toContain('Public contact coverage');
+    expect(content).toContain('AI contact coverage');
     expect(content).toContain('Public search coverage');
     expect(content).toContain('Discovery lenses');
     expect(content).toContain('Multi-term clusters');
@@ -1159,11 +1161,11 @@ describe('App', () => {
 
     const { container, unmount } = await renderApp(['/search'], searchApi);
 
-    await clickElement(getButton(container, /linkedin/i));
+    await clickElement(getButton(container, /ai mode/i));
     await typeValue(getCompanyTypeInput(container), 'Dentist');
     await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
     await clickElement(getButton(container, /find leads/i));
-    await waitForText(container, /public linkedin discovery complete/i, 6000);
+    await waitForText(container, /discovery complete/i, 6000);
     await waitForText(container, /Northstar Labs/i, 1000);
 
     expect(normalizedText(container)).toContain('3 visible leads');
@@ -1176,9 +1178,9 @@ describe('App', () => {
     await clickElement(getCheckboxByLabel(container, /cross-source match/i));
     expect(normalizedText(container)).toContain('1 visible leads');
 
-    const rankSelect = container.querySelector('select[aria-label="Rank LinkedIn results"]');
+    const rankSelect = container.querySelector('select[aria-label="Rank AI discovery results"]');
     if (!rankSelect) {
-      throw new Error('Could not find LinkedIn ranking select');
+      throw new Error('Could not find AI ranking select');
     }
 
     expect(Array.from((rankSelect as HTMLSelectElement).options).map((option) => option.value)).toEqual([

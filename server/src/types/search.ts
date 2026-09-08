@@ -11,6 +11,8 @@ import type {
   SEARCH_RESPONSE_CONTRACT_VERSION,
 } from '../../../shared/search-contract';
 
+// The public API exposes gmb and ai. Keep linkedin here only to deserialize
+// historical durable jobs; new public payloads canonicalize it to ai.
 const searchSourceModes = ['gmb', 'linkedin', 'ai'] as const;
 
 export const researchDepths = ['quick', 'verified', 'pro'] as const;

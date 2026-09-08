@@ -17,7 +17,7 @@ type FiltersPanelProps = {
 };
 
 export function FiltersPanel({ filters, onChange, sourceMode }: FiltersPanelProps) {
-  const isLinkedInMode = sourceMode === 'linkedin';
+  const isAiMode = sourceMode === 'ai';
 
   return (
     <aside className="space-y-5 rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
@@ -58,10 +58,10 @@ export function FiltersPanel({ filters, onChange, sourceMode }: FiltersPanelProp
           />
           Website
         </label>
-        {isLinkedInMode ? (
+        {isAiMode ? (
           <>
             <div className="my-4 border-t border-slate-100 pt-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-              Match quality
+              AI match quality
             </div>
             <label className="flex items-center gap-3">
               <input

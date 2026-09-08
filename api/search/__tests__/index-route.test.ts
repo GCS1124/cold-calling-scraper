@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { waitUntil } from '@vercel/functions';
-import { runStatelessLinkedinSearch } from '../../../server/src/services/linkedin-stateless-search.js';
+import { runStatelessAiSearch } from '../../../server/src/services/ai-lead-discovery.js';
 import { vercelSearchService } from '../../../server/src/services/vercel-search-service.js';
 import { authorizeSearchRequest } from '../../../api/_lib/search-auth.js';
 
@@ -16,8 +16,8 @@ vi.mock('../../../server/src/services/vercel-search-service.js', () => ({
   },
 }));
 
-vi.mock('../../../server/src/services/linkedin-stateless-search.js', () => ({
-  runStatelessLinkedinSearch: vi.fn(),
+vi.mock('../../../server/src/services/ai-lead-discovery.js', () => ({
+  runStatelessAiSearch: vi.fn(),
 }));
 
 vi.mock('../../../api/_lib/search-auth.js', () => ({
@@ -116,7 +116,7 @@ describe('/api/search', () => {
         method: 'POST',
         body: {
           companyType: 'Dentist',
-          sourceMode: 'linkedin',
+          sourceMode: 'ai',
           location: { mode: 'timezone', timeZone: 'EST' },
           count: 50,
         },
@@ -129,7 +129,7 @@ describe('/api/search', () => {
     expect(state.body).toMatchObject({ searchId: 'search-1', meta: { status: 'queued' } });
     expect(vercelSearchService.startSearch).toHaveBeenCalledWith({
       companyType: 'Dentist',
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
       city: 'EST',
       count: 50,
       phoneRequired: true,
@@ -156,6 +156,39 @@ describe('/api/search', () => {
         method: 'POST',
         body: {
           companyType: 'Dentist',
+          sourceMode: 'ai',
+          location: { mode: 'timezone', timeZone: 'EST' },
+          count: 50,
+        },
+      },
+      response,
+    );
+
+    expect(state.statusCode).toBe(200);
+    expect(vercelSearchService.startSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceMode: 'ai' }),
+      { ownerId: 'owner-a' },
+    );
+    expect(vercelSearchService.advanceSearch).toHaveBeenCalledWith(
+      'owner-search-1',
+      'owner-a',
+    );
+  });
+
+  it('canonicalizes retired LinkedIn payloads to the AI execution path', async () => {
+    vi.mocked(vercelSearchService.startSearch).mockResolvedValue({
+      searchId: 'legacy-ai-search-1',
+      leads: [],
+      meta: {},
+    } as never);
+    vi.mocked(vercelSearchService.advanceSearch).mockReturnValue(new Promise(() => {}));
+    const { response, state } = createResponse();
+
+    await handler(
+      {
+        method: 'POST',
+        body: {
+          companyType: 'Dentist',
           sourceMode: 'linkedin',
           location: { mode: 'timezone', timeZone: 'EST' },
           count: 50,
@@ -166,12 +199,7 @@ describe('/api/search', () => {
 
     expect(state.statusCode).toBe(200);
     expect(vercelSearchService.startSearch).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceMode: 'linkedin' }),
-      { ownerId: 'owner-a' },
-    );
-    expect(vercelSearchService.advanceSearch).toHaveBeenCalledWith(
-      'owner-search-1',
-      'owner-a',
+      expect.objectContaining({ sourceMode: 'ai' }),
     );
   });
 
@@ -206,13 +234,13 @@ describe('/api/search', () => {
     });
   });
 
-  it('returns a completed public LinkedIn response without durable storage', async () => {
+  it('returns a completed AI response without durable storage', async () => {
     const error = Object.assign(
       new Error('Search persistence is not configured.'),
       { code: 'SEARCH_PERSISTENCE_UNAVAILABLE' },
     );
     const statelessResponse = {
-      searchId: 'linkedin-stateless-search',
+      searchId: 'ai-stateless-search',
       leads: [],
       meta: {
         query: 'Dentist in Eastern Time',
@@ -239,7 +267,7 @@ describe('/api/search', () => {
       },
     };
     vi.mocked(vercelSearchService.startSearch).mockRejectedValue(error);
-    vi.mocked(runStatelessLinkedinSearch).mockResolvedValue(statelessResponse);
+    vi.mocked(runStatelessAiSearch).mockResolvedValue(statelessResponse);
     const { response, state } = createResponse();
 
     await handler(
@@ -247,7 +275,7 @@ describe('/api/search', () => {
         method: 'POST',
         body: {
           companyType: 'Dentist',
-          sourceMode: 'linkedin',
+          sourceMode: 'ai',
           location: { mode: 'timezone', timeZone: 'EST' },
           count: 50,
         },
@@ -262,9 +290,9 @@ describe('/api/search', () => {
         requestId: expect.any(String),
       },
     });
-    expect(runStatelessLinkedinSearch).toHaveBeenCalledWith({
+    expect(runStatelessAiSearch).toHaveBeenCalledWith({
       companyType: 'Dentist',
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
       city: 'EST',
       count: 50,
       phoneRequired: true,
@@ -275,10 +303,10 @@ describe('/api/search', () => {
     expect(waitUntil).not.toHaveBeenCalled();
   });
 
-  it('uses the stateless LinkedIn path before importing the durable job service', async () => {
+  it('uses the stateless AI path before importing the durable job service', async () => {
     vi.stubEnv('VERCEL', '1');
     vi.stubEnv('VERCEL_ENV', 'production');
-    vi.mocked(runStatelessLinkedinSearch).mockResolvedValue({} as never);
+    vi.mocked(runStatelessAiSearch).mockResolvedValue({} as never);
     const { response, state } = createResponse();
 
     await handler(
@@ -286,7 +314,7 @@ describe('/api/search', () => {
         method: 'POST',
         body: {
           companyType: 'Dentist',
-          sourceMode: 'linkedin',
+          sourceMode: 'ai',
           location: { mode: 'timezone', timeZone: 'EST' },
           count: 50,
         },
@@ -295,7 +323,7 @@ describe('/api/search', () => {
     );
 
     expect(state.statusCode).toBe(200);
-    expect(runStatelessLinkedinSearch).toHaveBeenCalledTimes(1);
+    expect(runStatelessAiSearch).toHaveBeenCalledTimes(1);
     expect(vercelSearchService.startSearch).not.toHaveBeenCalled();
     expect(waitUntil).not.toHaveBeenCalled();
   });

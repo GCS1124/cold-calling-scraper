@@ -10,14 +10,9 @@ export const sourceModeOptions = [
     hint: 'Google Business',
   },
   {
-    code: 'linkedin',
-    label: 'LinkedIn',
-    hint: 'Free public profiles',
-  },
-  {
     code: 'ai',
     label: 'AI mode',
-    hint: 'Free public discovery',
+    hint: 'All public sources',
   },
 ] as const;
 
@@ -46,11 +41,7 @@ export type ResearchDepth = (typeof researchDepthOptions)[number]['code'];
 export const sourceModeLabelsByCode = Object.fromEntries(
   sourceModeOptions.map((option) => [
     option.code,
-    option.code === 'gmb'
-      ? 'Google Business Profile'
-      : option.code === 'linkedin'
-        ? 'LinkedIn'
-        : 'AI mode',
+    option.code === 'gmb' ? 'Google Business Profile' : 'AI mode',
   ]),
 ) as Record<SearchSourceMode, string>;
 

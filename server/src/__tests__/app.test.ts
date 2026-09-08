@@ -21,10 +21,21 @@ describe('createApp', () => {
       authentication: { ownerRequired: true },
       modes: [
         { id: 'gmb' },
-        { id: 'linkedin' },
-        { id: 'ai' },
+        {
+          id: 'ai',
+          name: 'AI mode: public-source fusion',
+          contract: {
+            meta: {
+              sourceMode: 'ai',
+              limitations: expect.arrayContaining([
+                expect.stringContaining('including LinkedIn result signals'),
+              ]),
+            },
+          },
+        },
       ],
     });
+    expect(capabilities.body.modes.map((mode: { id: string }) => mode.id)).toEqual(['gmb', 'ai']);
 
     const search = await request(createApp()).post('/api/v1/search').send({
       companyType: 'Dentist',
