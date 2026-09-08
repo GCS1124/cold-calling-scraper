@@ -117,6 +117,24 @@ describe('extractContactDetailsFromHtml', () => {
     expect(extracted.decisionMakers).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'Example Dental' })]),
     );
+    expect(extracted.decisionMakers).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'With Us' })]),
+    );
+  });
+
+  it('does not mistake recruiting or call-to-action phrases for people', () => {
+    const html = `
+      <html><body>
+        <p>Partner With Us</p>
+        <p>Call Us for a free estimate.</p>
+        <p>Owner: Jordan Lee</p>
+        <a href="tel:+15125550101">+1 (512) 555-0101</a>
+      </body></html>
+    `;
+
+    const extracted = extractContactDetailsFromHtml(html);
+
+    expect(extracted.decisionMakers).toEqual([{ name: 'Jordan Lee', role: 'Owner' }]);
   });
 
   it('labels conservative public opportunity signals without extracting private data', () => {

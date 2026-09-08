@@ -15,12 +15,20 @@ const credentialPattern =
   /(?:^|\s)(?:dr|mr|mrs|ms|dds|dmd|md|do|rn|esq|jd|phd)\.?(?=\s|$)/gi;
 const businessNamePattern =
   /\b(?:llc|l\.?t\.?d|inc\.?|incorporated|corp\.?|corporation|company|clinic|studio|group|services|solutions|systems|agency|practice|medical|health|dental|dentistry|hvac|plumbing|roofing|construction|realty|attorneys?|auto|electric|cleaning|consulting|business)\b/i;
+const nonPersonPhrasePattern =
+  /\b(?:with us|for us|contact us|call us|join us|meet (?:our|the) team|our team|our staff|about us|learn more|read more|click here|reach out)\b/i;
 
 const normalizeWhitespace = (value: string) =>
   value
     .replace(/[|•]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+const hasPublicNameCapitalization = (value: string) =>
+  normalizeWhitespace(value)
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((word) => /^[A-Z][\p{L}'’.-]*$/u.test(word));
 
 export const normalizePublicPersonName = (value?: string) => {
   const normalized = normalizeWhitespace(value ?? '')
@@ -47,7 +55,11 @@ export const isLikelyPublicPersonName = (value?: string) => {
     return false;
   }
 
-  if (publicDecisionMakerRolePattern.test(normalized) || businessNamePattern.test(normalized)) {
+  if (
+    publicDecisionMakerRolePattern.test(normalized) ||
+    businessNamePattern.test(normalized) ||
+    nonPersonPhrasePattern.test(normalized)
+  ) {
     publicDecisionMakerRolePattern.lastIndex = 0;
     return false;
   }
@@ -79,6 +91,8 @@ const addMention = (
   nameValue: string,
   roleValue: string,
 ) => {
+  if (!hasPublicNameCapitalization(nameValue)) return;
+
   const name = normalizePublicPersonName(nameValue);
   if (!name) return;
 
