@@ -2329,9 +2329,14 @@ const buildLeadFromCandidate = (
     /owner|founder|chief executive|ceo|president|principal|partner|director|manager|administrator|head|vice president|vp/i.test(term),
   );
 
+  const leadName = normalizeText(candidate.name || slugToName(candidate.profileUrl) || candidate.profileUrl);
+
   return {
     id: createId(candidate.profileUrl || `${candidate.name}-${candidate.headline ?? ''}`),
-    name: normalizeText(candidate.name || slugToName(candidate.profileUrl) || candidate.profileUrl),
+    name: leadName,
+    decisionMakerName: leadName,
+    decisionMakerRole: candidate.headline,
+    decisionMakerSourceUrl: candidate.profileUrl,
     headline: candidate.headline,
     organizationName: extractOrganizationHint(candidate.headline),
     originalRole: candidate.headline,

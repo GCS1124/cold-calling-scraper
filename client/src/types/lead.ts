@@ -75,6 +75,8 @@ export type EmploymentStatus =
 export type ResearchCandidate = {
   id: string;
   name?: string;
+  /** Explicit human name returned by a grounded public source. */
+  personName?: string;
   organizationName?: string;
   originalRole?: string;
   location?: string;
@@ -97,6 +99,10 @@ export type Lead = {
   headline?: string;
   employmentStatus?: EmploymentStatus;
   organizationName?: string;
+  /** Publicly evidenced human decision-maker associated with the organization. */
+  decisionMakerName?: string;
+  decisionMakerRole?: string;
+  decisionMakerSourceUrl?: string;
   originalRole?: string;
   normalizedRole?: string;
   decisionMaker?: boolean;

@@ -73,4 +73,27 @@ describe('enrichWebsiteCandidates', () => {
     expect(enrichLead).not.toHaveBeenCalled();
     expect(result.candidateCount).toBe(1);
   });
+
+  it('can enrich a phone-qualified business for a missing public person name', async () => {
+    const enrichLead = vi.fn(async (lead: Lead) => ({
+      lead: { ...lead, decisionMakerName: 'Jordan Lee' },
+      warnings: [],
+    }));
+
+    const result = await enrichWebsiteCandidates({
+      leads: [
+        makeLead({
+          mobile: '+1 512 555 0101',
+          hasPhone: true,
+          verifiedPhone: true,
+        }),
+      ],
+      enrichLead,
+      includeDecisionMakerNames: true,
+      deadlineMs: Date.now() + 5_000,
+    });
+
+    expect(enrichLead).toHaveBeenCalledOnce();
+    expect(result.leads[0]?.decisionMakerName).toBe('Jordan Lee');
+  });
 });

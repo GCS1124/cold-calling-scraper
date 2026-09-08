@@ -5,6 +5,12 @@ import type { Lead, PublicSocialLink } from '../types/lead';
 import type { ProviderWarning } from '../types/search';
 import { httpClient } from '../utils/http-client';
 import { isPublicHttpUrl } from '../utils/public-url';
+import {
+  extractPublicDecisionMakerMentions,
+  normalizePublicPersonName,
+  normalizePublicPersonRole,
+  type PublicDecisionMaker,
+} from '../utils/public-person';
 import { collectContactEvidence, mergeContactEvidence, normalizeContactPhone } from './contact-evidence';
 import type { WebsiteAssessment } from '../../../shared/lead-quality';
 import {
@@ -33,6 +39,7 @@ type ExtractedContactDetails = {
   addresses: string[];
   socialUrls: string[];
   opportunitySignals: string[];
+  decisionMakers: PublicDecisionMaker[];
 };
 
 const blockedPattern =
@@ -466,12 +473,44 @@ const formatJsonLdAddress = (address: unknown) => {
   return parts.join(', ');
 };
 
+const readJsonLdPersonName = (value: unknown) => {
+  if (typeof value === 'string') return normalizePublicPersonName(value);
+  if (!value || typeof value !== 'object') return '';
+
+  const record = value as Record<string, unknown>;
+  const name = typeof record.name === 'string'
+    ? record.name
+    : [record.givenName, record.additionalName, record.familyName]
+      .filter((part): part is string => typeof part === 'string')
+      .join(' ');
+
+  return normalizePublicPersonName(name);
+};
+
+const addDecisionMaker = (
+  decisionMakers: Map<string, PublicDecisionMaker>,
+  nameValue: unknown,
+  roleValue: unknown,
+) => {
+  const name = readJsonLdPersonName(nameValue);
+  if (!name) return;
+
+  const key = name.toLocaleLowerCase();
+  const role = normalizePublicPersonRole(String(roleValue ?? ''));
+  const current = decisionMakers.get(key);
+  decisionMakers.set(key, {
+    name: current?.name ?? name,
+    ...(current?.role || role ? { role: current?.role ?? role } : {}),
+  });
+};
+
 const parseJsonLdContacts = (html: string): ExtractedContactDetails => {
   const $ = cheerio.load(html);
   const emails = new Set<string>();
   const phones = new Set<string>();
   const addresses = new Set<string>();
   const socialUrls = new Set<string>();
+  const decisionMakers = new Map<string, PublicDecisionMaker>();
 
   $('script[type="application/ld+json"]').each((_index, element) => {
     const payload = $(element).text().trim();
@@ -485,6 +524,27 @@ const parseJsonLdContacts = (html: string): ExtractedContactDetails => {
     for (const entry of flattenJsonLd(parsed)) {
       if (!entry || typeof entry !== 'object') {
         continue;
+      }
+
+      const entryObject = entry as Record<string, unknown>;
+      const entryType = String(entryObject['@type'] ?? '').toLowerCase();
+      if (entryType.includes('person')) {
+        addDecisionMaker(
+          decisionMakers,
+          entryObject,
+          entryObject.jobTitle ?? entryObject.role,
+        );
+      }
+
+      for (const key of ['founder', 'founders', 'employee', 'employees', 'member', 'members', 'owner', 'owners', 'principal', 'principals']) {
+        const values = Array.isArray(entryObject[key]) ? entryObject[key] : [entryObject[key]];
+        for (const value of values) {
+          const valueRecord = value && typeof value === 'object'
+            ? value as Record<string, unknown>
+            : undefined;
+          const role = valueRecord?.jobTitle ?? valueRecord?.role ?? key;
+          addDecisionMaker(decisionMakers, value, role);
+        }
       }
 
       for (const contactEntry of expandJsonLdContactEntries(entry as Record<string, unknown>)) {
@@ -538,13 +598,20 @@ const parseJsonLdContacts = (html: string): ExtractedContactDetails => {
     addresses: [...addresses],
     socialUrls: [...socialUrls],
     opportunitySignals: [],
+    decisionMakers: [...decisionMakers.values()],
   };
 };
 
 const extractVisibleText = ($: cheerio.CheerioAPI) => {
   $('script, style, noscript, svg, canvas, iframe').remove();
 
-  return $('body')
+  const bodyMarkup = $('body').html() ?? '';
+  const separatedMarkup = bodyMarkup
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:address|article|aside|div|h[1-6]|li|p|section|tr)>/gi, '\n');
+
+  return cheerio
+    .load('<body>' + separatedMarkup + '</body>')('body')
     .text()
     .replace(/\s+/g, ' ')
     .trim();
@@ -618,6 +685,72 @@ const extractSocialUrlsFromHtml = ($: cheerio.CheerioAPI, currentUrl: URL) => {
   return [...socialUrls];
 };
 
+const extractDecisionMakersFromHtml = (
+  $: cheerio.CheerioAPI,
+  visibleText: string,
+) => {
+  const decisionMakers = new Map<string, PublicDecisionMaker>();
+  const add = (nameValue: string, roleValue: string) => {
+    const name = normalizePublicPersonName(nameValue);
+    if (!name) return;
+
+    const key = name.toLocaleLowerCase();
+    const role = normalizePublicPersonRole(roleValue);
+    const current = decisionMakers.get(key);
+    decisionMakers.set(key, {
+      name: current?.name ?? name,
+      ...(current?.role || role ? { role: current?.role ?? role } : {}),
+    });
+  };
+
+  for (const mention of extractPublicDecisionMakerMentions(visibleText)) {
+    add(mention.name, mention.role ?? '');
+  }
+
+  const selectors = [
+    '[itemprop="founder"]',
+    '[itemprop="employee"]',
+    '[itemprop="member"]',
+    '[itemprop="owner"]',
+    '[itemprop="principal"]',
+    '[class*="owner" i]',
+    '[id*="owner" i]',
+    '[class*="founder" i]',
+    '[id*="founder" i]',
+    '[class*="leadership" i]',
+    '[id*="leadership" i]',
+    '[class*="team-member" i]',
+    '[class*="staff-member" i]',
+  ];
+
+  $(selectors.join(',')).each((_index, element) => {
+    const node = $(element);
+    const elementText = node.text().replace(/\s+/g, ' ').trim();
+    const nameNode = node.find(
+      '[itemprop="name"], [itemprop="givenName"], [class*="name" i], h2, h3, h4, h5, strong, b',
+    ).first();
+    const name = normalizePublicPersonName(
+      nameNode.text() || node.attr('content') || '',
+    );
+    const role = normalizePublicPersonRole(
+      String(node.attr('itemprop') ?? '') + ' ' +
+      String(node.attr('class') ?? '') + ' ' +
+      elementText.replace(nameNode.text(), ''),
+    );
+
+    if (name) {
+      add(name, role);
+      return;
+    }
+
+    for (const mention of extractPublicDecisionMakerMentions(elementText)) {
+      add(mention.name, mention.role ?? role);
+    }
+  });
+
+  return [...decisionMakers.values()];
+};
+
 export const extractContactDetailsFromHtml = (
   html: string,
   pageUrl?: string,
@@ -629,6 +762,11 @@ export const extractContactDetailsFromHtml = (
   const addresses = new Set<string>();
   const socialUrls = new Set<string>();
   const opportunitySignals = new Set<string>(extractPublicOpportunitySignals(text));
+  const decisionMakers = new Map<string, PublicDecisionMaker>();
+
+  for (const person of extractDecisionMakersFromHtml($, text)) {
+    decisionMakers.set(person.name.toLocaleLowerCase(), person);
+  }
 
   $('a[href^="mailto:"]').each((_index, element) => {
     const value = normalizeEmail($(element).attr('href') ?? '');
@@ -689,6 +827,14 @@ export const extractContactDetailsFromHtml = (
   for (const signal of jsonLd.opportunitySignals) {
     opportunitySignals.add(signal);
   }
+  for (const person of jsonLd.decisionMakers) {
+    const key = person.name.toLocaleLowerCase();
+    const current = decisionMakers.get(key);
+    decisionMakers.set(key, {
+      name: current?.name ?? person.name,
+      ...(current?.role || person.role ? { role: current?.role ?? person.role } : {}),
+    });
+  }
 
   if (pageUrl) {
     try {
@@ -706,6 +852,7 @@ export const extractContactDetailsFromHtml = (
     addresses: [...addresses],
     socialUrls: [...socialUrls],
     opportunitySignals: [...opportunitySignals],
+    decisionMakers: [...decisionMakers.values()],
   };
 };
 
@@ -1020,6 +1167,14 @@ export const enrichLeadFromWebsite = async (
   const addresses = new Set<string>();
   const socialUrls = new Set<string>();
   const opportunitySignals = new Set<string>();
+  const decisionMakers = new Map<string, PublicDecisionMaker & { sourceUrl: string }>();
+  if (lead.decisionMakerName) {
+    decisionMakers.set(lead.decisionMakerName.toLocaleLowerCase(), {
+      name: lead.decisionMakerName,
+      ...(lead.decisionMakerRole ? { role: lead.decisionMakerRole } : {}),
+      sourceUrl: lead.decisionMakerSourceUrl || website,
+    });
+  }
   let websiteAssessment: WebsiteAssessment | undefined;
 
   let blockedCount = 0;
@@ -1148,6 +1303,15 @@ export const enrichLeadFromWebsite = async (
         extracted.addresses.forEach((address) => addresses.add(address));
         extracted.socialUrls.forEach((socialUrl) => socialUrls.add(socialUrl));
         extracted.opportunitySignals.forEach((signal) => opportunitySignals.add(signal));
+        extracted.decisionMakers.forEach((person) => {
+          const key = person.name.toLocaleLowerCase();
+          const current = decisionMakers.get(key);
+          decisionMakers.set(key, {
+            name: current?.name ?? person.name,
+            ...(current?.role || person.role ? { role: current?.role ?? person.role } : {}),
+            sourceUrl: current?.sourceUrl || currentUrl,
+          });
+        });
       }
 
       if (pageAssessment.status === 'blocked' || pageAssessment.status === 'parked') {
@@ -1197,6 +1361,12 @@ export const enrichLeadFromWebsite = async (
   const mergedOpportunitySignals = [
     ...new Set([...(lead.opportunitySignals ?? []), ...opportunitySignals]),
   ];
+  const selectedDecisionMaker = [...decisionMakers.values()]
+    .sort((left, right) => Number(Boolean(right.role)) - Number(Boolean(left.role)))[0];
+  const decisionMakerName = lead.decisionMakerName || selectedDecisionMaker?.name;
+  const decisionMakerRole = lead.decisionMakerRole || selectedDecisionMaker?.role;
+  const decisionMakerSourceUrl =
+    lead.decisionMakerSourceUrl || selectedDecisionMaker?.sourceUrl;
 
   const email = normalizeEmail(lead.email ?? '') || crawledEmail;
   const phone = normalizeContactPhone(lead.mobile) ? lead.mobile ?? '' : crawledPhone;
@@ -1208,14 +1378,16 @@ export const enrichLeadFromWebsite = async (
       (!lead.mobile && phone) ||
       (!lead.address && address) ||
       mergedOpportunitySignals.length > (lead.opportunitySignals?.length ?? 0) ||
-      publicSocialLinks.length > (lead.publicSocialLinks?.length ?? 0),
+      publicSocialLinks.length > (lead.publicSocialLinks?.length ?? 0) ||
+      (!lead.decisionMakerName && Boolean(decisionMakerName)),
   );
 
   const totalExtracted =
     emails.size +
     phones.size +
     addresses.size +
-    socialUrls.size;
+    socialUrls.size +
+    decisionMakers.size;
 
   if (!websiteAssessment) {
     websiteAssessment = createUnavailableWebsiteAssessment({
@@ -1259,6 +1431,9 @@ export const enrichLeadFromWebsite = async (
       website,
       publicSocialLinks,
       opportunitySignals: mergedOpportunitySignals,
+      ...(decisionMakerName ? { decisionMakerName } : {}),
+      ...(decisionMakerRole ? { decisionMakerRole } : {}),
+      ...(decisionMakerSourceUrl ? { decisionMakerSourceUrl } : {}),
       hasEmail: Boolean(email),
       hasPhone: Boolean(phone),
       hasWebsite: Boolean(website),

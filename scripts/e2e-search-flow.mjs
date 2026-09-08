@@ -40,6 +40,10 @@ const makeLead = (mode, index = 1) => ({
   id: `e2e-${mode}-${index}`,
   name: `${mode} Public Lead`,
   headline: mode === 'linkedin' ? 'Owner at Austin Public Business' : undefined,
+  organizationName: 'Austin Public Business',
+  decisionMakerName: `${mode} Decision Maker`,
+  decisionMakerRole: mode === 'linkedin' ? 'Owner' : 'Principal',
+  decisionMakerSourceUrl: 'https://public-business.example/about',
   mobile: '+1 512 555 0101',
   email: mode === 'ai' ? 'hello@public-business.example' : '',
   website: 'https://public-business.example',
@@ -186,6 +190,8 @@ const run = async () => {
   page.on('pageerror', (error) => browserErrors.push(error.message));
   const inspectQuality = async (mode) => {
     await page.getByRole('button', { name: `Inspect ${mode} Public Lead`, exact: true }).click();
+    await page.getByText(`${mode} Decision Maker`, { exact: true }).first().waitFor();
+    await page.getByRole('link', { name: 'Open public name source', exact: true }).waitFor();
     await page.getByRole('region', { name: `Contact evidence for ${mode} Public Lead` }).waitFor();
     await page.getByText('Line type, reachability, email delivery', { exact: true }).waitFor();
     assert(await page.getByRole('link', { name: 'Phone source 1', exact: true }).getAttribute('href') === 'https://public-business.example/contact', 'Phone evidence URL was not retained');

@@ -240,6 +240,13 @@ const refreshProgress = (job: SearchJobRecord) => {
 const hasRequestedPhoneCandidates = (job: SearchJobRecord) =>
   job.leads.filter(isPhoneQualifiedLead).length >= job.request.count;
 
+const hasWebsiteDecisionMakerCandidates = (job: SearchJobRecord) =>
+  job.leads.some((lead) =>
+    Boolean(lead.website?.trim()) &&
+    !lead.decisionMakerName &&
+    !lead.crawlAttempts,
+  );
+
 const getLastProgressAt = (job: SearchJobRecord) => job.lastProgressAt ?? job.createdAt;
 
 const appendWarningOnce = (job: SearchJobRecord, warning: ProviderWarning) => {
@@ -1041,12 +1048,13 @@ const tickJob = async (
 
       if (
         deps.enrichWebsiteLead &&
-        !hasRequestedPhoneCandidates(job)
+        (!hasRequestedPhoneCandidates(job) || hasWebsiteDecisionMakerCandidates(job))
       ) {
         const websiteResult = await enrichWebsiteCandidates({
           leads: job.leads,
           enrichLead: deps.enrichWebsiteLead,
           deadlineMs: deps.now() + Math.min(12_000, maxTickDurationMs),
+          includeDecisionMakerNames: true,
           now: deps.now,
         });
         for (const warning of websiteResult.warnings) {
@@ -1062,8 +1070,8 @@ const tickJob = async (
               : 'configured',
           leadCount: websiteResult.leads.length,
           message: websiteResult.candidateCount
-            ? `Checked ${websiteResult.attemptedCount} phone-missing website candidate(s) within the bounded recovery window.`
-            : 'No phone-missing website candidates required recovery.',
+            ? `Checked ${websiteResult.attemptedCount} public website candidate(s) for phone and decision-maker evidence within the bounded recovery window.`
+            : 'No public website candidates required phone or decision-maker recovery.',
         }]);
         if (websiteResult.leads.length) {
           mergeLeads(job, websiteResult.leads, deps.now, false);

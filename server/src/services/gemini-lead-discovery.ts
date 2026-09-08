@@ -25,7 +25,7 @@ const researchCandidateKey = (candidate: ResearchCandidate) => {
   const website = normalizeIdentityPart(candidate.website);
   if (website) return `website:${website}`;
 
-  const name = normalizeIdentityPart(candidate.name);
+  const name = normalizeIdentityPart(candidate.personName || candidate.name);
   const organization = normalizeIdentityPart(candidate.organizationName);
   const location = normalizeIdentityPart(candidate.location);
 
@@ -54,6 +54,7 @@ const mergeResearchCandidate = (
     ...current,
     ...incoming,
     name: current.name || incoming.name,
+    personName: current.personName || incoming.personName,
     organizationName: current.organizationName || incoming.organizationName,
     originalRole: current.originalRole || incoming.originalRole,
     location: current.location || incoming.location,
@@ -101,7 +102,7 @@ export const mergeGroundingSources = (
 const decisionMakerRole = /\b(owner|founder|co[- ]?founder|chief|ceo|president|partner|principal|director|manager|operator|practice administrator|general manager|managing member)\b/i;
 
 const titleForCandidate = (candidate: ResearchCandidate) =>
-  [candidate.name, candidate.originalRole, candidate.organizationName]
+  [candidate.personName || candidate.name, candidate.originalRole, candidate.organizationName]
     .filter(Boolean)
     .join(candidate.originalRole ? ' - ' : '');
 
@@ -115,8 +116,16 @@ const toLead = (
   // the lead pipeline because their identity has no attributable web source.
   if (!candidate.grounded || !candidate.sourceUrls.length) return undefined;
 
-  const name = candidate.name || candidate.organizationName;
+  const name = candidate.name || candidate.organizationName || candidate.personName;
   if (!name) return undefined;
+  const decisionMakerName = candidate.personName || (
+    candidate.organizationName &&
+    candidate.name &&
+    candidate.name !== candidate.organizationName
+      ? candidate.name
+      : undefined
+  );
+  const decisionMakerSourceUrl = candidate.profileUrl || candidate.sourceUrls[0];
 
   const now = candidate.discoveredAt || new Date().toISOString();
   const sourceTitles = candidate.sourceTitles ?? [];
@@ -127,6 +136,9 @@ const toLead = (
     name,
     ...(candidate.originalRole ? { originalRole: candidate.originalRole } : {}),
     ...(candidate.organizationName ? { organizationName: candidate.organizationName } : {}),
+    ...(decisionMakerName ? { decisionMakerName } : {}),
+    ...(decisionMakerName && candidate.originalRole ? { decisionMakerRole: candidate.originalRole } : {}),
+    ...(decisionMakerName && decisionMakerSourceUrl ? { decisionMakerSourceUrl } : {}),
     ...(candidate.originalRole
       ? { decisionMaker: decisionMakerRole.test(candidate.originalRole) }
       : {}),

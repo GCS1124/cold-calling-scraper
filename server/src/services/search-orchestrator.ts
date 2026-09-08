@@ -361,6 +361,13 @@ const refreshProgress = (job: SearchJob) => {
 const hasRequestedPhoneCandidates = (job: SearchJob) =>
   job.leads.filter(isPhoneQualifiedLead).length >= job.request.count;
 
+const hasWebsiteDecisionMakerCandidates = (job: SearchJob) =>
+  job.leads.some((lead) =>
+    Boolean(lead.website?.trim()) &&
+    !lead.decisionMakerName &&
+    !lead.crawlAttempts,
+  );
+
 const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
   rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
 
@@ -946,11 +953,15 @@ const runRegionalDiscovery = async (
     }
   }
 
-  if (enrichWebsiteLead && !hasRequestedPhoneCandidates(job)) {
+  if (
+    enrichWebsiteLead &&
+    (!hasRequestedPhoneCandidates(job) || hasWebsiteDecisionMakerCandidates(job))
+  ) {
     const websiteResult = await enrichWebsiteCandidates({
       leads: job.leads,
       enrichLead: enrichWebsiteLead,
       deadlineMs: now() + 8_000,
+      includeDecisionMakerNames: true,
       now,
     });
     appendUniqueWarnings(job, websiteResult.warnings);
@@ -961,8 +972,8 @@ const runRegionalDiscovery = async (
         status: websiteResult.leads.length ? 'returned' : websiteResult.candidateCount ? 'failed' : 'configured',
         leadCount: websiteResult.leads.length,
         message: websiteResult.candidateCount
-          ? `Checked ${websiteResult.attemptedCount} phone-missing website candidate(s) within the bounded recovery window.`
-          : 'No phone-missing website candidates required recovery.',
+          ? `Checked ${websiteResult.attemptedCount} public website candidate(s) for phone and decision-maker evidence within the bounded recovery window.`
+          : 'No public website candidates required phone or decision-maker recovery.',
       },
     ]);
     if (websiteResult.leads.length) {

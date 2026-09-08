@@ -86,7 +86,7 @@ export function ResultsTable({
     ? 'Profile'
     : containsLinkedInLeads
       ? 'Profile / Company'
-      : 'Company';
+      : 'Company / person';
   const linkColumnLabel = allLeadsAreLinkedIn ? 'Profile / Website' : 'Website / Profile';
   const inspectionCopy = allLeadsAreLinkedIn
     ? 'Inspect public profile evidence before export.'
@@ -195,6 +195,25 @@ export function ResultsTable({
                         >
                           {lead.headline}
                         </div>
+                      ) : null}
+                      {lead.decisionMakerName ? (
+                        <div className="mt-2 max-w-[280px] rounded-xl border border-emerald-100 bg-emerald-50/70 px-2.5 py-2">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-700">
+                            Public person
+                          </p>
+                          <p className="mt-1 truncate text-xs font-bold text-emerald-950" title={lead.decisionMakerName}>
+                            {lead.decisionMakerName}
+                          </p>
+                          {lead.decisionMakerRole ? (
+                            <p className="mt-0.5 truncate text-[11px] text-emerald-800" title={lead.decisionMakerRole}>
+                              {lead.decisionMakerRole}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : !isLinkedInLead ? (
+                        <p className="mt-2 text-[11px] font-semibold text-slate-400">
+                          Public person not identified
+                        </p>
                       ) : null}
                       <div><LeadQualityBadge lead={lead} /></div>
                       {isLinkedInLead ? (
@@ -427,6 +446,38 @@ export function ResultsTable({
                                 ? 'Profile identity is public; contact fields come from public business sources. A business line does not establish a personal number.'
                                 : 'Review the available business details before adding this lead to your export.'}
                             </p>
+                            <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-700">
+                                Public decision-maker
+                              </p>
+                              {lead.decisionMakerName ? (
+                                <>
+                                  <p className="mt-1 text-sm font-bold text-emerald-950">
+                                    {lead.decisionMakerName}
+                                  </p>
+                                  {lead.decisionMakerRole ? (
+                                    <p className="mt-0.5 text-xs text-emerald-800">
+                                      {lead.decisionMakerRole}
+                                    </p>
+                                  ) : null}
+                                  {lead.decisionMakerSourceUrl ? (
+                                    <a
+                                      className="mt-2 inline-block text-xs font-semibold text-emerald-700 underline underline-offset-2"
+                                      href={lead.decisionMakerSourceUrl}
+                                      rel="noreferrer"
+                                      target="_blank"
+                                    >
+                                      Open public name source
+                                    </a>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <p className="mt-1 text-xs leading-5 text-slate-600">
+                                  No current human name was found on the public sources checked. This
+                                  does not mean the business has no owner or operator.
+                                </p>
+                              )}
+                            </div>
                             {lead.contactSourceUrl ? (
                               <p className="mt-3 text-xs leading-5 text-slate-500">
                                 Public contact source:{' '}

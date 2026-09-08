@@ -103,6 +103,30 @@ describe('contact attribution and identity', () => {
     expect(merged.every((item) => getContactEvidence(item, 'phone').every((e) => e.association === 'business'))).toBe(true);
   });
 
+  it('carries a public decision-maker name when a profile matches a business listing', () => {
+    const person = lead({
+      id: 'public-owner',
+      name: 'Avery Smith',
+      organizationName: 'Alpha Dental',
+      decisionMaker: true,
+      originalRole: 'Owner',
+      listingUrl: 'https://linkedin.com/in/avery-smith',
+      mobile: '',
+      hasPhone: false,
+      verifiedPhone: false,
+      source: 'LinkedIn',
+    });
+
+    const merged = bridgeLinkedInWithPublicListings([person], [lead()]);
+
+    expect(merged[0]).toMatchObject({
+      organizationName: 'Alpha Dental',
+      decisionMakerName: 'Avery Smith',
+      decisionMakerRole: 'Owner',
+      decisionMakerSourceUrl: 'https://linkedin.com/in/avery-smith',
+    });
+  });
+
   it.each(['former', 'conflicting'] as const)('does not attach an employer phone to a %s role', (employmentStatus) => {
     const person = lead({ mobile: '', hasPhone: false, listingUrl: 'https://linkedin.com/in/owner', employmentStatus });
     expect(bridgeLinkedInWithPublicListings([person], [lead()])[0]?.mobile).toBe('');

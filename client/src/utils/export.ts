@@ -3,6 +3,9 @@ import type { Lead } from '../types/lead';
 export const exportColumns = [
   'name',
   'organizationName',
+  'decisionMakerName',
+  'decisionMakerRole',
+  'decisionMakerSourceUrl',
   'originalRole',
   'normalizedRole',
   'decisionMaker',
@@ -37,6 +40,9 @@ export type ExportColumn = (typeof exportColumns)[number];
 export const exportColumnLabels: Record<ExportColumn, string> = {
   name: 'Name',
   organizationName: 'Organization',
+  decisionMakerName: 'Public decision-maker',
+  decisionMakerRole: 'Decision-maker role',
+  decisionMakerSourceUrl: 'Decision-maker source URL',
   originalRole: 'Published role',
   normalizedRole: 'Normalized role',
   decisionMaker: 'Decision-maker signal',
@@ -69,6 +75,9 @@ export const exportColumnLabels: Record<ExportColumn, string> = {
 export const defaultExportColumns = [
   'name',
   'organizationName',
+  'decisionMakerName',
+  'decisionMakerRole',
+  'decisionMakerSourceUrl',
   'originalRole',
   'normalizedRole',
   'decisionMaker',
@@ -100,6 +109,9 @@ export const buildExportRows = (leads: Lead[], columns: readonly ExportColumn[])
     const fields = {
       ...lead,
       organizationName: lead.organizationName ?? '',
+      decisionMakerName: lead.decisionMakerName ?? '',
+      decisionMakerRole: lead.decisionMakerRole ?? '',
+      decisionMakerSourceUrl: lead.decisionMakerSourceUrl ?? '',
       originalRole: lead.originalRole ?? lead.headline ?? '',
       normalizedRole: lead.normalizedRole ?? '',
       decisionMaker: lead.decisionMaker === true ? 'Yes' : lead.decisionMaker === false ? 'No' : '',

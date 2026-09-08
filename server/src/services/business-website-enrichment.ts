@@ -14,18 +14,20 @@ export const enrichWebsiteCandidates = async ({
   now = Date.now,
   maxCandidates = 12,
   concurrency = 3,
+  includeDecisionMakerNames = false,
 }: {
   leads: Lead[];
   enrichLead: WebsiteLeadEnricher;
   deadlineMs: number;
   maxCandidates?: number;
   concurrency?: number;
+  includeDecisionMakerNames?: boolean;
   now?: () => number;
 }) => {
   const candidates = leads
     .filter((lead) =>
       Boolean(lead.website?.trim()) &&
-      !isPhoneQualifiedLead(lead) &&
+      (!isPhoneQualifiedLead(lead) || (includeDecisionMakerNames && !lead.decisionMakerName)) &&
       !lead.crawlAttempts,
     )
     .slice(0, maxCandidates);

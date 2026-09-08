@@ -113,6 +113,7 @@ describe('Gemini public research layer', () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]).toMatchObject({
       name: 'Avery Smith',
+      personName: 'Avery Smith',
       organizationName: 'Austin Dental Studio',
       reportedPhone: '+1 512 555 0100',
       reportedEmail: 'avery@austindental.example',

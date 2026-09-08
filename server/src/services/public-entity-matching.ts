@@ -26,6 +26,9 @@ const toDomain = (value?: string) => {
   }
 };
 
+const isLinkedInProfileListing = (value?: string) =>
+  /(?:^|\/\/)(?:www\.)?linkedin\.com\/(?:in|pub)\//i.test(value ?? '');
+
 const toTokens = (value?: string) =>
   normalizeText(value)
     .split(' ')
@@ -68,7 +71,7 @@ const hasStrongOrganizationMatch = (person: Lead, listing: Lead) => {
     return personDomain === listingDomain;
   }
 
-  const organization = extractOrganizationHint(person.headline);
+  const organization = person.organizationName || extractOrganizationHint(person.headline);
   if (!organization) {
     return false;
   }
@@ -98,10 +101,25 @@ const mergeSocialLinks = (person: Lead, listing: Lead): PublicSocialLink[] => {
   return [...links.values()].slice(0, 20);
 };
 
-const mergePersonWithListing = (person: Lead, listing: Lead) =>
-  enrichLead({
+const mergePersonWithListing = (person: Lead, listing: Lead) => {
+  const decisionMakerName = person.decisionMakerName || (
+    person.name &&
+    normalizeText(person.name) !== normalizeText(listing.name) &&
+    (person.organizationName || isLinkedInProfileListing(person.listingUrl))
+      ? person.name
+      : undefined
+  );
+
+  return enrichLead({
     ...person,
     organizationName: listing.name,
+    ...(decisionMakerName ? { decisionMakerName } : {}),
+    ...(decisionMakerName && (person.decisionMakerRole || person.originalRole || person.headline)
+      ? { decisionMakerRole: person.decisionMakerRole || person.originalRole || person.headline }
+      : {}),
+    ...(decisionMakerName && (person.decisionMakerSourceUrl || person.listingUrl)
+      ? { decisionMakerSourceUrl: person.decisionMakerSourceUrl || person.listingUrl }
+      : {}),
     originalRole: person.originalRole || person.headline,
     mobile: getContactEvidence(person, 'phone').length ? person.mobile : listing.mobile,
     email: person.email || listing.email,
@@ -137,6 +155,7 @@ const mergePersonWithListing = (person: Lead, listing: Lead) =>
         : []),
     ],
   });
+};
 
 const matchLinkedInPeopleToPublicListings = (
   linkedinLeads: Lead[],

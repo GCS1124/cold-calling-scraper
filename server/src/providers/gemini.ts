@@ -3,6 +3,7 @@ import axios from 'axios';
 import type { Lead, ResearchCandidate } from '../types/lead';
 import type { SearchRequest } from '../types/search';
 import { isPublicHttpUrl } from '../utils/public-url';
+import { isLikelyPublicPersonName, normalizePublicPersonName } from '../utils/public-person';
 
 const geminiQueryModel = (process.env.GEMINI_QUERY_MODEL?.trim() || 'gemini-2.5-flash').replace(
   /^models\//,
@@ -274,7 +275,7 @@ const serializeListingSeeds = (listingSeeds: GeminiListingSeed[]) => {
 
   if (!seeds.length) return '';
 
-  return `\nPublic Google Business (GMB) and other business-listing seeds to enrich (these are starting points, not private data):\n${JSON.stringify(seeds)}\nFor each seed you can support, search public pages for the company and its current owner, founder, principal, CEO, operator, practice administrator, or other decision-maker. Preserve the seed listingUrl in sourceUrls when you discuss that company. Re-check any phone or email against a cited public page; do not guess or infer missing values.`;
+  return `\nPublic Google Business (GMB) and other business-listing seeds to enrich (these are starting points, not private data):\n${JSON.stringify(seeds)}\nFor each seed you can support, search public pages for the company and its current owner, founder, principal, CEO, operator, practice administrator, or other decision-maker. Return a separate personName for a human and organizationName for the business; never copy the company name into personName. Include the person's public role when shown. Preserve the seed listingUrl in sourceUrls when you discuss that company. Re-check any phone or email against a cited public page; do not guess or infer missing values.`;
 };
 
 /**
@@ -296,8 +297,16 @@ export const parseGroundedGeminiCandidates = (
   records.slice(0, MAX_RESEARCH_CANDIDATES).forEach((record, index) => {
     if (!record || typeof record !== 'object') return;
     const item = record as Record<string, unknown>;
-    const name = readString(item.name ?? item.personName, 180);
     const organizationName = readString(item.organizationName ?? item.organization ?? item.company, 220);
+    const rawName = readString(item.name, 180);
+    const explicitPersonName = normalizePublicPersonName(readString(
+      item.personName ?? item.contactName ?? item.ownerName ?? item.founderName ?? item.decisionMakerName,
+      180,
+    ));
+    const personName = explicitPersonName || (
+      rawName && organizationName && isLikelyPublicPersonName(rawName) ? rawName : ''
+    );
+    const name = rawName || personName;
     const originalRole = readString(item.role ?? item.title ?? item.position, 180);
     const location = readString(item.location ?? item.city, 180);
     const website = normalizePublicSourceUrl(item.website ?? item.companyWebsite);
@@ -328,6 +337,7 @@ export const parseGroundedGeminiCandidates = (
 
     if (
       !name &&
+      !personName &&
       !organizationName &&
       !originalRole &&
       !location &&
@@ -350,6 +360,7 @@ export const parseGroundedGeminiCandidates = (
         .toString('base64url')
         .slice(0, 24)}`,
       ...(name ? { name } : {}),
+      ...(personName ? { personName } : {}),
       ...(organizationName ? { organizationName } : {}),
       ...(originalRole ? { originalRole } : {}),
       ...(location ? { location } : {}),
@@ -427,7 +438,7 @@ export const discoverLeadsWithGemini = async (
         {
           parts: [
             {
-              text: `Use Google Search to find public, current US business lead candidates for this request. Search official company websites, public professional profile pages, trade associations, licensing or registry pages, news, public social links, and reputable business directories. Return JSON only with a candidates array, up to 40 concise records. Each record may include: name, organizationName, role, location, website, profileUrl, phone, email, socialLinks, sourceUrls, sourceTitles, evidence. Include only details visible in public search results or cited pages. Phone and email must be publicly listed business contact details, never guessed or inferred. Do not use private/authenticated profiles, Sales Navigator/Premium, paywalls, contact-reveal services, commercial lead databases, login sessions, or bypasses. Keep former or conflicting roles marked in evidence instead of presenting them as current. Always include sourceUrls for supporting pages; never fabricate a URL.\nCompany type: ${request.companyType}\nTarget location: ${locationLabel}\nResearch brief: ${request.researchBrief?.trim() || 'Find owner-led businesses and their publicly evidenced decision-makers.'}${listingSeedContext}`,
+              text: `Use Google Search to find public, current US business lead candidates for this request. Search official company websites, public professional profile pages, trade associations, licensing or registry pages, news, public social links, and reputable business directories. Return JSON only with a candidates array, up to 40 concise records. Each record may include: personName, name, organizationName, role, location, website, profileUrl, phone, email, socialLinks, sourceUrls, sourceTitles, evidence. Use personName only for a human explicitly shown on a cited public page; use organizationName for the business, and never put the company name in personName. Include current owner, founder, principal, CEO, operator, practice administrator, or another clearly labeled decision-maker when publicly evidenced. Include only details visible in public search results or cited pages. Phone and email must be publicly listed business contact details, never guessed or inferred. Do not use private/authenticated profiles, Sales Navigator/Premium, paywalls, contact-reveal services, commercial lead databases, login sessions, or bypasses. Keep former or conflicting roles marked in evidence instead of presenting them as current. Always include sourceUrls for supporting pages; never fabricate a URL.\nCompany type: ${request.companyType}\nTarget location: ${locationLabel}\nResearch brief: ${request.researchBrief?.trim() || 'Find owner-led businesses and their publicly evidenced decision-makers.'}${listingSeedContext}`,
             },
           ],
         },

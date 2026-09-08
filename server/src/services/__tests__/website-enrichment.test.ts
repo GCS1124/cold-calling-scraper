@@ -94,6 +94,31 @@ describe('extractContactDetailsFromHtml', () => {
     expect(extracted.phones).toContain('+1 512 555 0444');
   });
 
+  it('extracts only explicitly published decision-maker names', () => {
+    const html = [
+      '<html><body>',
+      '<p>Owner: Jane Doe</p>',
+      '<section class="team-member"><h3>Ravi Patel</h3><p>Chief Executive Officer</p></section>',
+      '<script type="application/ld+json">',
+      '{"@context":"https://schema.org","@type":"LocalBusiness","name":"Example Dental","founder":{"@type":"Person","name":"Morgan Lee","jobTitle":"Founder"}}',
+      '</script>',
+      '</body></html>',
+    ].join('');
+
+    const extracted = extractContactDetailsFromHtml(html, 'https://exampledental.com/about');
+
+    expect(extracted.decisionMakers).toEqual(
+      expect.arrayContaining([
+        { name: 'Jane Doe', role: 'Owner' },
+        { name: 'Ravi Patel', role: 'Chief Executive Officer' },
+        { name: 'Morgan Lee', role: 'Founder' },
+      ]),
+    );
+    expect(extracted.decisionMakers).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'Example Dental' })]),
+    );
+  });
+
   it('labels conservative public opportunity signals without extracting private data', () => {
     const signals = extractPublicOpportunitySignals(
       'Now hiring technicians. Expanding to a new location. Request a free estimate today.',

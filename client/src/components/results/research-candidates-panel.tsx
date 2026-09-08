@@ -41,7 +41,12 @@ export function ResearchCandidatesPanel({ candidates }: ResearchCandidatesPanelP
 
       <div className="mt-4 grid max-h-[48rem] gap-3 overflow-y-auto pr-1 md:grid-cols-2">
         {candidates.map((candidate) => {
-          const displayName = candidate.name || candidate.organizationName || 'Unnamed candidate';
+          const personName = candidate.personName || (
+            candidate.organizationName && candidate.name !== candidate.organizationName
+              ? candidate.name
+              : ''
+          );
+          const displayName = personName || candidate.organizationName || candidate.name || 'Unnamed candidate';
 
           return (
             <article
@@ -51,9 +56,14 @@ export function ResearchCandidatesPanel({ candidates }: ResearchCandidatesPanelP
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h4 className="truncate text-sm font-black text-slate-950">{displayName}</h4>
-                  {candidate.organizationName && candidate.name ? (
+                  {candidate.organizationName && personName ? (
                     <p className="mt-1 truncate text-sm font-semibold text-slate-600">
                       {candidate.organizationName}
+                    </p>
+                  ) : null}
+                  {personName ? (
+                    <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-700">
+                      Public person
                     </p>
                   ) : null}
                 </div>
