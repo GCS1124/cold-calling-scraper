@@ -107,11 +107,14 @@ without coupling to the UI. Preserve the same mandatory phone gate, evidence
 provenance, limitations, idempotency, request IDs, and error codes that the web
 client uses.
 
-Before production integration access, add audit-log retention, rotation/revocation
-controls, a durable worker completion callback, typed SDK generation, and
-contract compatibility tests. Do not promise webhooks, SLAs, personal mobile
-data, email deliverability, or all-internet coverage until the corresponding
-evidence and operational measurements exist.
+The preview now includes a dependency-free typed SDK, a hash-only Postgres
+key store with expiry, revocation, and last-use tracking, and bounded audit
+events that exclude lead payloads and raw credentials. Before production
+integration access, add customer-specific quotas, a durable worker completion
+callback, contract compatibility tests, and scheduled retention enforcement.
+Do not promise webhooks, SLAs, personal mobile data, email deliverability, or
+all-internet coverage until the corresponding evidence and operational
+measurements exist.
 
 Acceptance: an external client can discover capabilities, authenticate without
 sharing a browser session, start one of all three modes, safely retry a lost
@@ -128,12 +131,12 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 | Deliverable | State | Evidence required |
 | --- | --- | --- |
 | Detailed implementation roadmap | Written | This document and source audit |
-| Trust foundation | Local regression and browser checks pass | 294 server tests, 56 client tests, 9 shared tests, 13 integration tests, both builds, runtime boot, lint, and mocked browser flow |
+| Trust foundation | Local regression and browser checks pass | 298 server tests, 56 client tests, 9 shared tests, 4 SDK tests, both builds, runtime boot, lint, and mocked browser flow |
 | Crawler/domain checks | Partial: unrelated redirects and robots/parked pages rejected locally | Official-domain validation and bounded live checks still pending; unchanged-document reuse is not yet persistent |
 | Discovery reliability across three modes | Partial: GMB free-source merge, bounded public-phone recovery, shared provider-coverage contract, and durable replay-safe starts implemented locally | Recovery, retention reuse, and real-source smoke matrix still pending; stateless fallback cannot guarantee cross-instance replay |
 | Typed qualification / role and signal research | Partial: source-family trust, authority tiers, role normalization, organization hints, relationship persistence, opportunity taxonomy, and contradiction penalties implemented | Calibrated weights and independently reviewed multi-industry acceptance labels |
 | Dossiers / feedback / suppression | Partial: search responses and evidence dossiers expose lifecycle, contract, coverage, and quality summaries; source-family metadata, person-to-organization links, role fields, idempotent observation persistence, owner-scoped jobs, feedback storage, correction UI, and response/export suppression are implemented | Shared-workspace authorization, reviewed correction policy, and live export checks remain pending |
-| Versioned integration surface | Preview: `/api/v1` capabilities, owner-required route aliases, hashed API-key authentication, per-credential rate limiting, lifecycle/idempotency/error contract, and integration documentation are implemented | Customer-specific quotas, audit logs, SDK generation, worker callbacks, production key operations, and live client interoperability |
+| Versioned integration surface | Preview: `/api/v1` capabilities, owner-required route aliases, hashed API-key authentication, environment and Postgres key stores, expiry/revocation state, per-credential rate limiting, typed SDK, bounded audit events with required-mode readiness gate, lifecycle/idempotency/error contract, and integration documentation are implemented | Customer-specific quotas, scheduled retention enforcement, worker callbacks, production key operations, and live client interoperability |
 | Commercial quality benchmark | Pending | Reviewed dataset and measured results |
 | Production release | Pending | Commit, remote SHA, deployment, live readback |
 | Customer willingness to pay | Unproven | Pilot usage and customer feedback |

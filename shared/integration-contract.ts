@@ -12,6 +12,11 @@ export const buildIntegrationCapabilities = () => ({
     bearerFormat: 'Bearer <Supabase access token>',
     apiKeyFormat: 'x-api-key: <integration key>',
   },
+  client: {
+    packageName: 'lead-finder-integration-sdk',
+    version: '0.1.0',
+    runtime: 'fetch-compatible TypeScript/JavaScript',
+  },
   modes: [
     {
       id: 'gmb' as const,

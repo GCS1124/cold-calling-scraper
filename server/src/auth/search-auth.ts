@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 import type { RequestLike } from '../http/search-http-contract';
+import { lookupIntegrationApiKey } from '../services/integration-key-store';
 
 export type SearchAuthContext = {
   ownerId?: string;
@@ -138,6 +139,8 @@ const getAuthConfig = () => ({
     process.env.SUPABASE_ANON_KEY?.trim() ||
     '',
   integrationApiKeysRaw: process.env.LEAD_FINDER_INTEGRATION_API_KEYS?.trim() ?? '',
+  integrationApiKeySource:
+    process.env.LEAD_FINDER_INTEGRATION_API_KEYS_SOURCE?.trim().toLowerCase() || 'hybrid',
 });
 
 export const isSearchAuthRequired = () => getAuthConfig().required;
@@ -168,7 +171,7 @@ export const authenticateSearchRequest = async (
   }
 
   if (apiKey) {
-    if (!config.integrationApiKeysRaw) {
+    if (!config.integrationApiKeysRaw && config.integrationApiKeySource === 'env') {
       throw new SearchAuthorizationError(
         'AUTH_UNAVAILABLE',
         'Integration API-key authentication is not configured for this deployment.',
@@ -177,7 +180,7 @@ export const authenticateSearchRequest = async (
     }
 
     const records = parseIntegrationApiKeys(config.integrationApiKeysRaw);
-    if (!records.length) {
+    if (config.integrationApiKeysRaw && !records.length && config.integrationApiKeySource !== 'postgres') {
       throw new SearchAuthorizationError(
         'AUTH_UNAVAILABLE',
         'Integration API-key authentication is misconfigured for this deployment.',
@@ -186,16 +189,57 @@ export const authenticateSearchRequest = async (
     }
 
     const hashed = hashIntegrationApiKey(apiKey);
-    const record = records.find((candidate) => matchesHash(hashed, candidate.sha256));
-    if (!record) {
+    const envRecord = records.find((candidate) => matchesHash(hashed, candidate.sha256));
+    if (envRecord && config.integrationApiKeySource !== 'postgres') {
+      return { ownerId: envRecord.ownerId, apiKeyId: envRecord.id };
+    }
+
+    if (config.integrationApiKeySource !== 'env') {
+      try {
+        const storedRecord = await lookupIntegrationApiKey(hashed);
+        if (storedRecord) {
+          return {
+            ownerId: storedRecord.ownerId,
+            apiKeyId: storedRecord.apiKeyId,
+          };
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === 'SearchPersistenceError') {
+          throw new SearchAuthorizationError(
+            'AUTH_UNAVAILABLE',
+            error.message,
+            503,
+            true,
+          );
+        }
+        throw error;
+      }
+    }
+
+    if (envRecord) {
+      throw new SearchAuthorizationError(
+        'AUTH_INVALID',
+        'This integration key is not enabled by the configured key store.',
+        401,
+      );
+    }
+
+    if (!records.length && config.integrationApiKeySource !== 'env') {
+      throw new SearchAuthorizationError(
+        'AUTH_UNAVAILABLE',
+        'No integration key store is configured for this deployment.',
+        503,
+        true,
+      );
+    }
+
+    if (!envRecord) {
       throw new SearchAuthorizationError(
         'AUTH_INVALID',
         'Invalid integration API key.',
         401,
       );
     }
-
-    return { ownerId: record.ownerId, apiKeyId: record.id };
   }
 
   if (!token) {

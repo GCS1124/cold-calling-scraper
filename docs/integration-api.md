@@ -2,7 +2,8 @@
 
 Status: versioned integration surface in preview. Provider APIs remain an
 implementation detail; this contract exposes one stable first-party surface
-for GMB, public LinkedIn, and free AI-assisted discovery.
+for GMB, public LinkedIn, and free AI-assisted discovery. A dependency-free
+typed client is included at `packages/lead-finder-sdk`.
 
 ## Boundary
 
@@ -40,9 +41,9 @@ supported:
 1. `Authorization: Bearer <Supabase access token>` for an authenticated user.
 2. `x-api-key: <integration key>` for a server-to-server integration.
 
-API keys are never stored in source control or sent to the browser. Configure
-the server with `LEAD_FINDER_INTEGRATION_API_KEYS` as JSON containing only
-SHA-256 hashes and owner identifiers:
+API keys are never stored in source control or sent to the browser. The
+backward-compatible environment store uses `LEAD_FINDER_INTEGRATION_API_KEYS`
+as JSON containing only SHA-256 hashes and owner identifiers:
 
 ```json
 [
@@ -54,14 +55,34 @@ SHA-256 hashes and owner identifiers:
 ]
 ```
 
-Generate the hash outside the repository, store the raw key only in the
-integration secret manager, and rotate by adding a second record before
-removing the old one. A valid key maps every search and feedback event to one
-`ownerId`; a caller cannot submit an owner id in the request body.
+Generate the hash outside the repository and store the raw key only in the
+integration secret manager. `LEAD_FINDER_INTEGRATION_API_KEYS_SOURCE` controls
+the store: `env` uses only the JSON above, `postgres` uses the hash-only
+`public.integration_api_keys` table, and the default `hybrid` mode checks both.
+Apply `supabase/migrations/20260908190000_integration_api_keys.sql` before
+using the Postgres store. Rotate by inserting the replacement hash first, then
+revoke the old row with `revoked_at = now()`; expiry is enforced by
+`expires_at`, and `last_used_at` is maintained without storing the raw key.
+A valid key maps every search and feedback event to one owner id; a caller
+cannot submit an owner id in the request body.
 
-If the key configuration is absent or malformed, the integration surface fails
-closed with `503 AUTH_UNAVAILABLE`. An absent key fails with `401 AUTH_REQUIRED`
-and an incorrect key fails with `401 AUTH_INVALID`.
+Versioned integration calls also write a bounded audit event when
+`LEAD_FINDER_INTEGRATION_AUDIT_MODE` is not `off`. Events contain request id,
+method/path, operation, outcome, status, owner id, and key id only; search
+payloads, lead contact fields, query strings, raw API keys, and provider
+credentials are never stored. The default `best-effort` mode does not block a
+request if the audit store is unavailable. Set
+`LEAD_FINDER_INTEGRATION_AUDIT_MODE=required` after applying
+`supabase/migrations/20260908193000_integration_audit_events.sql` to fail
+closed when the audit table is not ready. Retention defaults to 30 days and is
+bounded to 1-3650 days by `LEAD_FINDER_INTEGRATION_AUDIT_RETENTION_DAYS`;
+cleanup runs opportunistically in warm runtimes, so a scheduled database
+cleanup is still recommended for strict retention guarantees.
+
+If the selected key store is absent, malformed, or not migrated, the integration
+surface fails closed with `503 AUTH_UNAVAILABLE`. An absent key fails with
+`401 AUTH_REQUIRED` and an incorrect, expired, or revoked key fails with
+`401 AUTH_INVALID`.
 
 ## Traffic Protection
 
@@ -201,20 +222,22 @@ whether to retry.
 
 ## Rollout Plan
 
-1. Freeze the v1 contract and generate a typed client from the capabilities
-   response; do not couple CRM code to provider names or UI labels.
-2. Configure one API key per integration owner, enable Postgres, and verify
-   owner isolation with two test keys before accepting customer traffic.
-3. Keep durable rate limiting enabled, then add audit-log retention, key usage
-   metrics, and customer-specific quotas before production promotion. The
-   built-in counter is a traffic guard, not a billing or usage ledger.
-4. Add a worker-backed completion callback only after durable job state and
+1. Freeze the v1 contract and use the included typed client; do not couple CRM
+   code to provider names or UI labels.
+2. Configure one revocable key per integration owner, enable Postgres, and
+   verify owner isolation with two test keys before accepting customer traffic.
+3. Apply the audit-event migration and set required audit mode for production
+   traffic; keep durable rate limiting enabled. The built-in counter is a
+   traffic guard, not a billing or usage ledger.
+4. Add key usage metrics, customer-specific quotas, worker callbacks, and
+   scheduled retention enforcement before production promotion.
+5. Add a worker-backed completion callback only after durable job state and
    retry semantics are measured. Until then, poll using the advertised lifecycle
    flags; do not invent webhook delivery guarantees.
-5. Run the reviewed multi-industry corpus and live provider smoke matrix. Track
+6. Run the reviewed multi-industry corpus and live provider smoke matrix. Track
    accepted leads per hour, phone-business association, duplicate rate,
    freshness, provider failure rate, and repeat usage separately for GMB,
    LinkedIn, and AI.
-6. Promote only when the measured quality gates in the lead-quality roadmap are
+7. Promote only when the measured quality gates in the lead-quality roadmap are
    met. A green synthetic suite does not prove provider yield or willingness to
    pay.

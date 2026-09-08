@@ -11,7 +11,11 @@ export const authorizeSearchRequest = async (
   requestId: string,
 ): Promise<SearchAuthContext | null> => {
   try {
-    return await authenticateSearchRequest(request);
+    const auth = await authenticateSearchRequest(request);
+    if (request.requireAuthenticatedOwner === true) {
+      request.integrationAuthContext = auth;
+    }
+    return auth;
   } catch (error) {
     if (!isSearchAuthorizationError(error)) {
       throw error;

@@ -11,6 +11,13 @@ export type RequestLike = {
   headers?: Record<string, string | string[] | undefined>;
   /** Internal marker used only by the versioned integration route wrappers. */
   requireAuthenticatedOwner?: boolean;
+  /** Auth context cached by the versioned integration wrapper for audit metadata. */
+  integrationAuthContext?: {
+    ownerId?: string;
+    apiKeyId?: string;
+  };
+  method?: string;
+  url?: string;
 };
 
 type ResponseLike = {

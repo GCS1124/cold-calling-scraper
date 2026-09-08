@@ -1,0 +1,17 @@
+{
+  "name": "lead-finder-integration-sdk",
+  "version": "0.1.0",
+  "description": "Dependency-free TypeScript client for the Lead Finder v1 integration contract",
+  "type": "module",
+  "private": true,
+  "files": ["dist", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
+}
