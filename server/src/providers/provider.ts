@@ -9,6 +9,9 @@ export type LeadProviderRequest = {
   request: SearchRequest;
   deadlineMs?: number;
   location?: NormalizedUsLocation;
+  /** Internal bounded fan-out controls for callers with a tighter deadline. */
+  maxLeadCount?: number;
+  maxSearchQueries?: number;
 };
 
 export type LeadProvider = {

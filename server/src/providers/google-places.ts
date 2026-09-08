@@ -705,6 +705,8 @@ export const googlePlacesProvider: LeadProvider = {
     request,
     location,
     deadlineMs: requestDeadlineMs,
+    maxLeadCount: requestedMaxLeadCount,
+    maxSearchQueries: requestedMaxSearchQueries,
   }: LeadProviderRequest) {
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
     if (!isGooglePlacesConfigured() || !apiKey) {
@@ -717,13 +719,19 @@ export const googlePlacesProvider: LeadProvider = {
         location?.label?.includes(',') &&
         location.city?.trim(),
     );
-    const maxLeadCount = isCityStateLocal
+    const defaultMaxLeadCount = isCityStateLocal
       ? Math.min(Math.max(request.count * 2, 80), 120)
       : Math.min(request.count, 60);
-    const searchQueries = uniqueQueries([query, ...queryVariants]).slice(
-      0,
-      isCityStateLocal ? 80 : 10,
+    const maxLeadCount = Math.min(
+      120,
+      Math.max(1, requestedMaxLeadCount ?? defaultMaxLeadCount),
     );
+    const defaultSearchQueryLimit = isCityStateLocal ? 80 : 10;
+    const searchQueryLimit = Math.max(
+      1,
+      Math.min(requestedMaxSearchQueries ?? defaultSearchQueryLimit, 80),
+    );
+    const searchQueries = uniqueQueries([query, ...queryVariants]).slice(0, searchQueryLimit);
 
     const candidateMap = new Map<string, PlaceCandidate>();
     const locationLabel = location?.label ?? request.city;
@@ -732,7 +740,7 @@ export const googlePlacesProvider: LeadProvider = {
       locationLabel,
       location,
       searchQueries,
-    );
+    ).slice(0, searchQueryLimit);
 
     await collectCandidatesForQueries(
       searchQueries,

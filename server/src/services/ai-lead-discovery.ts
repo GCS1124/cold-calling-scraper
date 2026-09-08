@@ -212,6 +212,8 @@ const discoverGoogleBusinessListingsForAi: typeof discoverUsLeadsFromOsm = async
     request: googleRequest,
     location,
     deadlineMs,
+    maxLeadCount: Math.min(Math.max(request.count, 20), maxGeminiListingSeeds),
+    maxSearchQueries: 3,
   });
 };
 
@@ -235,6 +237,12 @@ const selectListingSeeds = (leads: Lead[]) => {
     })
     .slice(0, maxGeminiListingSeeds);
 };
+
+const emptyGeminiResearch = (): GeminiResearchDiscovery => ({
+  candidates: [],
+  groundingSources: [],
+  leads: [],
+});
 
 export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
   const discoverLinkedin = deps.discoverLinkedin ?? discoverUsLeadsFromLinkedinSearch;
@@ -298,8 +306,6 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
         })
       : Promise.resolve({ candidates: [], groundingSources: [], leads: [] });
 
-    let gmbListingsFailed = false;
-    let gmbListingsTimedOut = false;
     const gmbListingPromise = discoverGmbListings
       ? withTimeout(
           discoverGmbListings({
@@ -323,8 +329,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
             return leads;
           })
           .catch((error): Lead[] => {
-            gmbListingsFailed = true;
-            gmbListingsTimedOut = isTimeoutFailure(error);
+            const timedOut = isTimeoutFailure(error);
             addWarning(warnings, {
               providerId: 'google-places-ai',
               providerName: 'Google Business (GMB) listings',
@@ -335,7 +340,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
               severity: 'warning',
             });
             updateCoverage(coverage, 'google-places-ai', {
-              status: gmbListingsTimedOut ? 'partial' : 'failed',
+              status: timedOut ? 'partial' : 'failed',
               message:
                 error instanceof Error
                   ? error.message
@@ -387,6 +392,66 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
             return [];
           })
       : Promise.resolve([] as Lead[]);
+
+    const enrichListingSeedsWithGemini = async (listingLeads: Lead[]) => {
+      const listingSeeds = selectListingSeeds(listingLeads);
+      if (!listingSeeds.length) {
+        updateCoverage(coverage, 'gemini-listing-enrichment', {
+          status: 'configured',
+          message: 'No public business listing seeds were available for the Gemini enrichment pass.',
+        });
+        return emptyGeminiResearch();
+      }
+
+      try {
+        const listingEnrichment = await withTimeout(
+          discoverGemini(request, location.label, listingSeeds),
+          Math.min(discoveryDeadlineMs, Date.now() + geminiListingEnrichmentWindowMs),
+          'Gemini listing enrichment timed out; original business listing fields were preserved.',
+        );
+        updateCoverage(coverage, 'gemini-listing-enrichment', {
+          status: 'returned',
+          leadCount: listingEnrichment.candidates.length,
+          message: `Gemini enriched ${listingSeeds.length} public business listing seed${listingSeeds.length === 1 ? '' : 's'}; original listing fields remain preserved.`,
+        });
+        return listingEnrichment;
+      } catch (error) {
+        const timedOut = isTimeoutFailure(error);
+        geminiListingEnrichmentFailed = true;
+        geminiListingEnrichmentTimedOut = timedOut;
+        addWarning(warnings, {
+          providerId: 'gemini-listing-enrichment',
+          providerName: 'Gemini listing enrichment',
+          message:
+            error instanceof Error
+              ? `${error.message} Original Google Business listing fields were preserved.`
+              : 'Gemini listing enrichment failed. Original business listing fields were preserved.',
+          severity: 'warning',
+        });
+        updateCoverage(coverage, 'gemini-listing-enrichment', {
+          status: timedOut ? 'partial' : 'failed',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Gemini listing enrichment failed.',
+        });
+        return emptyGeminiResearch();
+      }
+    };
+
+    // Start the seeded Gemini pass as soon as GMB returns so a slow LinkedIn
+    // or OSM branch cannot consume the window reserved for enrichment.
+    const geminiListingEnrichmentPromise: Promise<GeminiResearchDiscovery> = isGeminiLeadDiscoveryEnabled()
+      ? discoverGmbListings
+        ? gmbListingPromise.then(async (gmbLeads) => {
+            if (selectListingSeeds(gmbLeads).length) {
+              return enrichListingSeedsWithGemini(gmbLeads);
+            }
+
+            return enrichListingSeedsWithGemini(await publicListingPromise);
+          })
+        : publicListingPromise.then(enrichListingSeedsWithGemini)
+      : Promise.resolve(emptyGeminiResearch());
 
     const assistance = await runGeminiQueryAssistance({
       request,
@@ -441,68 +506,25 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
         return { leads: [], warnings: [], blocked: false };
       });
 
-    const [discoveryResult, publicListingLeads, gmbListingLeads, initialGeminiResult] = await Promise.all([
+    const [discoveryResult, publicListingLeads, gmbListingLeads, initialGeminiResult, listingGeminiResult] = await Promise.all([
       linkedinDiscoveryPromise,
       publicListingPromise,
       gmbListingPromise,
       geminiDiscoveryPromise,
+      geminiListingEnrichmentPromise,
     ]);
 
-    const listingSeeds = selectListingSeeds([
-      ...gmbListingLeads,
-      ...publicListingLeads,
-    ]);
-
-    let geminiResult = initialGeminiResult;
-    if (isGeminiLeadDiscoveryEnabled() && listingSeeds.length) {
-      try {
-        const listingEnrichment = await withTimeout(
-          discoverGemini(request, location.label, listingSeeds),
-          Math.min(discoveryDeadlineMs, Date.now() + geminiListingEnrichmentWindowMs),
-          'Gemini listing enrichment timed out; original business listing fields were preserved.',
-        );
-        geminiResult = {
-          candidates: mergeResearchCandidates([
-            ...geminiResult.candidates,
-            ...listingEnrichment.candidates,
-          ]),
-          groundingSources: mergeGroundingSources([
-            ...geminiResult.groundingSources,
-            ...listingEnrichment.groundingSources,
-          ]),
-          leads: [...geminiResult.leads, ...listingEnrichment.leads],
-        };
-        updateCoverage(coverage, 'gemini-listing-enrichment', {
-          status: 'returned',
-          leadCount: listingEnrichment.candidates.length,
-          message: `Gemini enriched ${listingSeeds.length} public business listing seed${listingSeeds.length === 1 ? '' : 's'}; original listing fields remain preserved.`,
-        });
-      } catch (error) {
-        geminiListingEnrichmentFailed = true;
-        geminiListingEnrichmentTimedOut = isTimeoutFailure(error);
-        addWarning(warnings, {
-          providerId: 'gemini-listing-enrichment',
-          providerName: 'Gemini listing enrichment',
-          message:
-            error instanceof Error
-              ? `${error.message} Original Google Business listing fields were preserved.`
-              : 'Gemini listing enrichment failed. Original business listing fields were preserved.',
-          severity: 'warning',
-        });
-        updateCoverage(coverage, 'gemini-listing-enrichment', {
-          status: geminiListingEnrichmentTimedOut ? 'partial' : 'failed',
-          message:
-            error instanceof Error
-              ? error.message
-              : 'Gemini listing enrichment failed.',
-        });
-      }
-    } else if (isGeminiLeadDiscoveryEnabled()) {
-      updateCoverage(coverage, 'gemini-listing-enrichment', {
-        status: 'configured',
-        message: 'No public business listing seeds were available for the Gemini enrichment pass.',
-      });
-    }
+    const geminiResult = {
+      candidates: mergeResearchCandidates([
+        ...initialGeminiResult.candidates,
+        ...listingGeminiResult.candidates,
+      ]),
+      groundingSources: mergeGroundingSources([
+        ...initialGeminiResult.groundingSources,
+        ...listingGeminiResult.groundingSources,
+      ]),
+      leads: [...initialGeminiResult.leads, ...listingGeminiResult.leads],
+    };
 
     researchCandidates = geminiResult.candidates;
     updateCoverage(coverage, 'gemini-public-discovery', {
