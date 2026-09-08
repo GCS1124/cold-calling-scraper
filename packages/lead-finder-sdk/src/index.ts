@@ -222,6 +222,14 @@ export type IntegrationCapabilities = {
   requestId?: string;
 };
 
+export type IntegrationOpenApiDocument = {
+  openapi: string;
+  info: { title: string; version: string; description?: string };
+  paths: Record<string, Record<string, unknown>>;
+  components?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 export type SearchApiErrorResponse = {
   error: string;
   code: string;
@@ -353,6 +361,14 @@ export class LeadFinderClient {
 
   async getCapabilities(options: RequestOptions = {}) {
     return this.request<IntegrationCapabilities>('/capabilities', { method: 'GET' }, options);
+  }
+
+  async getOpenApi(options: RequestOptions = {}) {
+    return this.request<IntegrationOpenApiDocument>(
+      '/capabilities?format=openapi',
+      { method: 'GET' },
+      options,
+    );
   }
 
   async startSearch(

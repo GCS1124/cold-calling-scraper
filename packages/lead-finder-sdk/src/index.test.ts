@@ -143,4 +143,18 @@ describe('LeadFinderClient', () => {
       requestId: 'request-429',
     });
   });
+
+  it('discovers the machine-readable OpenAPI document from the existing capabilities route', async () => {
+    const fetchMock = vi.fn<FetchImplementation>().mockResolvedValue(
+      response({ openapi: '3.1.0', paths: { '/api/v1/search': { post: {} } } }),
+    );
+    const client = new LeadFinderClient({ baseUrl: 'https://example.test', fetch: fetchMock });
+
+    const document = await client.getOpenApi();
+
+    expect(document.openapi).toBe('3.1.0');
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'https://example.test/api/v1/capabilities?format=openapi',
+    );
+  });
 });

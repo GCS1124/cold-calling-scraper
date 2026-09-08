@@ -34,6 +34,10 @@ without an invalid polling loop. The SDK preserves machine-readable API errors,
 request ids, limitations, provider coverage, evidence, and the mandatory
 public-phone policy.
 
+Use `client.getOpenApi()` to load the machine-readable contract from the same
+deployment. The equivalent HTTP endpoint is
+`GET /api/v1/capabilities?format=openapi`.
+
 The key belongs in the calling server's secret manager. Do not ship an
 integration key to a browser bundle. The API uses only public, legally
 accessible sources; a public business number is not represented as a verified

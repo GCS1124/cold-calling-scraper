@@ -33,6 +33,11 @@ The older `/api/search` routes remain application transport for the web client.
 Consumers should use `/api/v1` so a future contract revision can be introduced
 without silently changing integration behavior.
 
+The same capabilities function serves a machine-readable OpenAPI 3.1 document
+at `GET /api/v1/capabilities?format=openapi`; the SDK exposes this as
+`client.getOpenApi()`. This keeps generated clients and the typed client on the
+same deployment-specific contract without adding another serverless route.
+
 ## Authentication
 
 Versioned search operations always require an owner. Two server-side options are

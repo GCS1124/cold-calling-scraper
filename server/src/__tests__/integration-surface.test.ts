@@ -58,6 +58,21 @@ describe('versioned integration surface', () => {
     expect(serialized).not.toContain('SUPABASE_SERVICE_ROLE_KEY');
   });
 
+  it('publishes an OpenAPI document through the existing capabilities function', () => {
+    const { response, state } = createResponse();
+
+    capabilitiesHandler({ method: 'GET', query: { format: 'openapi' }, headers: {} }, response);
+
+    expect(state.statusCode).toBe(200);
+    expect(state.body).toMatchObject({
+      openapi: '3.1.0',
+      paths: {
+        '/api/v1/search': { post: { operationId: 'startSearch' } },
+        '/api/v1/search/{searchId}/feedback': { post: { operationId: 'recordFeedback' } },
+      },
+    });
+  });
+
   it('marks versioned search requests as owner-required before legacy handling', async () => {
     legacyHandler.mockResolvedValue(undefined);
     const request = { method: 'POST', headers: {} };
