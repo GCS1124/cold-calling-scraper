@@ -336,29 +336,39 @@ describe('createSearchService', () => {
     expect(completed?.meta.progress.foundCount).toBe(50);
   });
 
-  it('completes a LinkedIn search job with public profile leads', async () => {
+  it('runs the merged public-source AI mode through the durable local lifecycle', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
-
+    const discoverAiLeads = vi.fn().mockResolvedValue({
+      leads: [
+        {
+          ...sampleLead,
+          id: 'ai-linkedin-lead-1',
+          name: 'Mark Sweeney',
+          source: 'LinkedIn, Public Profile, Public Website',
+          listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
+          mobile: '+1 512 555 0101',
+          contactSourceUrl: 'https://www.openstreetmap.org/node/123',
+          hasPhone: true,
+          verifiedPhone: true,
+        },
+      ],
+      warnings: [],
+      coverage: [
+        {
+          providerId: 'linkedin-public-search',
+          providerName: 'Public LinkedIn Search',
+          status: 'returned',
+          leadCount: 1,
+        },
+      ],
+      aiAssistance: 'enabled',
+      researchCandidates: [],
+      enrichedCount: 1,
+    });
     const service = createSearchService({
-      idFactory: () => 'search-linkedin-1',
+      idFactory: () => 'search-ai-1',
       normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
-      discoverLinkedinLeads: vi.fn().mockResolvedValue({
-        leads: [
-          {
-            ...sampleLead,
-            id: 'linkedin-lead-1',
-            contactSourceUrl: 'https://markdental.com/contact',
-            name: 'Mark Sweeney',
-            source: 'LinkedIn',
-            website: '',
-            listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
-            hasWebsite: true,
-            sourceScore: 82,
-          },
-        ],
-        warnings: [],
-        blocked: false,
-      }),
+      discoverAiLeads,
       schedule: (task) => {
         backgroundTask = task;
       },
@@ -368,61 +378,65 @@ describe('createSearchService', () => {
       companyType: 'Dentist',
       city: 'Austin',
       count: 50,
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
     });
 
-    expect(started.meta.status).toBe('queued');
-
+    expect(started.meta.sourceMode).toBe('ai');
     if (!backgroundTask) {
       throw new Error('Background task was not scheduled');
     }
 
-    const task = backgroundTask as () => Promise<void>;
-    await task();
-    const completed = await service.getSearch('search-linkedin-1');
+    await (backgroundTask as () => Promise<void>)();
+    const completed = await service.getSearch('search-ai-1');
 
+    expect(discoverAiLeads).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ sourceMode: 'ai' }),
+        location: sampleLocation,
+        deadlineMs: expect.any(Number),
+      }),
+    );
     expect(completed?.meta.status).toBe('complete');
-    expect(completed?.meta.progress.currentSource).toBe('Complete');
-    expect(completed?.leads).toHaveLength(1);
+    expect(completed?.meta.sourceMode).toBe('ai');
+    expect(completed?.leads[0]?.name).toBe('Mark Sweeney');
     expect(completed?.leads[0]?.listingUrl).toContain('/in/');
-    expect(completed?.meta.providerWarnings).toHaveLength(0);
+    expect(completed?.meta.progress.aiAssistance).toBe('enabled');
   });
 
-  it('bridges a matching free listing phone into local LinkedIn discovery', async () => {
+  it('keeps the AI result when public LinkedIn and listing evidence are fused upstream', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
-    const owner = {
-      ...sampleLead,
-      id: 'linkedin-owner',
-      name: 'Avery Smith',
-      headline: 'Owner at Austin Dental Studio',
-      mobile: '',
-      hasPhone: false,
-      verifiedPhone: false,
-      website: 'https://austindental.example',
-      hasWebsite: true,
-      source: 'LinkedIn',
-      listingUrl: 'https://linkedin.com/in/avery-smith',
-    };
-    const listing = {
-      ...sampleLead,
-      id: 'osm-owner-business',
-      name: 'Austin Dental Studio',
-      source: 'OpenStreetMap',
-      listingUrl: 'https://www.openstreetmap.org/node/456',
-      website: 'https://austindental.example',
-      mobile: '+1 512 555 0199',
-      hasPhone: true,
-      verifiedPhone: true,
-    };
+    const discoverAiLeads = vi.fn().mockResolvedValue({
+      leads: [
+        {
+          ...sampleLead,
+          id: 'ai-owner',
+          name: 'Avery Smith',
+          headline: 'Owner at Austin Dental Studio',
+          source: 'LinkedIn, Public Profile, OpenStreetMap',
+          listingUrl: 'https://linkedin.com/in/avery-smith',
+          mobile: '+1 512 555 0199',
+          contactSourceUrl: 'https://www.openstreetmap.org/node/456',
+          hasPhone: true,
+          verifiedPhone: true,
+        },
+      ],
+      warnings: [],
+      coverage: [
+        {
+          providerId: 'public-business-listings',
+          providerName: 'OpenStreetMap',
+          status: 'returned',
+          leadCount: 1,
+        },
+      ],
+      aiAssistance: 'enabled',
+      researchCandidates: [],
+      enrichedCount: 1,
+    });
     const service = createSearchService({
-      idFactory: () => 'search-linkedin-bridge',
+      idFactory: () => 'search-ai-bridge',
       normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
-      discoverLinkedinLeads: vi.fn().mockResolvedValue({
-        leads: [owner],
-        warnings: [],
-        blocked: false,
-      }),
-      discoverOsmLeads: vi.fn().mockResolvedValue([listing]),
+      discoverAiLeads,
       schedule: (task) => {
         backgroundTask = task;
       },
@@ -432,7 +446,7 @@ describe('createSearchService', () => {
       companyType: 'Dentist',
       city: 'Austin',
       count: 50,
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
       phoneRequired: true,
     });
 
@@ -440,12 +454,10 @@ describe('createSearchService', () => {
       throw new Error('Background task was not scheduled');
     }
 
-    const task = backgroundTask as () => Promise<void>;
-    await task();
-    const completed = await service.getSearch('search-linkedin-bridge');
+    await (backgroundTask as () => Promise<void>)();
+    const completed = await service.getSearch('search-ai-bridge');
 
     expect(completed?.meta.status).toBe('complete');
-    expect(completed?.leads).toHaveLength(1);
     expect(completed?.leads[0]).toMatchObject({
       name: 'Avery Smith',
       mobile: '+1 512 555 0199',
@@ -454,44 +466,40 @@ describe('createSearchService', () => {
     expect(completed?.leads[0]?.listingUrl).toBe('https://linkedin.com/in/avery-smith');
   });
 
-  it('merges public LinkedIn contact enrichment into the completed lead', async () => {
+  it('keeps public contact enrichment in the merged AI result', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
-    const enrichLinkedinLeads = vi.fn().mockImplementation(async ({ leads }) => ({
-      leads: leads.map((lead: Lead) => ({
-        ...lead,
+    const discoverAiLeads = vi.fn().mockResolvedValue({
+      leads: [{
+        ...sampleLead,
+        id: 'ai-enriched-lead',
+        name: 'Mark Sweeney',
+        source: 'LinkedIn, Public Profile, Public Web, Website Crawl',
+        listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
         mobile: '+1 512 555 0199',
         email: 'hello@markdental.com',
         website: 'https://markdental.com',
-        contactEvidence: [{ field: 'phone', value: '+15125550199', sourceUrl: 'https://markdental.com/contact', sourceName: 'Business website', sourceKind: 'business_website', association: 'business', observedAt: lead.scrapedAt }],
-        hasEmail: true,
+        contactSourceUrl: 'https://markdental.com/contact',
         hasPhone: true,
+        hasEmail: true,
         hasWebsite: true,
-        verifiedEmail: true,
         verifiedPhone: true,
-        source: `${lead.source}, Public Web, Website Crawl`,
-      })),
+        verifiedEmail: true,
+      }],
       warnings: [],
-      enrichedCount: leads.length,
-    }));
-
+      coverage: [{
+        providerId: 'public-website-enrichment',
+        providerName: 'Public Website Enrichment',
+        status: 'returned',
+        leadCount: 1,
+      }],
+      aiAssistance: 'enabled',
+      researchCandidates: [],
+      enrichedCount: 1,
+    });
     const service = createSearchService({
-      idFactory: () => 'search-linkedin-enriched',
+      idFactory: () => 'search-ai-enriched',
       normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
-      discoverLinkedinLeads: vi.fn().mockResolvedValue({
-        leads: [
-          {
-            ...sampleLead,
-            id: 'linkedin-enriched-lead',
-            name: 'Mark Sweeney',
-            source: 'LinkedIn',
-            website: '',
-            listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
-          },
-        ],
-        warnings: [],
-        blocked: false,
-      }),
-      enrichLinkedinLeads,
+      discoverAiLeads,
       schedule: (task) => {
         backgroundTask = task;
       },
@@ -501,49 +509,57 @@ describe('createSearchService', () => {
       companyType: 'Dentist',
       city: 'Austin',
       count: 50,
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
     });
 
     if (!backgroundTask) {
       throw new Error('Background task was not scheduled');
     }
 
-    const task = backgroundTask as () => Promise<void>;
-    await task();
-    const completed = await service.getSearch('search-linkedin-enriched');
+    await (backgroundTask as () => Promise<void>)();
+    const completed = await service.getSearch('search-ai-enriched');
 
-    expect(enrichLinkedinLeads).toHaveBeenCalledTimes(1);
-    expect(completed?.leads[0]?.email).toBe('hello@markdental.com');
-    expect(completed?.leads[0]?.mobile).toBe('+1 512 555 0199');
-    expect(completed?.leads[0]?.website).toBe('https://markdental.com');
+    expect(completed?.leads[0]).toMatchObject({
+      email: 'hello@markdental.com',
+      mobile: '+1 512 555 0199',
+      website: 'https://markdental.com',
+    });
     expect(completed?.leads[0]?.source).toContain('Website Crawl');
-    expect(completed?.meta.progress.duplicatesRemoved).toBe(0);
+    expect(completed?.meta.progress.enriched).toBe(1);
   });
 
-  it('keeps discovered LinkedIn profiles when public contact enrichment fails', async () => {
+  it('preserves qualified AI candidates when an optional public source reports a warning', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
-    const enrichLinkedinLeads = vi
-      .fn()
-      .mockRejectedValue(new Error('Public contact provider unavailable'));
-
     const service = createSearchService({
-      idFactory: () => 'search-linkedin-enrichment-failure',
+      idFactory: () => 'search-ai-warning',
       normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
-      discoverLinkedinLeads: vi.fn().mockResolvedValue({
-        leads: [
-          {
-            ...sampleLead,
-            id: 'linkedin-enrichment-failure-lead',
-            contactSourceUrl: 'https://markdental.com/contact',
-            name: 'Mark Sweeney',
-            source: 'LinkedIn',
-            listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
-          },
-        ],
-        warnings: [],
-        blocked: false,
+      discoverAiLeads: vi.fn().mockResolvedValue({
+        leads: [{
+          ...sampleLead,
+          id: 'ai-warning-lead',
+          name: 'Mark Sweeney',
+          source: 'LinkedIn, Public Profile',
+          listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
+          mobile: '+1 512 555 0199',
+          contactSourceUrl: 'https://markdental.com/contact',
+          hasPhone: true,
+          verifiedPhone: true,
+        }],
+        warnings: [{
+          providerId: 'public-website-enrichment',
+          providerName: 'Public Website Enrichment',
+          message: 'Public contact provider unavailable. Discovered public profiles were kept.',
+        }],
+        coverage: [{
+          providerId: 'public-website-enrichment',
+          providerName: 'Public Website Enrichment',
+          status: 'failed',
+          leadCount: 0,
+        }],
+        aiAssistance: 'enabled',
+        researchCandidates: [],
+        enrichedCount: 0,
       }),
-      enrichLinkedinLeads,
       schedule: (task) => {
         backgroundTask = task;
       },
@@ -553,46 +569,47 @@ describe('createSearchService', () => {
       companyType: 'Dentist',
       city: 'Austin',
       count: 50,
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
     });
 
     if (!backgroundTask) {
       throw new Error('Background task was not scheduled');
     }
 
-    const task = backgroundTask as () => Promise<void>;
-    await task();
-    const completed = await service.getSearch('search-linkedin-enrichment-failure');
+    await (backgroundTask as () => Promise<void>)();
+    const completed = await service.getSearch('search-ai-warning');
 
-    expect(enrichLinkedinLeads).toHaveBeenCalledTimes(1);
     expect(completed?.meta.status).toBe('complete');
     expect(completed?.leads).toHaveLength(1);
-    expect(completed?.leads[0]?.listingUrl).toContain('/in/');
-    expect(
-      completed?.meta.providerWarnings.some(
-        (warning) =>
-          warning.providerName === 'Public Contact Search' &&
-          warning.message.includes('Discovered public profiles were kept'),
-      ),
-    ).toBe(true);
+    expect(completed?.meta.providerWarnings).toContainEqual(
+      expect.objectContaining({ providerId: 'public-website-enrichment' }),
+    );
   });
 
-  it('fails a LinkedIn search honestly when public profile pages are blocked', async () => {
+  it('fails AI mode honestly when public profile discovery is blocked', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
 
     const service = createSearchService({
-      idFactory: () => 'search-linkedin-blocked',
+      idFactory: () => 'search-ai-blocked',
       normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
-      discoverLinkedinLeads: vi.fn().mockResolvedValue({
+      discoverAiLeads: vi.fn().mockResolvedValue({
         leads: [],
         warnings: [
           {
             providerId: 'linkedin-search-brave',
             providerName: 'Brave Search',
-            message: 'Brave Search returned a blocked or rate-limited page while searching public LinkedIn profiles.',
+            message: 'Public profile search was blocked or rate-limited.',
           },
         ],
-        blocked: true,
+        coverage: [{
+          providerId: 'linkedin-public-search',
+          providerName: 'Public LinkedIn Search',
+          status: 'failed',
+          leadCount: 0,
+        }],
+        aiAssistance: 'failed',
+        researchCandidates: [],
+        enrichedCount: 0,
       }),
       schedule: (task) => {
         backgroundTask = task;
@@ -603,7 +620,7 @@ describe('createSearchService', () => {
       companyType: 'Founder',
       city: 'Austin',
       count: 50,
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
     });
 
     expect(started.meta.status).toBe('queued');
@@ -614,52 +631,17 @@ describe('createSearchService', () => {
 
     const task = backgroundTask as () => Promise<void>;
     await task();
-    const completed = await service.getSearch('search-linkedin-blocked');
+    const completed = await service.getSearch('search-ai-blocked');
 
     expect(completed?.meta.status).toBe('failed');
     expect(completed?.meta.progress.currentSource).toBe('Failed');
     expect(completed?.leads).toHaveLength(0);
-    expect(completed?.meta.providerWarnings.some((warning) => warning.providerName === 'Brave Search')).toBe(true);
-    expect(
-      completed?.meta.providerWarnings.some((warning) => warning.providerName === 'LinkedIn'),
-    ).toBe(true);
-  });
-
-  it('fails a LinkedIn search honestly when the orchestrator timeout expires', async () => {
-    let backgroundTask: (() => Promise<void>) | null = null;
-
-    const service = createSearchService({
-      idFactory: () => 'search-linkedin-timeout',
-      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
-      discoverLinkedinLeads: vi.fn().mockRejectedValue(
-        new Error('LinkedIn discovery timed out before the batch completed'),
-      ),
-      schedule: (task) => {
-        backgroundTask = task;
-      },
-    });
-
-    const started = await service.startSearch({
-      companyType: 'Founder',
-      city: 'Austin',
-      count: 50,
-      sourceMode: 'linkedin',
-    });
-
-    expect(started.meta.status).toBe('queued');
-
-    if (!backgroundTask) {
-      throw new Error('Background task was not scheduled');
-    }
-
-    const task = backgroundTask as () => Promise<void>;
-    await task();
-    const completed = await service.getSearch('search-linkedin-timeout');
-
-    expect(completed?.meta.status).toBe('failed');
-    expect(completed?.meta.progress.currentSource).toBe('Failed');
-    expect(completed?.leads).toHaveLength(0);
-    expect(completed?.meta.providerWarnings.some((warning) => warning.providerName === 'LinkedIn')).toBe(true);
+    expect(completed?.meta.providerWarnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ providerId: 'linkedin-search-brave' }),
+        expect.objectContaining({ providerId: 'no-usable-results', severity: 'error' }),
+      ]),
+    );
   });
 
   it('fans out Austin city-state searches across local seed variants before finishing', async () => {

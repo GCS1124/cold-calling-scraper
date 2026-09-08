@@ -187,7 +187,7 @@ describe('createSearchJobStore', () => {
       searchId: 'claim-job',
       request: {
         companyType: 'Dentist',
-        sourceMode: 'linkedin',
+        sourceMode: 'ai',
         city: 'Austin, TX',
         count: 50,
       },
@@ -202,7 +202,7 @@ describe('createSearchJobStore', () => {
         requestedCount: 50,
         foundCount: 0,
         duplicatesRemoved: 0,
-        currentSource: 'LinkedIn',
+        currentSource: 'AI mode',
         batchesCompleted: 0,
         estimatedRemaining: 50,
       },

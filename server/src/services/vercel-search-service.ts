@@ -16,11 +16,6 @@ import { deduplicateLeads } from './lead-deduplication';
 import { enrichLead } from './lead-validation';
 import { discoverUsLeadsFromOsm } from './osm-discovery';
 import { formatGoogleMapsFailure } from './google-maps-discovery';
-import {
-  discoverUsLeadsFromLinkedinSearch,
-  type LinkedInDiscoveryResult,
-} from './linkedin-search';
-import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
 import { enrichLeadFromWebsite } from './website-enrichment';
 import { enrichWebsiteCandidates, type WebsiteLeadEnricher } from './business-website-enrichment';
 import {
@@ -48,10 +43,7 @@ import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 import { createResearchQueue, type ResearchQueue } from './research-queue';
 import { reverifyLeads } from './research-reverification';
 import { noUsableResultsWarning } from './search-finalization';
-import { bridgeLinkedInWithPublicListings } from './public-entity-matching';
 import { recordProviderCoverage } from './provider-coverage';
-import { expandQueryWithGemini } from '../providers/gemini';
-import { runGeminiQueryAssistance } from './gemini-query-assistance';
 import {
   createSearchCallbackState,
   deliverSearchCompletionCallback,
@@ -119,26 +111,17 @@ type VercelSearchServiceDeps = {
     queryLimit?: number;
     deadlineMs?: number;
   }) => Promise<Lead[]>;
-  discoverLinkedinLeads?: (args: {
-    request: SearchRequest;
-    location: NormalizedUsLocation;
-    queryHints?: string[];
-    deadlineMs?: number;
-  }) => Promise<LinkedInDiscoveryResult>;
   discoverAiLeads?: (args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
     deadlineMs?: number;
   }) => Promise<AiDiscoveryResult>;
-  enrichLinkedinLeads?: typeof enrichLinkedinLeadsWithPublicContacts;
-  expandQuery?: typeof expandQueryWithGemini;
   discoverOsmLeads?: (args: {
     request: { companyType: string; count: number };
     location: NormalizedUsLocation;
     profile: ReturnType<typeof resolveCategoryProfile>;
     deadlineMs?: number;
   }) => Promise<Lead[]>;
-  discoverLinkedinListings?: NonNullable<VercelSearchServiceDeps['discoverOsmLeads']>;
   enrichWebsiteLead?: WebsiteLeadEnricher;
   now?: () => number;
   idFactory?: () => string;
@@ -150,7 +133,7 @@ type VercelSearchServiceDeps = {
 const discoverGoogleMapsLeadsOnDemand: NonNullable<
   VercelSearchServiceDeps['discoverGoogleMapsLeads']
 > = async (args) => {
-  // Keep Playwright and Chromium out of LinkedIn serverless cold starts.
+  // Keep Playwright and Chromium out of serverless cold starts.
   const { discoverUsLeadsFromGoogleMaps } = await import('./google-maps-discovery.js');
   return discoverUsLeadsFromGoogleMaps(args);
 };
@@ -169,20 +152,11 @@ const getGooglePlacesTimeoutMs = (requestedCount: number) =>
   requestedCount >= 100 ? 32_000 : requestedCount >= 50 ? 20_000 : 8_000;
 const getGoogleMapsTimeoutMs = (requestedCount: number) =>
   requestedCount >= 50 ? 8_000 : 5_000;
-const getLinkedinProfileDiscoveryWindowMs = (requestedCount: number) =>
-  requestedCount >= 50 ? 30_000 : 20_000;
-const getLinkedinContactEnrichmentWindowMs = (requestedCount: number) =>
-  requestedCount >= 50 ? 24_000 : 14_000;
-const getLinkedinContactEnrichmentBatchSize = (requestedCount: number) =>
-  requestedCount >= 100 ? 18 : 12;
 const getAiDiscoveryWindowMs = (requestedCount: number) =>
   requestedCount >= 50 ? 36_000 : 30_000;
 const getMaxTickDurationMs = (requestedCount: number) =>
   requestedCount >= 50 ? 45_000 : 30_000;
 const processingLeaseMs = 70_000;
-
-const isTimeoutFailure = (error: unknown) =>
-  error instanceof Error && /deadline|timed out|timeout/i.test(error.message);
 
 const isVercelRuntime = () =>
   process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV);
@@ -314,230 +288,6 @@ const mergeLeads = (
     job.lastProgressAt = now();
   }
   refreshProgress(job);
-};
-
-const runLinkedinDiscovery = async (
-  job: SearchJobRecord,
-  request: SearchRequest,
-  location: NormalizedUsLocation,
-  discoverLinkedinLeads: NonNullable<VercelSearchServiceDeps['discoverLinkedinLeads']>,
-  discoverPublicListings: VercelSearchServiceDeps['discoverLinkedinListings'],
-  expandQuery: NonNullable<VercelSearchServiceDeps['expandQuery']>,
-  now: () => number,
-) => {
-  job.progress.currentSource = leadSourceModeLabels.linkedin;
-  recordProviderCoverage(job.progress, [
-    {
-      providerId: 'linkedin-public-search',
-      providerName: 'Public LinkedIn Search',
-      status: 'configured',
-      leadCount: 0,
-      message: 'Public search engines only; private profiles and authenticated sessions are not accessed.',
-    },
-    {
-      providerId: 'public-business-listings',
-      providerName: 'Public Business Listings',
-      status: discoverPublicListings ? 'configured' : 'not_configured',
-      leadCount: 0,
-      message: discoverPublicListings
-        ? 'Free public listings are used for organization and phone corroboration.'
-        : 'No public listing fallback was configured for this execution path.',
-    },
-  ]);
-
-  const discoveryDeadlineMs = now() + getLinkedinProfileDiscoveryWindowMs(request.count);
-  let publicListingsFailed = false;
-  let publicListingsTimedOut = false;
-  const assistancePromise = runGeminiQueryAssistance({
-    request,
-    locationLabel: location.label,
-    seedHints: request.researchBrief?.trim() ? [request.researchBrief.trim()] : [],
-    deadlineMs: discoveryDeadlineMs,
-    expandQuery,
-  });
-  const linkedinResultPromise = assistancePromise.then((assistance) => {
-    job.progress.aiAssistance = assistance.aiAssistance;
-    recordProviderCoverage(job.progress, [assistance.coverage]);
-    if (assistance.warning) appendWarningOnce(job, assistance.warning);
-    return discoverLinkedinLeads({
-      request,
-      location,
-      queryHints: assistance.queryHints,
-      deadlineMs: discoveryDeadlineMs,
-    });
-  });
-  const publicListingPromise = discoverPublicListings
-    ? discoverPublicListings({
-        request: {
-          companyType: request.companyType,
-          count: request.count,
-        },
-        location,
-        profile: resolveCategoryProfile(request.companyType),
-        deadlineMs: Math.min(
-          discoveryDeadlineMs,
-          now() + getGooglePlacesTimeoutMs(request.count),
-        ),
-      }).catch((error): Lead[] => {
-        publicListingsFailed = true;
-        publicListingsTimedOut = isTimeoutFailure(error);
-        appendWarningOnce(job, {
-          providerId: 'public-business-listings',
-          providerName: 'Public Business Listings',
-          message:
-            error instanceof Error
-              ? `${error.message} LinkedIn profiles were preserved.`
-              : 'Public business-listing discovery failed. LinkedIn profiles were preserved.',
-          severity: 'warning',
-        });
-        return [];
-      })
-    : Promise.resolve([] as Lead[]);
-
-  const [linkedinResult, publicListingLeads] = await Promise.all([
-    linkedinResultPromise,
-    publicListingPromise,
-  ]);
-
-  for (const warning of linkedinResult.warnings) {
-    appendWarningOnce(job, warning);
-  }
-  recordProviderCoverage(job.progress, [
-    {
-      providerId: 'linkedin-public-search',
-      providerName: 'Public LinkedIn Search',
-      status: linkedinResult.blocked ? 'failed' : 'returned',
-      leadCount: linkedinResult.leads.length,
-      message: linkedinResult.blocked
-        ? 'Public search providers were blocked or rate-limited.'
-        : 'Public profile discovery returned candidates.',
-    },
-    {
-      providerId: 'public-business-listings',
-      providerName: 'Public Business Listings',
-      status: publicListingsFailed
-        ? publicListingsTimedOut
-          ? 'partial'
-          : 'failed'
-        : publicListingLeads.length
-          ? 'returned'
-          : discoverPublicListings
-            ? 'returned'
-            : 'not_configured',
-      leadCount: publicListingLeads.length,
-      message: publicListingsFailed
-        ? 'Public listing discovery failed; LinkedIn profiles were preserved.'
-        : `Free public listing provider returned ${publicListingLeads.length} candidate(s).`,
-    },
-  ]);
-
-  if (linkedinResult.coverage) {
-    job.progress.publicQueriesAttempted = linkedinResult.coverage.queriesAttempted;
-    job.progress.publicProvidersChecked = linkedinResult.coverage.providersChecked;
-    job.progress.publicQueryFamilies = linkedinResult.coverage.queryFamilies;
-    job.progress.publicQueryFamilyCounts = linkedinResult.coverage.queryFamilyCounts;
-  }
-
-  if (!linkedinResult.leads.length) {
-    if (linkedinResult.blocked) {
-      appendWarningOnce(job, {
-        providerId: 'linkedin-search',
-        providerName: 'LinkedIn',
-        message:
-          'LinkedIn search providers were blocked or rate-limited, so no public profiles were returned.',
-      });
-    }
-
-    return;
-  }
-
-  if (publicListingLeads.length) {
-    appendWarningOnce(job, {
-      providerId: 'public-business-listings',
-      providerName: 'Public Business Listings',
-      message:
-        `Checked ${publicListingLeads.length} free public listings to corroborate LinkedIn organizations and phone evidence.`,
-      severity: 'info',
-    });
-  }
-
-  mergeLeads(
-    job,
-    bridgeLinkedInWithPublicListings(linkedinResult.leads, publicListingLeads),
-    now,
-  );
-  job.progress.batchesCompleted += 1;
-};
-
-const runLinkedinEnrichment = async (
-  job: SearchJobRecord,
-  request: SearchRequest,
-  location: NormalizedUsLocation,
-  enrichLinkedinLeads: NonNullable<VercelSearchServiceDeps['enrichLinkedinLeads']>,
-  now: () => number,
-) => {
-  job.progress.currentSource = 'Public Contact Enrichment';
-  job.progress.discovered = job.leads.length;
-  job.progress.totalCandidates = job.leads.length;
-
-  const enrichmentQueue =
-    job.enrichmentQueue?.length ? job.enrichmentQueue : job.leads.map((lead) => lead.id);
-  const enrichmentCursor = Math.min(
-    enrichmentQueue.length,
-    Math.max(0, job.enrichmentCursor ?? 0),
-  );
-  const batchIds = enrichmentQueue.slice(
-    enrichmentCursor,
-    enrichmentCursor + getLinkedinContactEnrichmentBatchSize(request.count),
-  );
-  const batch = batchIds
-    .map((id) => job.leads.find((lead) => lead.id === id))
-    .filter((lead): lead is Lead => Boolean(lead));
-
-  job.enrichmentQueue = enrichmentQueue;
-
-  if (!batch.length) {
-    job.enrichmentCursor = enrichmentCursor + batchIds.length;
-    return job.enrichmentCursor >= enrichmentQueue.length;
-  }
-
-  const contactResult = await enrichLinkedinLeads({
-    leads: batch,
-    request,
-    location,
-    deadlineMs: now() + getLinkedinContactEnrichmentWindowMs(request.count),
-    onProgress: (completed) => {
-      job.progress.enriched = Math.min(
-        enrichmentQueue.length,
-        enrichmentCursor + completed,
-      );
-      job.updatedAt = now();
-    },
-  });
-
-  for (const warning of contactResult.warnings) {
-    appendWarningOnce(job, warning);
-  }
-  recordProviderCoverage(job.progress, [
-    {
-      providerId: 'public-website-enrichment',
-      providerName: 'Public Website Enrichment',
-      status: 'returned',
-      leadCount: contactResult.enrichedCount,
-      message: 'Public business websites were checked for published contact details.',
-    },
-  ]);
-
-  job.progress.enriched = contactResult.enrichedCount;
-  mergeLeads(job, contactResult.leads, now, false);
-
-  job.enrichmentCursor = enrichmentCursor + batchIds.length;
-  job.progress.enriched = Math.min(
-    enrichmentQueue.length,
-    job.enrichmentCursor,
-  );
-
-  return job.enrichmentCursor >= enrichmentQueue.length;
 };
 
 const runAiDiscovery = async (
@@ -811,14 +561,11 @@ const discoverRegionLeads = async (
 const tickJob = async (
   job: SearchJobRecord,
   store: ReturnType<typeof createSearchJobStore>,
-  deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'now' | 'expandQuery'>> &
+  deps: Required<Pick<VercelSearchServiceDeps, 'googlePlaces' | 'normalizeLocation' | 'discoverOsmLeads' | 'now'>> &
     Pick<
       VercelSearchServiceDeps,
       | 'discoverGoogleMapsLeads'
-      | 'discoverLinkedinLeads'
-      | 'discoverLinkedinListings'
       | 'discoverAiLeads'
-      | 'enrichLinkedinLeads'
       | 'enrichWebsiteLead'
     >,
 ): Promise<SearchJobRecord> => {
@@ -855,6 +602,9 @@ const tickJob = async (
   }
 
   const sourceMode: LeadSourceMode = normalizeLeadSourceMode(job.request.sourceMode);
+  if (job.request.sourceMode !== sourceMode) {
+    job.request = { ...job.request, sourceMode };
+  }
   const candidateTargetCount = getLeadDiscoveryCandidateTarget(job.request.count);
   const discoverGoogleMapsForSearch = deps.discoverGoogleMapsLeads
     ? async (
@@ -898,96 +648,6 @@ const tickJob = async (
             ? error.message
             : 'Free AI discovery failed. No unverified leads were added.',
       });
-    }
-
-    job.discoveryComplete = true;
-    finalizeJobStatus(job);
-    job.updatedAt = withNow();
-    await store.upsert(job);
-    return job;
-  }
-
-  if (sourceMode === 'linkedin') {
-    const discoverLinkedinLeads =
-      deps.discoverLinkedinLeads ??
-      (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
-
-    if (!discoverLinkedinLeads) {
-      appendWarningOnce(job, {
-        providerId: 'linkedin-search',
-        providerName: 'LinkedIn',
-        message: 'LinkedIn discovery is not configured for this environment.',
-      });
-      job.status = 'failed';
-      job.progress.currentSource = 'LinkedIn';
-      job.updatedAt = withNow();
-      await store.upsert(job);
-      return job;
-    }
-
-    let linkedinEnrichmentComplete = true;
-
-    try {
-      if (job.status !== 'enriching') {
-        job.status = 'discovering';
-        job.progress.currentSource = leadSourceModeLabels.linkedin;
-        job.updatedAt = deps.now();
-        // Persist the phase before the network work so overlapping polls see a
-        // truthful in-progress snapshot instead of starting from "queued".
-        await store.upsert(job);
-      }
-
-      if (job.status === 'enriching' && deps.enrichLinkedinLeads && job.leads.length) {
-        linkedinEnrichmentComplete = await runLinkedinEnrichment(
-          job,
-          job.request,
-          targetLocation,
-          deps.enrichLinkedinLeads,
-          deps.now,
-        );
-      } else {
-        await runLinkedinDiscovery(
-          job,
-          job.request,
-          targetLocation,
-          discoverLinkedinLeads,
-          deps.discoverLinkedinListings,
-          deps.expandQuery,
-          deps.now,
-        );
-
-        if (deps.enrichLinkedinLeads && job.leads.length) {
-          job.enrichmentQueue = job.leads.map((lead) => lead.id);
-          job.enrichmentCursor = 0;
-          job.status = 'enriching';
-          job.progress.currentSource = 'Public Contact Enrichment';
-          job.updatedAt = withNow();
-          await store.upsert(job);
-          return job;
-        }
-      }
-    } catch (error) {
-      appendWarningOnce(job, {
-        providerId: 'linkedin-search',
-        providerName: 'LinkedIn',
-        message:
-          error instanceof Error
-            ? error.message
-            : 'LinkedIn discovery failed',
-      });
-      job.status = 'failed';
-      job.progress.currentSource = 'LinkedIn';
-      job.updatedAt = withNow();
-      await store.upsert(job);
-      return job;
-    }
-
-    if (!linkedinEnrichmentComplete) {
-      job.status = 'enriching';
-      job.progress.currentSource = 'Public Contact Enrichment';
-      job.updatedAt = withNow();
-      await store.upsert(job);
-      return job;
     }
 
     job.discoveryComplete = true;
@@ -1159,21 +819,11 @@ export const createVercelSearchServiceWithDeps = (
     (process.env.NODE_ENV === 'test' || isVercelRuntime()
       ? undefined
       : discoverGoogleMapsLeadsOnDemand);
-  const discoverLinkedinLeads =
-    deps.discoverLinkedinLeads ??
-    (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
-  const expandQuery = deps.expandQuery ?? expandQueryWithGemini;
   const discoverAiLeads = deps.discoverAiLeads ?? discoverUsLeadsFromAiMode;
-  const enrichLinkedinLeads =
-    deps.enrichLinkedinLeads ??
-    (deps.discoverLinkedinLeads ? undefined : enrichLinkedinLeadsWithPublicContacts);
   const enrichWebsiteLead =
     deps.enrichWebsiteLead ??
     (process.env.NODE_ENV === 'test' ? undefined : enrichLeadFromWebsite);
   const discoverOsm = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
-  const discoverLinkedinListings =
-    deps.discoverLinkedinListings ??
-    (process.env.NODE_ENV === 'test' ? undefined : discoverOsm);
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
   const deliverCallback = deps.deliverCallback ?? deliverSearchCompletionCallback;
@@ -1243,12 +893,8 @@ export const createVercelSearchServiceWithDeps = (
       googlePlaces,
       normalizeLocation,
       discoverGoogleMapsLeads,
-      discoverLinkedinLeads,
-      discoverLinkedinListings,
       discoverAiLeads,
-      enrichLinkedinLeads,
       enrichWebsiteLead,
-      expandQuery,
       discoverOsmLeads: discoverOsm,
       now,
     });
@@ -1285,6 +931,7 @@ export const createVercelSearchServiceWithDeps = (
       const normalizedCallback = normalizeCallbackRequest(request.callback);
       const normalizedRequest: SearchRequest = {
         ...request,
+        sourceMode: normalizeLeadSourceMode(request.sourceMode),
         phoneRequired: true,
         researchDepth: request.researchDepth ?? 'verified',
         ...(normalizedCallback ? { callback: normalizedCallback } : { callback: undefined }),

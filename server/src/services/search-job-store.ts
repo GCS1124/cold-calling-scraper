@@ -298,6 +298,7 @@ const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
         : undefined,
     request: {
       ...job.request,
+      sourceMode: normalizeLeadSourceMode(job.request?.sourceMode),
       ...(normalizeCallbackRequest(job.request?.callback)
         ? { callback: normalizeCallbackRequest(job.request.callback) }
         : { callback: undefined }),

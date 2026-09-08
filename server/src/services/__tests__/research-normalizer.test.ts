@@ -48,7 +48,7 @@ const job = createSearchJobRecord({
   searchId: 'normalizer-search',
   request: {
     companyType: 'Dentist',
-    sourceMode: 'linkedin',
+    sourceMode: 'ai',
     city: 'Austin, TX',
     count: 50,
     phoneRequired: true,

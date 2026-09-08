@@ -10,11 +10,8 @@ export type SearchApiErrorResponse = {
   details?: unknown;
 };
 
-/**
- * Public integrations expose only GMB and AI. The legacy LinkedIn value is
- * retained internally so persisted historical jobs can still be read safely.
- */
-export type SearchModeCode = 'gmb' | 'linkedin' | 'ai';
+/** The public product exposes two modes: GMB and AI public-source fusion. */
+export type SearchModeCode = 'gmb' | 'ai';
 
 export type SearchCallbackRequest = {
   url: string;
@@ -112,10 +109,6 @@ const commonLimitations = [
 const modeLimitations: Record<SearchModeCode, readonly string[]> = {
   gmb: [
     'Google Business results depend on configured Google Places access; free public listing coverage is used as an independent fallback.',
-  ],
-  linkedin: [
-    // Legacy response compatibility; new requests canonicalize this to AI.
-    'LinkedIn discovery uses public search results only; private profiles, authenticated sessions, Premium data, and paywalls are not accessed.',
   ],
   ai: [
     'AI mode fuses public business listings, public professional-profile discovery including LinkedIn result signals, Gemini-grounded research, public websites, and published social links into one ranked evidence graph.',

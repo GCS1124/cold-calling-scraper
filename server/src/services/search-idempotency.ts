@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { SearchRequest } from '../types/search';
+import { normalizeLeadSourceMode } from './search-source-mode';
 
 const idempotencyKeyPattern = /^[A-Za-z0-9._:-]{1,128}$/;
 
@@ -49,7 +50,7 @@ const buildFingerprintPayload = (request: SearchRequest) => {
 
   return {
     companyType: normalizeText(request.companyType),
-    sourceMode: request.sourceMode ?? 'gmb',
+    sourceMode: normalizeLeadSourceMode(request.sourceMode),
     researchDepth: request.researchDepth ?? 'verified',
     ...(request.researchBrief?.trim()
       ? { researchBrief: normalizeText(request.researchBrief) }

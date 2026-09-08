@@ -7,7 +7,7 @@ import {
 } from '../../../../shared/search-contract';
 
 describe('search response contract', () => {
-  it.each(['gmb', 'linkedin', 'ai'] as const)('describes %s mode and its phone policy', (mode) => {
+  it.each(['gmb', 'ai'] as const)('describes %s mode and its phone policy', (mode) => {
     const contract = buildSearchResponseContract(mode);
 
     expect(contract.contractVersion).toBe(SEARCH_RESPONSE_CONTRACT_VERSION);

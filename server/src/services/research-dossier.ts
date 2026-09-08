@@ -11,6 +11,7 @@ import {
   type SEARCH_RESPONSE_CONTRACT_VERSION,
 } from '../../../shared/search-contract';
 import { buildLeadQualitySummary } from './quality-summary';
+import { normalizeLeadSourceMode } from './search-source-mode';
 
 export type ResearchDossier = {
   contractVersion: typeof SEARCH_RESPONSE_CONTRACT_VERSION;
@@ -56,7 +57,7 @@ export const buildResearchDossier = (
 ): ResearchDossier => {
   const leads = rankQualifiedLeads(response.leads.filter((lead) =>
     (!leadId || lead.id === leadId) && isPhoneQualifiedLead(lead)));
-  const sourceMode = response.meta.sourceMode ?? 'gmb';
+  const sourceMode = normalizeLeadSourceMode(response.meta.sourceMode);
   const contract = buildSearchResponseContract(sourceMode);
 
   const limitations = [...new Set([

@@ -23,11 +23,6 @@ import {
   formatGoogleMapsFailure,
 } from './google-maps-discovery';
 import {
-  discoverUsLeadsFromLinkedinSearch,
-  type LinkedInDiscoveryResult,
-} from './linkedin-search';
-import { enrichLinkedinLeadsWithPublicContacts } from './linkedin-contact-enrichment';
-import {
   discoverUsLeadsFromAiMode,
   type AiDiscoveryResult,
 } from './ai-lead-discovery';
@@ -42,13 +37,10 @@ import {
   normalizeLeadSourceMode,
   type LeadSourceMode,
 } from './search-source-mode';
-import { expandQueryWithGemini } from '../providers/gemini';
-import { runGeminiQueryAssistance } from './gemini-query-assistance';
 import { getResearchDepthConfig } from './research-depth';
 import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 import { reverifyLeads } from './research-reverification';
 import { noUsableResultsWarning } from './search-finalization';
-import { bridgeLinkedInWithPublicListings } from './public-entity-matching';
 import { enrichLeadFromWebsite } from './website-enrichment';
 import { enrichWebsiteCandidates, type WebsiteLeadEnricher } from './business-website-enrichment';
 import {
@@ -121,7 +113,6 @@ type SearchService = {
 type SearchDeps = {
   normalizeLocation?: (rawLocation: string) => Promise<NormalizedUsLocation>;
   enrichLead?: (lead: Lead) => Lead | Promise<Lead>;
-  enrichLinkedinLeads?: typeof enrichLinkedinLeadsWithPublicContacts;
   enrichWebsiteLead?: WebsiteLeadEnricher;
   discoverGoogleLeads?: typeof googlePlacesProvider | ((args: {
     request: SearchRequest;
@@ -137,12 +128,6 @@ type SearchDeps = {
     queryLimit?: number;
     deadlineMs?: number;
   }) => Promise<Lead[]>;
-  discoverLinkedinLeads?: (args: {
-    request: SearchRequest;
-    location: NormalizedUsLocation;
-    queryHints?: string[];
-    deadlineMs?: number;
-  }) => Promise<LinkedInDiscoveryResult>;
   discoverAiLeads?: (args: {
     request: SearchRequest;
     location: NormalizedUsLocation;
@@ -158,7 +143,6 @@ type SearchDeps = {
   now?: () => number;
   idFactory?: () => string;
   feedbackStore?: LeadFeedbackStore;
-  expandQuery?: typeof expandQueryWithGemini;
 };
 
 const jobTtlMs = 15 * 60 * 1000;
@@ -167,9 +151,6 @@ const getGoogleDiscoveryTimeoutMs = (requestedCount: number) =>
 // Maps is a fallback after Places and OSM. Keep a failed browser attempt from
 // holding every regional pass open for the full discovery window.
 const googleMapsDiscoveryTimeoutMs = 8_000;
-const linkedinDiscoveryTimeoutMs = 90000;
-const linkedinProfileDiscoveryWindowMs = 30000;
-const linkedinContactEnrichmentWindowMs = 55000;
 const aiDiscoveryTimeoutMs = 40000;
 const osmDiscoveryTimeoutMs = 20000;
 const maxCandidatePool = 3000;
@@ -413,261 +394,6 @@ const upsertLeads = (
     job.lastProgressAt = now();
   }
   refreshProgress(job);
-};
-
-const runLinkedinDiscovery = async (
-  job: SearchJob,
-  request: SearchRequest,
-  location: NormalizedUsLocation,
-  discoverLinkedinLeads: NonNullable<SearchDeps['discoverLinkedinLeads']>,
-  enrichLinkedinLeads: SearchDeps['enrichLinkedinLeads'],
-  discoverPublicListings: SearchDeps['discoverOsmLeads'] | undefined,
-  expandQuery: SearchDeps['expandQuery'],
-  now: () => number,
-) => {
-  job.progress.currentSource = leadSourceModeLabels.linkedin;
-  recordProviderCoverage(job.progress, [
-    {
-      providerId: 'linkedin-public-search',
-      providerName: 'Public LinkedIn Search',
-      status: 'configured',
-      leadCount: 0,
-      message: 'Public search engines only; private profiles and authenticated sessions are not accessed.',
-    },
-    {
-      providerId: 'public-business-listings',
-      providerName: 'Public Business Listings',
-      status: discoverPublicListings ? 'configured' : 'not_configured',
-      leadCount: 0,
-      message: discoverPublicListings
-        ? 'Free public listings are used for organization and phone corroboration.'
-        : 'No public listing fallback was configured for this execution path.',
-    },
-  ]);
-
-  const discoveryDeadlineMs = Date.now() + linkedinProfileDiscoveryWindowMs;
-  let linkedinFailed = false;
-  let publicListingsFailed = false;
-  let publicListingsTimedOut = false;
-  const assistancePromise = runGeminiQueryAssistance({
-    request,
-    locationLabel: location.label,
-    seedHints: request.researchBrief?.trim() ? [request.researchBrief.trim()] : [],
-    deadlineMs: discoveryDeadlineMs,
-    expandQuery,
-  });
-  const linkedinResultPromise = withTimeout(
-    assistancePromise.then((assistance) => {
-      job.progress.aiAssistance = assistance.aiAssistance;
-      recordProviderCoverage(job.progress, [assistance.coverage]);
-      if (assistance.warning) appendUniqueWarnings(job, [assistance.warning]);
-      return discoverLinkedinLeads({
-        request,
-        location,
-        queryHints: assistance.queryHints,
-        deadlineMs: discoveryDeadlineMs,
-      });
-    }),
-    linkedinDiscoveryTimeoutMs,
-    'LinkedIn discovery timed out before the batch completed',
-  ).catch((error): LinkedInDiscoveryResult => {
-    linkedinFailed = true;
-    appendUniqueWarnings(job, [
-      {
-        providerId: 'linkedin-search',
-        providerName: 'LinkedIn',
-        message:
-          error instanceof Error
-            ? `${error.message} Public profiles returned before the failure were preserved.`
-            : 'Public LinkedIn discovery failed. No unverified leads were added.',
-      },
-    ]);
-    return { leads: [], warnings: [], blocked: true };
-  });
-  const publicListingPromise = discoverPublicListings
-    ? withTimeout(
-        discoverPublicListings({
-          request: {
-            companyType: request.companyType,
-            count: request.count,
-          },
-          location,
-          profile: resolveCategoryProfile(request.companyType),
-          deadlineMs: Math.min(
-            discoveryDeadlineMs,
-            Date.now() + osmDiscoveryTimeoutMs,
-          ),
-        }),
-        osmDiscoveryTimeoutMs,
-        'Public business-listing discovery timed out before the batch completed',
-      ).catch((error): Lead[] => {
-        publicListingsFailed = true;
-        publicListingsTimedOut = isTimeoutFailure(error);
-        appendUniqueWarnings(job, [
-          {
-            providerId: 'public-business-listings',
-            providerName: 'Public Business Listings',
-            message:
-              error instanceof Error
-                ? `${error.message} LinkedIn profiles were preserved.`
-                : 'Public business-listing discovery failed. LinkedIn profiles were preserved.',
-            severity: 'warning',
-          },
-        ]);
-        return [];
-      })
-    : Promise.resolve([] as Lead[]);
-
-  let linkedinResult: LinkedInDiscoveryResult;
-  let publicListingLeads: Lead[];
-  try {
-    [linkedinResult, publicListingLeads] = await Promise.all([
-      linkedinResultPromise,
-      publicListingPromise,
-    ]);
-  } catch (error) {
-    if (error instanceof Error && /timed out/i.test(error.message)) {
-      appendUniqueWarnings(job, [
-        {
-          providerId: 'linkedin-search',
-          providerName: 'LinkedIn',
-          message: error.message,
-        },
-      ]);
-      return;
-    }
-
-    throw error;
-  }
-
-  appendUniqueWarnings(job, linkedinResult.warnings);
-  recordProviderCoverage(job.progress, [
-    {
-      providerId: 'linkedin-public-search',
-      providerName: 'Public LinkedIn Search',
-      status: linkedinFailed || linkedinResult.blocked ? 'failed' : 'returned',
-      leadCount: linkedinResult.leads.length,
-      message: linkedinFailed
-        ? 'Public LinkedIn discovery failed before candidates could be returned.'
-        : linkedinResult.blocked
-          ? 'Public search providers were blocked or rate-limited.'
-          : 'Public profile discovery returned candidates.',
-    },
-    {
-      providerId: 'public-business-listings',
-      providerName: 'Public Business Listings',
-      status: publicListingsFailed
-        ? publicListingsTimedOut
-          ? 'partial'
-          : 'failed'
-        : publicListingLeads.length
-          ? 'returned'
-          : discoverPublicListings
-            ? 'returned'
-            : 'not_configured',
-      leadCount: publicListingLeads.length,
-      message: publicListingsFailed
-        ? 'Public listing discovery failed; LinkedIn profiles were preserved.'
-        : `Free public listing provider returned ${publicListingLeads.length} candidate(s).`,
-    },
-  ]);
-
-  if (linkedinResult.coverage) {
-    job.progress.publicQueriesAttempted = linkedinResult.coverage.queriesAttempted;
-    job.progress.publicProvidersChecked = linkedinResult.coverage.providersChecked;
-    job.progress.publicQueryFamilies = linkedinResult.coverage.queryFamilies;
-    job.progress.publicQueryFamilyCounts = linkedinResult.coverage.queryFamilyCounts;
-  }
-
-  if (!linkedinResult.leads.length) {
-    if (linkedinResult.blocked) {
-      appendUniqueWarnings(job, [
-        {
-          providerId: 'linkedin-search',
-          providerName: 'LinkedIn',
-          message:
-            'LinkedIn search providers were blocked or rate-limited, so no public profiles were returned.',
-        },
-      ]);
-    }
-
-    return;
-  }
-
-  if (publicListingLeads.length) {
-    appendUniqueWarnings(job, [
-      {
-        providerId: 'public-business-listings',
-        providerName: 'Public Business Listings',
-        message:
-          `Checked ${publicListingLeads.length} free public listings to corroborate LinkedIn organizations and phone evidence.`,
-        severity: 'info',
-      },
-    ]);
-  }
-
-  const bridgedLinkedinLeads = bridgeLinkedInWithPublicListings(
-    linkedinResult.leads,
-    publicListingLeads,
-  );
-  upsertLeads(job, bridgedLinkedinLeads, now);
-
-  if (enrichLinkedinLeads) {
-    job.status = 'enriching';
-    job.progress.discovered = linkedinResult.leads.length;
-    job.progress.totalCandidates = linkedinResult.leads.length;
-
-    try {
-      const contactResult = await withTimeout(
-        enrichLinkedinLeads({
-          leads: bridgedLinkedinLeads,
-          request,
-          location,
-          deadlineMs: Date.now() + linkedinContactEnrichmentWindowMs,
-          onProgress: (completed) => {
-            job.progress.enriched = completed;
-          },
-        }),
-        linkedinContactEnrichmentWindowMs,
-        'LinkedIn contact enrichment timed out before the batch completed',
-      );
-
-      appendUniqueWarnings(job, contactResult.warnings);
-      recordProviderCoverage(job.progress, [
-        {
-          providerId: 'public-website-enrichment',
-          providerName: 'Public Website Enrichment',
-          status: 'returned',
-          leadCount: contactResult.enrichedCount,
-          message: 'Public business websites were checked for published contact details.',
-        },
-      ]);
-      job.progress.enriched = contactResult.enrichedCount;
-      upsertLeads(job, contactResult.leads, now, false);
-    } catch (error) {
-      recordProviderCoverage(job.progress, [
-        {
-          providerId: 'public-website-enrichment',
-          providerName: 'Public Website Enrichment',
-          status: 'failed',
-          leadCount: 0,
-          message: error instanceof Error ? error.message : 'Public website enrichment failed.',
-        },
-      ]);
-      appendUniqueWarnings(job, [
-        {
-          providerId: 'linkedin-public-contact-enrichment',
-          providerName: 'Public Contact Search',
-          message:
-            error instanceof Error
-              ? `${error.message}. Discovered public profiles were kept; contact fields may be incomplete.`
-              : 'Public contact enrichment failed. Discovered public profiles were kept; contact fields may be incomplete.',
-        },
-      ]);
-    }
-  }
-
-  job.progress.batchesCompleted += 1;
 };
 
 const runAiDiscovery = async (
@@ -995,21 +721,11 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
   const discoverGoogleMapsLeads =
     deps.discoverGoogleMapsLeads ??
     (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromGoogleMaps);
-  const discoverLinkedinLeads =
-    deps.discoverLinkedinLeads ??
-    (process.env.NODE_ENV === 'test' ? undefined : discoverUsLeadsFromLinkedinSearch);
-  const expandQuery = deps.expandQuery ?? expandQueryWithGemini;
   const discoverAiLeads = deps.discoverAiLeads ?? discoverUsLeadsFromAiMode;
-  const enrichLinkedinLeads =
-    deps.enrichLinkedinLeads ??
-    (deps.discoverLinkedinLeads ? undefined : enrichLinkedinLeadsWithPublicContacts);
   const enrichWebsiteLead =
     deps.enrichWebsiteLead ??
     (process.env.NODE_ENV === 'test' ? undefined : enrichLeadFromWebsite);
   const discoverOsmLeads = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
-  const discoverLinkedinListings =
-    deps.discoverOsmLeads ??
-    (process.env.NODE_ENV === 'test' ? undefined : discoverOsmLeads);
   const now = deps.now ?? Date.now;
   const idFactory = deps.idFactory ?? randomUUID;
   const canAccessJob = (job: SearchJob, context?: SearchAccessContext) =>
@@ -1046,6 +762,9 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     job.status = 'discovering';
     job.progress.currentSource = 'Nominatim';
     const sourceMode: LeadSourceMode = normalizeLeadSourceMode(job.request.sourceMode);
+    if (job.request.sourceMode !== sourceMode) {
+      job.request = { ...job.request, sourceMode };
+    }
     const guardedDiscoverGoogleMapsLeads = discoverGoogleMapsLeads
       ? async (args: Parameters<NonNullable<SearchDeps['discoverGoogleMapsLeads']>>[0]) => {
           if (job.googleMapsUnavailable) {
@@ -1079,46 +798,6 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     if (!isCurrentRun(job, executionToken)) return;
 
     job.progress.currentSource = leadSourceModeLabels[sourceMode];
-
-    if (sourceMode === 'linkedin') {
-      if (!discoverLinkedinLeads) {
-        markFailed(job, {
-          providerId: 'linkedin-search',
-          providerName: 'LinkedIn',
-          message: 'LinkedIn discovery is not configured for this environment.',
-        });
-        return;
-      }
-
-      try {
-        await runLinkedinDiscovery(
-          job,
-          job.request,
-          location,
-          discoverLinkedinLeads,
-          enrichLinkedinLeads,
-          discoverLinkedinListings,
-          expandQuery,
-          now,
-        );
-      } catch (error) {
-        if (!isCurrentRun(job, executionToken)) return;
-        markFailed(job, {
-          providerId: 'linkedin-search',
-          providerName: 'LinkedIn',
-          message:
-            error instanceof Error
-              ? error.message
-              : 'LinkedIn discovery failed',
-        });
-        return;
-      }
-
-      if (!isCurrentRun(job, executionToken)) return;
-
-      finalizeJobStatus(job);
-      return;
-    }
 
     if (sourceMode === 'ai') {
       await runAiDiscovery(job, job.request, location, discoverAiLeads, now);
@@ -1229,6 +908,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
 
       const normalizedRequest: SearchRequest = {
         ...request,
+        sourceMode: normalizeLeadSourceMode(request.sourceMode),
         phoneRequired: true,
         researchDepth: request.researchDepth ?? 'verified',
       };
@@ -1260,10 +940,10 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         requestFingerprint,
         request: normalizedRequest,
         leads: [],
-        locationLabel: request.city.trim(),
-        query: `${request.companyType} in ${request.city.trim()}`,
+        locationLabel: normalizedRequest.city.trim(),
+        query: `${normalizedRequest.companyType} in ${normalizedRequest.city.trim()}`,
         status: 'queued',
-        progress: createProgress(request.count),
+        progress: createProgress(normalizedRequest.count),
         providerWarnings: [],
         researchCandidates: [],
         expiresAt: startedAt + jobTtlMs,

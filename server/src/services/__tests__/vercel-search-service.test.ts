@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createSearchJobStore } from '../search-job-store';
 import { createVercelSearchServiceWithDeps } from '../vercel-search-service';
+import type { AiDiscoveryResult } from '../ai-lead-discovery';
 import type { Lead } from '../../types/lead';
 import { googlePlacesProvider } from '../../providers/google-places';
 
@@ -190,11 +191,9 @@ describe('createVercelSearchServiceWithDeps', () => {
 
   it('does not let one owner advance another owner\'s durable job', async () => {
     const store = createSearchJobStore();
-    const discoverLinkedinLeads = vi.fn();
     const service = createVercelSearchServiceWithDeps({
       store,
       normalizeLocation: vi.fn().mockResolvedValue(localLocation),
-      discoverLinkedinLeads,
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
       idFactory: () => 'owner-isolated-search',
       now: () => 1000,
@@ -205,13 +204,12 @@ describe('createVercelSearchServiceWithDeps', () => {
         companyType: 'Dentist',
         city: 'Austin, TX',
         count: 50,
-        sourceMode: 'linkedin',
+        sourceMode: 'ai',
       },
       { ownerId: 'owner-a' },
     );
 
     await expect(service.advanceSearch(started.searchId, 'owner-b')).resolves.toBeNull();
-    expect(discoverLinkedinLeads).not.toHaveBeenCalled();
     await expect(store.get(started.searchId, 'owner-a')).resolves.toMatchObject({
       status: 'queued',
       ownerId: 'owner-a',
@@ -445,28 +443,32 @@ describe('createVercelSearchServiceWithDeps', () => {
     }
   });
 
-  it('completes a LinkedIn search with public profile listings', async () => {
+  it('persists the merged public-source AI result with LinkedIn evidence', async () => {
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
       normalizeLocation: vi.fn().mockResolvedValue(localLocation),
-      discoverLinkedinLeads: vi.fn().mockResolvedValue({
-        leads: [
-          makeLead({
-            id: 'linkedin-lead-1',
-            contactSourceUrl: 'https://markdental.com/contact',
-            name: 'Mark Sweeney',
-            source: 'LinkedIn',
-            website: '',
-            listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
-            hasWebsite: true,
-            sourceScore: 82,
-          }),
-        ],
+      discoverAiLeads: vi.fn().mockResolvedValue({
+        leads: [makeLead({
+          id: 'ai-linkedin-lead-1',
+          contactSourceUrl: 'https://markdental.com/contact',
+          name: 'Mark Sweeney',
+          source: 'LinkedIn, Public Profile',
+          listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
+          sourceScore: 82,
+        })],
         warnings: [],
-        blocked: false,
+        coverage: [{
+          providerId: 'linkedin-public-search',
+          providerName: 'Public LinkedIn Search',
+          status: 'returned',
+          leadCount: 1,
+        }],
+        aiAssistance: 'enabled',
+        researchCandidates: [],
+        enrichedCount: 1,
       }),
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      idFactory: () => 'search-linkedin-1',
+      idFactory: () => 'search-ai-1',
       now: () => 1000,
     });
 
@@ -474,7 +476,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       companyType: 'Dentist',
       city: 'Austin, TX',
       count: 50,
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
     });
 
     const snapshot = await service.getSearch(response.searchId);
@@ -482,102 +484,95 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.meta.status).toBe('complete');
     expect(snapshot?.meta.progress.currentSource).toBe('Complete');
     expect(snapshot?.leads).toHaveLength(1);
+    expect(snapshot?.meta.sourceMode).toBe('ai');
     expect(snapshot?.leads[0]?.listingUrl).toContain('/in/');
     expect(snapshot?.meta.providerWarnings).toHaveLength(0);
   });
 
-  it('passes Gemini public search lenses into the durable LinkedIn path', async () => {
-    const previousApiKey = process.env.GEMINI_API_KEY;
-    const previousFlag = process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
-    try {
-      process.env.GEMINI_API_KEY = 'user-supplied-test-key';
-      delete process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
-      const discoverLinkedinLeads = vi.fn().mockResolvedValue({
-        leads: [makeLead({ id: 'linkedin-gemini-lens', source: 'LinkedIn' })],
-        warnings: [],
-        blocked: false,
-      });
-      const expandQuery = vi.fn().mockResolvedValue(['HVAC owner Austin', 'HVAC founder Austin']);
-      const service = createVercelSearchServiceWithDeps({
-        store: createSearchJobStore(),
-        normalizeLocation: vi.fn().mockResolvedValue(localLocation),
-        discoverLinkedinLeads,
-        expandQuery,
-        discoverOsmLeads: vi.fn().mockResolvedValue([]),
-        idFactory: () => 'search-linkedin-gemini-lenses',
-        now: () => 1000,
-      });
-
-      const response = await service.startSearch({
-        companyType: 'HVAC contractor',
-        city: 'Austin, TX',
-        count: 50,
-        sourceMode: 'linkedin',
-      });
-      const snapshot = await service.getSearch(response.searchId);
-
-      expect(expandQuery).toHaveBeenCalledWith(
-        'HVAC contractor in Austin, TX',
-        expect.objectContaining({ companyType: 'HVAC contractor' }),
-      );
-      expect(discoverLinkedinLeads).toHaveBeenCalledWith(
-        expect.objectContaining({
-          queryHints: ['HVAC owner Austin', 'HVAC founder Austin'],
-        }),
-      );
-      expect(snapshot?.meta.progress.aiAssistance).toBe('enabled');
-      expect(snapshot?.meta.progress.providerCoverage).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            providerId: 'gemini-query-assistance',
-            status: 'returned',
-          }),
-        ]),
-      );
-    } finally {
-      if (previousApiKey === undefined) delete process.env.GEMINI_API_KEY;
-      else process.env.GEMINI_API_KEY = previousApiKey;
-      if (previousFlag === undefined) delete process.env.GEMINI_QUERY_ASSISTANCE_ENABLED;
-      else process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = previousFlag;
-    }
-  });
-
-  it('bridges a matching free listing phone into durable LinkedIn discovery', async () => {
-    const owner = makeLead({
-      id: 'linkedin-owner',
-      name: 'Avery Smith',
-      headline: 'Owner at Austin Dental Studio',
-      mobile: '',
-      hasPhone: false,
-      verifiedPhone: false,
-      website: 'https://austindental.example',
-      hasWebsite: true,
-      source: 'LinkedIn',
-      listingUrl: 'https://linkedin.com/in/avery-smith',
-    });
-    const listing = makeLead({
-      id: 'osm-owner-business',
-      name: 'Austin Dental Studio',
-      source: 'OpenStreetMap',
-      listingUrl: 'https://www.openstreetmap.org/node/456',
-      website: 'https://austindental.example',
-      mobile: '+1 512 555 0199',
-      hasPhone: true,
-      verifiedPhone: true,
-    });
-    const discoverLinkedinLeads = vi.fn().mockResolvedValue({
-      leads: [owner],
+  it('persists AI query assistance and public LinkedIn coverage together', async () => {
+    const discoverAiLeads = vi.fn().mockResolvedValue({
+      leads: [makeLead({ id: 'ai-gemini-lens', source: 'LinkedIn, Public Profile' })],
       warnings: [],
-      blocked: false,
+      coverage: [{
+        providerId: 'gemini-query-assistance',
+        providerName: 'Gemini query assistance',
+        status: 'returned',
+        leadCount: 0,
+      }, {
+        providerId: 'linkedin-public-search',
+        providerName: 'Public LinkedIn Search',
+        status: 'returned',
+        leadCount: 1,
+      }],
+      aiAssistance: 'enabled',
+      researchCandidates: [],
+      enrichedCount: 1,
     });
-    const discoverLinkedinListings = vi.fn().mockResolvedValue([listing]);
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
       normalizeLocation: vi.fn().mockResolvedValue(localLocation),
-      discoverLinkedinLeads,
-      discoverLinkedinListings,
+      discoverAiLeads,
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      idFactory: () => 'search-linkedin-bridge',
+      idFactory: () => 'search-ai-gemini-lenses',
+      now: () => 1000,
+    });
+
+    const response = await service.startSearch({
+      companyType: 'HVAC contractor',
+      city: 'Austin, TX',
+      count: 50,
+      sourceMode: 'ai',
+    });
+    const snapshot = await service.getSearch(response.searchId);
+
+    expect(discoverAiLeads).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ sourceMode: 'ai', companyType: 'HVAC contractor' }),
+      }),
+    );
+    expect(snapshot?.meta.progress.aiAssistance).toBe('enabled');
+    expect(snapshot?.meta.progress.providerCoverage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerId: 'gemini-query-assistance',
+          status: 'returned',
+        }),
+        expect.objectContaining({
+          providerId: 'linkedin-public-search',
+          status: 'returned',
+        }),
+      ]),
+    );
+  });
+
+  it('persists a public listing phone bridged onto a LinkedIn decision-maker in AI mode', async () => {
+    const discoverAiLeads = vi.fn().mockResolvedValue({
+      leads: [makeLead({
+        id: 'ai-owner',
+        name: 'Avery Smith',
+        headline: 'Owner at Austin Dental Studio',
+        source: 'LinkedIn, Public Profile, OpenStreetMap',
+        listingUrl: 'https://linkedin.com/in/avery-smith',
+        mobile: '+1 512 555 0199',
+        contactSourceUrl: 'https://www.openstreetmap.org/node/456',
+      })],
+      warnings: [],
+      coverage: [{
+        providerId: 'public-business-listings',
+        providerName: 'OpenStreetMap',
+        status: 'returned',
+        leadCount: 1,
+      }],
+      aiAssistance: 'enabled',
+      researchCandidates: [],
+      enrichedCount: 1,
+    });
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      discoverAiLeads,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-ai-bridge',
       now: () => 1000,
     });
 
@@ -585,15 +580,15 @@ describe('createVercelSearchServiceWithDeps', () => {
       companyType: 'Dentist',
       city: 'Austin, TX',
       count: 50,
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
       phoneRequired: true,
     });
     const completed = await service.getSearch(response.searchId);
 
-    expect(discoverLinkedinLeads).toHaveBeenCalledTimes(1);
-    expect(discoverLinkedinListings).toHaveBeenCalledWith(
+    expect(discoverAiLeads).toHaveBeenCalledTimes(1);
+    expect(discoverAiLeads).toHaveBeenCalledWith(
       expect.objectContaining({
-        request: { companyType: 'Dentist', count: 50 },
+        request: expect.objectContaining({ sourceMode: 'ai' }),
       }),
     );
     expect(completed?.meta.status).toBe('complete');
@@ -604,41 +599,27 @@ describe('createVercelSearchServiceWithDeps', () => {
       contactSourceUrl: 'https://www.openstreetmap.org/node/456',
     });
     expect(completed?.leads[0]?.listingUrl).toBe('https://linkedin.com/in/avery-smith');
-    expect(completed?.meta.providerWarnings).toContainEqual(
-      expect.objectContaining({
-        providerId: 'public-business-listings',
-        severity: 'info',
-      }),
-    );
   });
 
-  it('returns the durable in-progress snapshot for overlapping LinkedIn polls', async () => {
+  it('returns the durable in-progress snapshot for overlapping AI polls', async () => {
     let markDiscoveryStarted = () => {};
     const discoveryStarted = new Promise<void>((resolve) => {
       markDiscoveryStarted = resolve;
     });
-    let releaseDiscovery = (_result: {
-      leads: Lead[];
-      warnings: [];
-      blocked: boolean;
-    }) => {};
-    const discoveryResult = new Promise<{
-      leads: Lead[];
-      warnings: [];
-      blocked: boolean;
-    }>((resolve) => {
+    let releaseDiscovery = (_result: AiDiscoveryResult) => {};
+    const discoveryResult = new Promise<AiDiscoveryResult>((resolve) => {
       releaseDiscovery = resolve;
     });
-    const discoverLinkedinLeads = vi.fn().mockImplementation(async () => {
+    const discoverAiLeads = vi.fn().mockImplementation(async () => {
       markDiscoveryStarted();
       return discoveryResult;
     });
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
       normalizeLocation: vi.fn().mockResolvedValue(localLocation),
-      discoverLinkedinLeads,
+      discoverAiLeads,
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      idFactory: () => 'search-linkedin-overlap',
+      idFactory: () => 'search-ai-overlap',
       now: () => 1000,
     });
 
@@ -646,7 +627,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       companyType: 'Dentist',
       city: 'Austin, TX',
       count: 50,
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
     });
 
     const firstPoll = service.getSearch(response.searchId);
@@ -655,35 +636,34 @@ describe('createVercelSearchServiceWithDeps', () => {
     const overlappingSnapshot = await service.getSearch(response.searchId);
 
     expect(overlappingSnapshot?.meta.status).toBe('discovering');
-    expect(overlappingSnapshot?.meta.progress.currentSource).toBe('LinkedIn');
-    expect(discoverLinkedinLeads).toHaveBeenCalledOnce();
+    expect(overlappingSnapshot?.meta.progress.currentSource).toBe('AI mode');
+    expect(discoverAiLeads).toHaveBeenCalledOnce();
 
-    releaseDiscovery({ leads: [], warnings: [], blocked: false });
+    releaseDiscovery({
+      leads: [],
+      warnings: [],
+      coverage: [],
+      aiAssistance: 'failed',
+      researchCandidates: [],
+      enrichedCount: 0,
+    });
     const completedSnapshot = await firstPoll;
 
     expect(completedSnapshot?.meta.status).toBe('failed');
     expect(completedSnapshot?.leads).toHaveLength(0);
   });
 
-  it('does not duplicate LinkedIn discovery across service instances', async () => {
+  it('does not duplicate AI discovery across service instances', async () => {
     const store = createSearchJobStore();
     let markDiscoveryStarted = () => {};
     const discoveryStarted = new Promise<void>((resolve) => {
       markDiscoveryStarted = resolve;
     });
-    let releaseDiscovery = (_result: {
-      leads: Lead[];
-      warnings: [];
-      blocked: boolean;
-    }) => {};
-    const discoveryResult = new Promise<{
-      leads: Lead[];
-      warnings: [];
-      blocked: boolean;
-    }>((resolve) => {
+    let releaseDiscovery = (_result: AiDiscoveryResult) => {};
+    const discoveryResult = new Promise<AiDiscoveryResult>((resolve) => {
       releaseDiscovery = resolve;
     });
-    const discoverLinkedinLeads = vi.fn().mockImplementation(async () => {
+    const discoverAiLeads = vi.fn().mockImplementation(async () => {
       markDiscoveryStarted();
       return discoveryResult;
     });
@@ -691,7 +671,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       createVercelSearchServiceWithDeps({
         store,
         normalizeLocation: vi.fn().mockResolvedValue(localLocation),
-        discoverLinkedinLeads,
+        discoverAiLeads,
         discoverOsmLeads: vi.fn().mockResolvedValue([]),
         now: () => 1000,
       });
@@ -702,7 +682,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       companyType: 'Dentist',
       city: 'Austin, TX',
       count: 50,
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
     });
 
     const firstAdvance = first.advanceSearch(response.searchId);
@@ -711,51 +691,56 @@ describe('createVercelSearchServiceWithDeps', () => {
     const secondSnapshot = await second.advanceSearch(response.searchId);
 
     expect(secondSnapshot?.meta.status).toBe('discovering');
-    expect(discoverLinkedinLeads).toHaveBeenCalledOnce();
+    expect(discoverAiLeads).toHaveBeenCalledOnce();
 
-    releaseDiscovery({ leads: [], warnings: [], blocked: false });
+    releaseDiscovery({
+      leads: [],
+      warnings: [],
+      coverage: [],
+      aiAssistance: 'failed',
+      researchCandidates: [],
+      enrichedCount: 0,
+    });
     const completedSnapshot = await firstAdvance;
 
     expect(completedSnapshot?.meta.status).toBe('failed');
   });
 
-  it('persists public LinkedIn contact enrichment in the Vercel search job', async () => {
-    const enrichLinkedinLeads = vi.fn().mockImplementation(async ({ leads }) => ({
-      leads: leads.map((lead: Lead) => ({
-        ...lead,
+  it('persists public contact enrichment inside the merged AI result', async () => {
+    const discoverAiLeads = vi.fn().mockResolvedValue({
+      leads: [makeLead({
+        id: 'ai-enriched-lead',
+        name: 'Mark Sweeney',
+        source: 'LinkedIn, Public Profile, Public Web, Website Crawl',
+        listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
         mobile: '+1 512 555 0199',
         email: 'hello@markdental.com',
         website: 'https://markdental.com',
-        contactEvidence: [{ field: 'phone', value: '+15125550199', sourceUrl: 'https://markdental.com/contact', sourceName: 'Business website', sourceKind: 'business_website', association: 'business', observedAt: lead.scrapedAt }],
-        hasEmail: true,
+        contactSourceUrl: 'https://markdental.com/contact',
         hasPhone: true,
+        hasEmail: true,
         hasWebsite: true,
-        verifiedEmail: true,
         verifiedPhone: true,
-        source: `${lead.source}, Public Web, Website Crawl`,
-      })),
-      warnings: [],
-      enrichedCount: leads.length,
-    }));
-    const discoverLinkedinLeads = vi.fn().mockResolvedValue({
-      leads: [makeLead({
-        id: 'linkedin-enriched-lead',
-        name: 'Mark Sweeney',
-        source: 'LinkedIn',
-        website: '',
-        listingUrl: 'https://linkedin.com/in/mark-sweeney-austin',
+        verifiedEmail: true,
       })],
       warnings: [],
-      blocked: false,
+      coverage: [{
+        providerId: 'public-website-enrichment',
+        providerName: 'Public Website Enrichment',
+        status: 'returned',
+        leadCount: 1,
+      }],
+      aiAssistance: 'enabled',
+      researchCandidates: [],
+      enrichedCount: 1,
     });
 
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
       normalizeLocation: vi.fn().mockResolvedValue(localLocation),
-      discoverLinkedinLeads,
-      enrichLinkedinLeads,
+      discoverAiLeads,
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      idFactory: () => 'search-linkedin-enriched',
+      idFactory: () => 'search-ai-enriched',
       now: () => 1000,
     });
 
@@ -763,119 +748,43 @@ describe('createVercelSearchServiceWithDeps', () => {
       companyType: 'Dentist',
       city: 'Austin, TX',
       count: 50,
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
     });
-
-    const discoveringSnapshot = await service.getSearch(response.searchId);
-    expect(discoveringSnapshot?.meta.status).toBe('enriching');
     const snapshot = await service.getSearch(response.searchId);
 
-    expect(discoverLinkedinLeads).toHaveBeenCalledWith(
-      expect.objectContaining({ deadlineMs: 31_000 }),
-    );
-    expect(enrichLinkedinLeads).toHaveBeenCalledTimes(1);
-    expect(enrichLinkedinLeads).toHaveBeenCalledWith(
-      expect.objectContaining({ deadlineMs: 25_000 }),
-    );
+    expect(discoverAiLeads).toHaveBeenCalledTimes(1);
     expect(snapshot?.meta.status).toBe('complete');
-    expect(snapshot?.leads[0]?.email).toBe('hello@markdental.com');
-    expect(snapshot?.leads[0]?.mobile).toBe('+1 512 555 0199');
-    expect(snapshot?.leads[0]?.website).toBe('https://markdental.com');
+    expect(snapshot?.leads[0]).toMatchObject({
+      email: 'hello@markdental.com',
+      mobile: '+1 512 555 0199',
+      website: 'https://markdental.com',
+    });
     expect(snapshot?.leads[0]?.source).toContain('Website Crawl');
-    expect(snapshot?.meta.progress.duplicatesRemoved).toBe(0);
+    expect(snapshot?.meta.progress.enriched).toBe(1);
   });
 
-  it('resumes public LinkedIn contact enrichment in durable batches', async () => {
-    const leads = Array.from({ length: 14 }, (_, index) =>
-      makeLead({
-        id: `linkedin-batch-${index}`,
-        name: `Mark Sweeney ${index}`,
-        source: 'LinkedIn',
-        mobile: '',
-        hasPhone: false,
-        verifiedPhone: false,
-        website: '',
-        listingUrl: `https://linkedin.com/in/mark-sweeney-${index}`,
-      }),
-    );
-    const enrichmentBatchSizes: number[] = [];
-    const enrichLinkedinLeads = vi.fn().mockImplementation(
-      async ({ leads: batch, onProgress }) => {
-        enrichmentBatchSizes.push(batch.length);
-        onProgress?.(batch.length);
-
-        return {
-          leads: batch.map((lead: Lead) => ({
-            ...lead,
-            mobile: `+1 512 555 ${String(1900 + Number(lead.id.split('-').pop())).padStart(4, '0')}`,
-            email: `hello-${lead.id}@markdental.com`,
-            website: `https://markdental-${lead.id}.com`,
-            contactEvidence: [{ field: 'phone', value: `+1512555${1900 + Number(lead.id.split('-').pop())}`, sourceUrl: `https://markdental-${lead.id}.com/contact`, sourceName: 'Business website', sourceKind: 'business_website', association: 'business', observedAt: lead.scrapedAt }],
-            hasEmail: true,
-            hasPhone: true,
-            hasWebsite: true,
-            verifiedEmail: true,
-            verifiedPhone: true,
-            source: `${lead.source}, Public Web, Website Crawl`,
-          })),
-          warnings: [],
-          enrichedCount: batch.length,
-        };
-      },
-    );
+  it('fails AI searches honestly when public profile pages are blocked', async () => {
     const service = createVercelSearchServiceWithDeps({
       store: createSearchJobStore(),
       normalizeLocation: vi.fn().mockResolvedValue(localLocation),
-      discoverLinkedinLeads: vi.fn().mockResolvedValue({
-        leads,
-        warnings: [],
-        blocked: false,
-      }),
-      enrichLinkedinLeads,
-      discoverOsmLeads: vi.fn().mockResolvedValue([]),
-      idFactory: () => 'search-linkedin-batches',
-      now: () => 1000,
-    });
-
-    const response = await service.startSearch({
-      companyType: 'Dentist',
-      city: 'Austin, TX',
-      count: 50,
-      sourceMode: 'linkedin',
-      phoneRequired: true,
-    });
-
-    const discoveringSnapshot = await service.getSearch(response.searchId);
-    expect(discoveringSnapshot?.meta.status).toBe('enriching');
-    expect(discoveringSnapshot?.meta.progress.enriched).toBe(0);
-
-    const firstBatchSnapshot = await service.getSearch(response.searchId);
-    expect(firstBatchSnapshot?.meta.status).toBe('enriching');
-    expect(firstBatchSnapshot?.meta.progress.enriched).toBe(12);
-    expect(enrichmentBatchSizes).toEqual([12]);
-
-    const completedSnapshot = await service.getSearch(response.searchId);
-    expect(completedSnapshot?.meta.status).toBe('complete');
-    expect(completedSnapshot?.meta.progress.enriched).toBe(14);
-    expect(enrichmentBatchSizes).toEqual([12, 2]);
-    expect(completedSnapshot?.leads).toHaveLength(14);
-    expect(completedSnapshot?.leads.every((lead) => lead.hasEmail && lead.hasPhone)).toBe(true);
-  });
-
-  it('fails LinkedIn searches honestly when public profile pages are blocked', async () => {
-    const service = createVercelSearchServiceWithDeps({
-      store: createSearchJobStore(),
-      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
-      discoverLinkedinLeads: vi.fn().mockResolvedValue({
+      discoverAiLeads: vi.fn().mockResolvedValue({
         leads: [],
         warnings: [
           {
             providerId: 'linkedin-search-brave',
             providerName: 'Brave Search',
-            message: 'Brave Search returned a blocked or rate-limited page while searching public LinkedIn profiles.',
+            message: 'Public profile search was blocked or rate-limited.',
           },
         ],
-        blocked: true,
+        coverage: [{
+          providerId: 'linkedin-public-search',
+          providerName: 'Public LinkedIn Search',
+          status: 'failed',
+          leadCount: 0,
+        }],
+        aiAssistance: 'failed',
+        researchCandidates: [],
+        enrichedCount: 0,
       }),
       discoverOsmLeads: vi.fn().mockResolvedValue([]),
       idFactory: () => 'search-linkedin-blocked',
@@ -886,7 +795,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       companyType: 'Founder',
       city: 'Austin, TX',
       count: 50,
-      sourceMode: 'linkedin',
+      sourceMode: 'ai',
     });
 
     const snapshot = await service.getSearch(response.searchId);
@@ -894,8 +803,12 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.meta.status).toBe('failed');
     expect(snapshot?.meta.progress.currentSource).toBe('Failed');
     expect(snapshot?.leads).toHaveLength(0);
-    expect(snapshot?.meta.providerWarnings.some((warning) => warning.providerName === 'Brave Search')).toBe(true);
-    expect(snapshot?.meta.providerWarnings.some((warning) => warning.providerName === 'LinkedIn')).toBe(true);
+    expect(snapshot?.meta.providerWarnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ providerId: 'linkedin-search-brave' }),
+        expect.objectContaining({ providerId: 'no-usable-results', severity: 'error' }),
+      ]),
+    );
   });
 
   it('keeps structured email and address data from OSM without crawlers', async () => {

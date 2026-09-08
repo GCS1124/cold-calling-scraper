@@ -50,7 +50,7 @@ const response: SearchResponse = {
   ],
   researchCandidates: [researchCandidate],
   meta: {
-    sourceMode: 'linkedin',
+    sourceMode: 'ai',
     execution: {
       path: 'stateless',
       pollable: false,
@@ -100,7 +100,7 @@ describe('buildResearchDossier', () => {
 
     expect(dossier.leads[0]?.evidence?.[0]?.sourceUrl).toBe('https://publicdental.example');
     expect(dossier.contractVersion).toBe(2);
-    expect(dossier.sourceMode).toBe('linkedin');
+    expect(dossier.sourceMode).toBe('ai');
     expect(dossier.execution).toMatchObject({
       path: 'stateless',
       pollable: false,

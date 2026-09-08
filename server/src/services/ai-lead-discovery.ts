@@ -26,7 +26,6 @@ import {
   isGeminiLeadDiscoveryEnabled,
 } from '../providers/gemini';
 import {
-  buildLeadsFromGeminiCandidates,
   discoverGeminiResearch,
   mergeGroundingSources,
   mergeResearchCandidates,
