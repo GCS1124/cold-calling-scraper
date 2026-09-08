@@ -613,7 +613,9 @@ const extractVisibleText = ($: cheerio.CheerioAPI) => {
   return cheerio
     .load('<body>' + separatedMarkup + '</body>')('body')
     .text()
-    .replace(/\s+/g, ' ')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/\n{2,}/g, '\n')
     .trim();
 };
 

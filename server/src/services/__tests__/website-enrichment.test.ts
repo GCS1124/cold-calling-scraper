@@ -127,6 +127,7 @@ describe('extractContactDetailsFromHtml', () => {
       <html><body>
         <p>Partner With Us</p>
         <p>WHERE DEPENDABLE PARTNERSHIPS DRIVE DEALER SUCCESS</p>
+        <p>North Austin Manager</p>
         <p>Free Estimate</p>
         <p>Call Us for a free estimate.</p>
         <p>Owner: Jordan Lee</p>

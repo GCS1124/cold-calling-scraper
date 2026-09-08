@@ -17,6 +17,8 @@ const businessNamePattern =
   /\b(?:llc|l\.?t\.?d|inc\.?|incorporated|corp\.?|corporation|company|clinic|studio|group|services|solutions|systems|agency|practice|medical|health|dental|dentistry|hvac|plumbing|roofing|construction|realty|attorneys?|auto|electric|cleaning|consulting|business)\b/i;
 const nonPersonPhrasePattern =
   /\b(?:with us|for us|contact us|call us|join us|meet (?:our|the) team|our team|our staff|about us|learn more|read more|click here|reach out|free estimate|request (?:a|an)? quote|book (?:a|an)? appointment|schedule (?:a|an)? appointment|customer service|contact form|home services?|our mission|our values)\b/i;
+const directionalLocationPattern =
+  /^(?:north|south|east|west|central|downtown|midtown|uptown|greater|metro)\s+\p{L}/iu;
 
 const normalizeWhitespace = (value: string) =>
   value
@@ -58,7 +60,8 @@ export const isLikelyPublicPersonName = (value?: string) => {
   if (
     publicDecisionMakerRolePattern.test(normalized) ||
     businessNamePattern.test(normalized) ||
-    nonPersonPhrasePattern.test(normalized)
+    nonPersonPhrasePattern.test(normalized) ||
+    directionalLocationPattern.test(normalized)
   ) {
     publicDecisionMakerRolePattern.lastIndex = 0;
     return false;
@@ -111,17 +114,21 @@ const addMention = (
 
 /** Extract only explicit role/name phrases; this never invents a person name. */
 export const extractPublicDecisionMakerMentions = (value: string): PublicDecisionMaker[] => {
-  const text = normalizeWhitespace(value);
+  const text = value
+    .split(/\r?\n/)
+    .map(normalizeWhitespace)
+    .filter(Boolean)
+    .join('\n');
   if (!text) return [];
 
-  const nameExpression = "[A-Z][\\p{L}'’.-]{1,}(?:\\s+[A-Z][\\p{L}'’.-]{1,}){1,5}?";
+  const nameExpression = "[A-Z][\\p{L}'’.-]{1,}(?:[ \\t]+[A-Z][\\p{L}'’.-]{1,}){1,5}?";
   const mentions = new Map<string, PublicDecisionMaker>();
   const roleBeforeName = new RegExp(
-    '\\b(' + roleExpression + ')\\b\\s*(?:is|:|-|–|—|,)?\\s+(' + nameExpression + ')',
+    '\\b(' + roleExpression + ')\\b[ \\t]*(?:is|:|-|–|—|,)?[ \\t]+(' + nameExpression + ')',
     'giu',
   );
   const nameBeforeRole = new RegExp(
-    '(' + nameExpression + ')\\s*(?:,|\\||•|-|–|—|\\bis\\b)?\\s+(' + roleExpression + ')\\b',
+    '(' + nameExpression + ')[ \\t]*(?:,|\\||•|-|–|—|\\bis\\b)?[ \\t]+(' + roleExpression + ')\\b',
     'giu',
   );
 
