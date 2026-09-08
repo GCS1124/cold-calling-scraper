@@ -166,7 +166,7 @@ const getDiscoveryBatchSize = (requestedCount: number) => (requestedCount >= 100
 const getPerSeedCount = (requestedCount: number) =>
   requestedCount >= 100 ? 30 : requestedCount >= 50 ? 25 : 20;
 const getGooglePlacesTimeoutMs = (requestedCount: number) =>
-  requestedCount >= 50 ? 20_000 : 8_000;
+  requestedCount >= 100 ? 32_000 : requestedCount >= 50 ? 20_000 : 8_000;
 const getGoogleMapsTimeoutMs = (requestedCount: number) =>
   requestedCount >= 50 ? 8_000 : 5_000;
 const getLinkedinProfileDiscoveryWindowMs = (requestedCount: number) =>

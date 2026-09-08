@@ -69,6 +69,8 @@ const contactEnrichmentWindowMs = 18_000;
 const geminiListingEnrichmentWindowMs = 8_000;
 const maxGeminiListingSeeds = 40;
 const maxAiGmbCandidates = 500;
+const getAiDiscoveryWindowMs = (requestedCount: number) =>
+  requestedCount >= 100 ? 32_000 : discoveryWindowMs;
 const getAiGmbSearchQueryLimit = (requestedCount: number) =>
   Math.min(16, Math.max(3, Math.ceil(Math.max(50, requestedCount) / 50) + 2));
 // Keep the orchestration budget at least as large as Gemini's grounded request
@@ -288,7 +290,10 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       ? [request.researchBrief.trim()]
       : [];
 
-    const discoveryDeadlineMs = Math.min(deadlineMs, Date.now() + discoveryWindowMs);
+    const discoveryDeadlineMs = Math.min(
+      deadlineMs,
+      Date.now() + getAiDiscoveryWindowMs(request.count),
+    );
     // Gemini's candidate search does not depend on the query-lens response, so
     // start it immediately and keep it independent from LinkedIn's timeout.
     const geminiDiscoveryPromise: Promise<GeminiResearchDiscovery> = isGeminiLeadDiscoveryEnabled()
@@ -326,7 +331,9 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
             profile: resolveCategoryProfile(request.companyType),
             deadlineMs: discoveryDeadlineMs,
           }),
-          discoveryDeadlineMs,
+          // Allow in-flight public requests to finish after the provider's
+          // stop-start deadline so already-collected GMB phones are retained.
+          Math.min(deadlineMs, discoveryDeadlineMs + (request.count >= 100 ? 4_000 : 1_000)),
           'Google Business listing discovery timed out; other public sources were preserved.',
         )
           .then((leads) => {

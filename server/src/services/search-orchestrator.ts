@@ -162,7 +162,8 @@ type SearchDeps = {
 };
 
 const jobTtlMs = 15 * 60 * 1000;
-const googleDiscoveryTimeoutMs = 20000;
+const getGoogleDiscoveryTimeoutMs = (requestedCount: number) =>
+  requestedCount >= 100 ? 32_000 : 20_000;
 // Maps is a fallback after Places and OSM. Keep a failed browser attempt from
 // holding every regional pass open for the full discovery window.
 const googleMapsDiscoveryTimeoutMs = 8_000;
@@ -790,7 +791,7 @@ const runRegionalDiscovery = async (
                 request: discoveryRequest,
                 location: discoveryLocation,
                 queryVariants,
-                deadlineMs: Date.now() + googleDiscoveryTimeoutMs,
+                deadlineMs: Date.now() + getGoogleDiscoveryTimeoutMs(request.count),
               })
             : discoverGoogleLeads.fetchLeads({
                 rawQuery: request.companyType,
@@ -802,9 +803,9 @@ const runRegionalDiscovery = async (
                   count: Math.max(discoveryRequest.count, 100),
                 },
                 location: discoveryLocation,
-                deadlineMs: Date.now() + googleDiscoveryTimeoutMs,
+                deadlineMs: Date.now() + getGoogleDiscoveryTimeoutMs(request.count),
               }),
-          googleDiscoveryTimeoutMs,
+          getGoogleDiscoveryTimeoutMs(request.count),
           'Google Places discovery timed out before the batch completed',
         );
         const acceptedGoogleLeads = filterLeadsForLocation(googleLeads, targetLocation);
