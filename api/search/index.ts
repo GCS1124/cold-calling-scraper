@@ -12,6 +12,7 @@ import {
 } from '../../server/src/http/search-http-contract.js';
 import { SearchIdempotencyConflictError } from '../../server/src/services/search-idempotency.js';
 import { authorizeSearchRequest } from '../_lib/search-auth.js';
+import { hasCallbackSigningSecret } from '../../server/src/services/search-completion-callback.js';
 
 const isSearchPersistenceFailure = (error: unknown) =>
   error instanceof Error &&
@@ -85,6 +86,38 @@ export default async function handler(req: any, res: any) {
 
     const payload = searchRequestSchema.parse(req.body);
     flattenedRequest = flattenSearchRequest(payload);
+
+    if (flattenedRequest.callback) {
+      if (!auth.ownerId) {
+        sendSearchError(res, 401, {
+          code: 'CALLBACK_OWNER_REQUIRED',
+          message: 'Completion callbacks require an authenticated integration owner.',
+          retryable: false,
+          requestId,
+        });
+        return;
+      }
+
+      if (!hasDurableSearchStorage()) {
+        sendSearchError(res, 503, {
+          code: 'CALLBACK_REQUIRES_DURABLE_STORAGE',
+          message: 'Completion callbacks require durable Postgres search storage.',
+          retryable: false,
+          requestId,
+        });
+        return;
+      }
+
+      if (!hasCallbackSigningSecret()) {
+        sendSearchError(res, 503, {
+          code: 'CALLBACK_SIGNING_NOT_CONFIGURED',
+          message: 'Completion callbacks require LEAD_FINDER_INTEGRATION_CALLBACK_SIGNING_SECRET.',
+          retryable: false,
+          requestId,
+        });
+        return;
+      }
+    }
 
     if (
       isVercelRuntime() &&

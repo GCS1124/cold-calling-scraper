@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { usStateCodes } from '../../server/src/data/us-states.js';
+import { isPublicHttpsCallbackUrl } from '../../server/src/utils/public-url.js';
 
 const publicTimeZoneCodes = ['EST', 'CST', 'MST', 'PST'] as const;
 const publicSearchSourceModes = ['gmb', 'linkedin', 'ai'] as const;
@@ -16,6 +17,18 @@ const citySchema = z
   .refine((value) => cityPattern.test(value), {
     message: 'City must contain letters, spaces, apostrophes, periods, or hyphens.',
   });
+
+const callbackSchema = z
+  .object({
+    url: z
+      .string()
+      .trim()
+      .max(2_048)
+      .refine(isPublicHttpsCallbackUrl, {
+        message: 'Callback URL must be a public HTTPS endpoint without credentials, query, or fragment.',
+      }),
+  })
+  .strict();
 
 export const searchLocationSchema = z.discriminatedUnion('mode', [
   z.object({
@@ -38,6 +51,7 @@ export const searchRequestSchema = z.object({
   count: z.number().int().min(50).max(500),
   // Older clients may omit this, but disabling it is never accepted.
   phoneRequired: z.literal(true).default(true),
+  callback: callbackSchema.optional(),
   filters: z
     .object({
       hasEmail: z.boolean().optional(),
@@ -85,5 +99,6 @@ export const flattenSearchRequest = (request: PublicSearchRequest) => ({
   city: serializeLocationValue(request.location),
   count: Math.max(request.count, 50),
   phoneRequired: request.phoneRequired,
+  callback: request.callback,
   filters: request.filters,
 });

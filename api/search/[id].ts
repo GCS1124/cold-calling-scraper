@@ -10,6 +10,7 @@ import {
 import { authorizeSearchRequest } from '../_lib/search-auth.js';
 
 const activeSearchStatuses = new Set(['queued', 'discovering', 'enriching']);
+const callbackStatuses = new Set(['pending', 'retrying']);
 
 const isSearchPersistenceFailure = (error: unknown) =>
   error instanceof Error &&
@@ -55,7 +56,10 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    if (activeSearchStatuses.has(response.meta.status)) {
+    if (
+      activeSearchStatuses.has(response.meta.status) ||
+      callbackStatuses.has(response.meta.callback?.status ?? '')
+    ) {
       waitUntil(
         getVercelSearchService()
           .then((service) => service.advanceSearch(searchId))

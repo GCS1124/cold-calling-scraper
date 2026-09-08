@@ -148,6 +148,44 @@ The initial response is a complete stateless result or a durable snapshot. Do
 not assume that `200` means the final lead list is ready; inspect
 `meta.execution.path` and `meta.status`.
 
+### Completion callbacks
+
+Durable searches can optionally notify an owner-controlled HTTPS endpoint when
+they reach `complete`, `failed`, or `cancelled`. Add this to the start request:
+
+```json
+{
+  "callback": {
+    "url": "https://crm.example.com/webhooks/lead-finder"
+  }
+}
+```
+
+Callbacks are accepted only for owner-authenticated requests with durable
+Postgres search storage. The deployment must set
+`LEAD_FINDER_INTEGRATION_CALLBACK_SIGNING_SECRET`; the raw secret is never
+stored in a search job or sent to the callback endpoint. Each delivery is a
+`POST` with `Content-Type: application/json` and these headers:
+`X-Lead-Finder-Event`, `X-Lead-Finder-Event-Id`, `X-Lead-Finder-Search-Id`,
+`X-Lead-Finder-Timestamp`, and `X-Lead-Finder-Signature`.
+
+The signature is HMAC-SHA256 over `<timestamp>.<raw JSON body>` and is sent as
+`t=<timestamp>,v1=<hex digest>`. The body has the shape
+`{ event, eventId, emittedAt, searchId, status, response }`. The response keeps
+the same public-phone and source-evidence contract as polling, and never
+includes the callback URL in the response metadata.
+
+Delivery is at-least-once. Receivers must deduplicate on `eventId`, return a
+2xx response only after durable processing, and tolerate retries. Transient
+network failures and 408/425/429/5xx responses use bounded exponential retry;
+non-retryable 4xx responses stop delivery and appear in
+`meta.providerWarnings`. `meta.callback` exposes only safe delivery state:
+`pending`, `retrying`, `delivered`, or `failed`, plus attempt and timestamp
+metadata. The standalone `server/src/worker.ts` process must be running for
+callbacks to continue without caller polling; otherwise polling the durable
+search remains the recovery mechanism. Stateless LinkedIn and AI fallbacks do
+not accept callbacks because they cannot promise cross-instance delivery.
+
 ## Lifecycle
 
 Durable responses advertise:
@@ -231,6 +269,9 @@ whether to retry.
 | `INVALID_SEARCH_REQUEST` | 400 | Fix the bounded request payload |
 | `INVALID_IDEMPOTENCY_KEY` | 400 | Send a safe bounded key |
 | `IDEMPOTENCY_KEY_REUSED` | 409 | Create a new key for different criteria |
+| `CALLBACK_OWNER_REQUIRED` | 401 | Use an owner-authenticated integration request |
+| `CALLBACK_REQUIRES_DURABLE_STORAGE` | 503 | Configure Postgres before requesting a callback |
+| `CALLBACK_SIGNING_NOT_CONFIGURED` | 503 | Configure the server-side callback signing secret |
 | `SEARCH_PERSISTENCE_UNAVAILABLE` | 503 | Configure/restore Postgres before durable GMB work |
 | `LEAD_NOT_FOUND` | 404 | Refresh the search snapshot or discard the stale lead id |
 | provider-specific search failure | 502/500 | Retry only when the response says it is retryable |
@@ -244,16 +285,13 @@ whether to retry.
 3. Apply the audit-event migration and set required audit mode for production
    traffic; keep durable rate limiting enabled. The built-in counter is a
    traffic guard, not a billing or usage ledger.
-4. Add key usage metrics, worker callbacks, and scheduled retention enforcement
-   before production promotion; the optional per-credential daily quota is now
-   available for controlled rollout.
-5. Add a worker-backed completion callback only after durable job state and
-   retry semantics are measured. Until then, poll using the advertised lifecycle
-   flags; do not invent webhook delivery guarantees.
-6. Run the reviewed multi-industry corpus and live provider smoke matrix. Track
+4. Add key usage metrics and scheduled retention enforcement before production
+   promotion; the optional per-credential daily quota and signed worker-backed
+   completion callback are available for controlled rollout.
+5. Run the reviewed multi-industry corpus and live provider smoke matrix. Track
    accepted leads per hour, phone-business association, duplicate rate,
    freshness, provider failure rate, and repeat usage separately for GMB,
    LinkedIn, and AI.
-7. Promote only when the measured quality gates in the lead-quality roadmap are
+6. Promote only when the measured quality gates in the lead-quality roadmap are
    met. A green synthetic suite does not prove provider yield or willingness to
    pay.

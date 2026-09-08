@@ -17,10 +17,17 @@ import { normalizeLeadSourceMode } from './search-source-mode';
 import {
   buildSearchExecutionContract,
   buildSearchResponseContract,
+  type SearchCallbackContract,
 } from '../../../shared/search-contract';
 import { buildLeadQualitySummary } from './quality-summary';
 import { SearchIdempotencyConflictError } from './search-idempotency';
 import { filterSuppressedLeads } from '../../../shared/lead-feedback';
+import {
+  isCallbackDue,
+  normalizeCallbackRequest,
+  sanitizeCallbackState,
+  type SearchCallbackState,
+} from './search-completion-callback';
 
 export type SearchLocationMode =
   | 'local'
@@ -36,6 +43,7 @@ export type SearchJobRecord = {
   idempotencyKey?: string;
   requestFingerprint?: string;
   request: SearchRequest;
+  callback?: SearchCallbackState;
   query: string;
   locationLabel: string;
   locationMode: SearchLocationMode;
@@ -106,7 +114,7 @@ export const isSearchPersistenceError = (
   (error instanceof Error &&
     (error as Error & { code?: unknown }).code === 'SEARCH_PERSISTENCE_UNAVAILABLE');
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 const DEFAULT_JOB_TTL_MS = 1000 * 60 * 60 * 6;
 const MEMORY_MAX_JOBS = Number(process.env.SEARCH_JOB_MEMORY_MAX_JOBS ?? 500);
@@ -287,6 +295,13 @@ const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
       typeof job.requestFingerprint === 'string' && job.requestFingerprint.trim()
         ? job.requestFingerprint.trim()
         : undefined,
+    request: {
+      ...job.request,
+      ...(normalizeCallbackRequest(job.request?.callback)
+        ? { callback: normalizeCallbackRequest(job.request.callback) }
+        : { callback: undefined }),
+    },
+    callback: sanitizeCallbackState(job.callback),
     query: job.query?.trim() ?? '',
     locationLabel: job.locationLabel?.trim() ?? '',
     locationMode: normalizeLocationMode(job.locationMode),
@@ -349,6 +364,7 @@ const migrateJobPayload = (payload: unknown): SearchJobRecord | null => {
     requestFingerprint:
       typeof raw.requestFingerprint === 'string' ? raw.requestFingerprint : undefined,
     request: raw.request,
+    callback: sanitizeCallbackState(raw.callback),
     query: String(raw.query ?? ''),
     locationLabel: String(raw.locationLabel ?? ''),
     locationMode: normalizeLocationMode(raw.locationMode),
@@ -523,11 +539,13 @@ const memoryStore = (): SearchJobStore => {
       }
 
       const job = jobs.get(normalized);
+      const active = job ? ['queued', 'discovering', 'enriching'].includes(job.status) : false;
+      const callbackReady = Boolean(job) && !active && isCallbackDue(job?.callback, now);
       if (
         !job ||
         (ownerId && job.ownerId !== ownerId) ||
-        job.cancelRequested ||
-        !['queued', 'discovering', 'enriching'].includes(job.status) ||
+        (job.cancelRequested && !callbackReady) ||
+        (!active && !callbackReady) ||
         (job.processingUntil ?? 0) > now
       ) {
         return null;
@@ -605,6 +623,23 @@ const memoryStore = (): SearchJobStore => {
 const isHiddenWarning = (warning: ProviderWarning) =>
   warning.providerId === 'website-crawl' &&
   /blocked contact crawling|timed out during contact crawling/i.test(warning.message);
+
+const toCallbackContract = (callback: SearchCallbackState): SearchCallbackContract => ({
+  configured: true,
+  eventId: callback.eventId,
+  status: callback.status,
+  attempts: callback.attempts,
+  ...(callback.lastAttemptAt
+    ? { lastAttemptAt: new Date(callback.lastAttemptAt).toISOString() }
+    : {}),
+  ...(callback.nextAttemptAt
+    ? { nextAttemptAt: new Date(callback.nextAttemptAt).toISOString() }
+    : {}),
+  ...(callback.lastStatusCode ? { lastStatusCode: callback.lastStatusCode } : {}),
+  ...(callback.deliveredAt
+    ? { deliveredAt: new Date(callback.deliveredAt).toISOString() }
+    : {}),
+});
 
 const postgresStore = (): SearchJobStore => {
   let schemaReady = false;
@@ -864,8 +899,28 @@ const postgresStore = (): SearchJobStore => {
               end,
               0
             ) <= $4
-            and coalesce(payload->>'status', '') in ('queued', 'discovering', 'enriching')
-            and coalesce(payload->>'cancelRequested', 'false') <> 'true'
+            and (
+              coalesce(payload->>'status', '') in ('queued', 'discovering', 'enriching')
+              or (
+                coalesce(payload->>'status', '') in ('complete', 'failed', 'cancelled')
+                and payload->'callback'->>'status' in ('pending', 'retrying')
+                and coalesce(
+                  case
+                    when payload->'callback'->>'nextAttemptAt' ~ '^[0-9]+$'
+                      then (payload->'callback'->>'nextAttemptAt')::bigint
+                    else 0
+                  end,
+                  0
+                ) <= $4
+              )
+            )
+            and (
+              coalesce(payload->>'cancelRequested', 'false') <> 'true'
+              or (
+                coalesce(payload->>'status', '') in ('complete', 'failed', 'cancelled')
+                and payload->'callback'->>'status' in ('pending', 'retrying')
+              )
+            )
             and ($5::text is null or payload->>'ownerId' = $5)
           returning payload
         `,
@@ -1192,6 +1247,7 @@ export const toSearchResponse = (
         lastProgressAt,
         ...(completedAt ? { completedAt } : {}),
       }),
+      ...(job.callback ? { callback: toCallbackContract(job.callback) } : {}),
       qualitySummary: buildLeadQualitySummary(leads),
       progress,
       totals: countLeadTotals(leads),
@@ -1211,6 +1267,7 @@ export const createSearchJobRecord = (
         | 'ownerId'
         | 'idempotencyKey'
         | 'requestFingerprint'
+        | 'callback'
         | 'status'
         | 'leads'
         | 'providerWarnings'
@@ -1230,6 +1287,7 @@ export const createSearchJobRecord = (
     idempotencyKey: params.idempotencyKey,
     requestFingerprint: params.requestFingerprint,
     request: params.request,
+    callback: params.callback,
     query: params.query,
     locationLabel: params.locationLabel,
     locationMode: params.locationMode,

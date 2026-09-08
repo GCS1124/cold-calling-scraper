@@ -5,6 +5,7 @@ import type { LeadFeedbackEventType } from '../../../shared/lead-feedback';
 import type { LeadQualitySummary } from '../../../shared/lead-quality';
 import type {
   SearchExecutionContract,
+  SearchCallbackContract,
   PhonePolicyContract,
   SearchModeCode,
   SEARCH_RESPONSE_CONTRACT_VERSION,
@@ -23,6 +24,12 @@ export const searchRequestSchema = z.object({
   city: z.string().trim().min(2).max(80),
   count: z.number().int().min(50).max(500),
   phoneRequired: z.literal(true).optional(),
+  callback: z
+    .object({
+      url: z.string().trim().min(1).max(2_048),
+    })
+    .strict()
+    .optional(),
   filters: z
     .object({
       hasEmail: z.boolean().optional(),
@@ -115,6 +122,7 @@ export type SearchResponse = {
     sourceMode?: SearchModeCode;
     /** Optional for compatibility with legacy snapshots; runtime responses include it. */
     execution?: SearchExecutionContract;
+    callback?: SearchCallbackContract;
     /** HTTP request correlation id; omitted by non-HTTP service callers. */
     requestId?: string;
     qualitySummary?: LeadQualitySummary;

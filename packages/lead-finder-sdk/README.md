@@ -42,3 +42,8 @@ The key belongs in the calling server's secret manager. Do not ship an
 integration key to a browser bundle. The API uses only public, legally
 accessible sources; a public business number is not represented as a verified
 personal mobile or direct line.
+
+For durable searches, an optional `callback: { url: 'https://...' }` can be
+included in the request. The deployment must configure a server-side callback
+signing secret. Receivers should verify the HMAC signature and deduplicate the
+at-least-once `eventId`; stateless fallback responses do not support callbacks.

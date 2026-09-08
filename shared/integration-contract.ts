@@ -45,11 +45,13 @@ export const buildIntegrationCapabilities = () => ({
     resume: 'POST /api/v1/search/:searchId/resume',
     reverify: 'POST /api/v1/search/:searchId/reverify',
     feedback: 'POST /api/v1/search/:searchId/feedback',
+    callback: 'Optional signed POST from durable searches to the request callback URL',
   },
   guarantees: [
     'Every returned lead passed the mandatory public-phone evidence gate.',
     'Search retries can reuse the same bounded Idempotency-Key.',
     'Responses include request correlation and machine-readable error codes.',
     'Only public, legally accessible sources are used; provider credentials stay server-side.',
+    'Durable searches may emit an at-least-once signed completion callback; receivers must deduplicate by eventId.',
   ] as const,
 });

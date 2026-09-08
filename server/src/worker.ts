@@ -6,6 +6,7 @@ import { createSearchJobStore } from './services/search-job-store';
 import { vercelSearchService } from './services/vercel-search-service';
 
 const activeStatuses = new Set(['queued', 'discovering', 'enriching']);
+const callbackStatuses = new Set(['pending', 'retrying']);
 const leaseMs = Number(process.env.RESEARCH_WORKER_LEASE_MS ?? 90_000);
 const pollMs = Number(process.env.RESEARCH_WORKER_POLL_MS ?? 1_000);
 const retryMs = Number(process.env.RESEARCH_WORKER_RETRY_MS ?? 5_000);
@@ -27,13 +28,28 @@ export const runResearchWorkerOnce = async () => {
   try {
     const response = await vercelSearchService.advanceSearch(item.searchId);
     const terminal = !response || !activeStatuses.has(response.meta.status);
+    const callbackPending = callbackStatuses.has(response?.meta.callback?.status ?? '');
+    const shouldRetry = !terminal || callbackPending;
+    const workerAttemptLimitReached = !callbackPending && item.attempts >= maxAttempts;
     await queue.release({
       searchId: item.searchId,
       token,
-      status: terminal || item.attempts >= maxAttempts ? (terminal ? 'complete' : 'dead') : 'queued',
+      status: shouldRetry
+        ? workerAttemptLimitReached
+          ? 'dead'
+          : 'queued'
+        : 'complete',
       now: Date.now(),
-      retryAt: terminal ? undefined : Date.now() + 50,
-      error: terminal ? undefined : 'Search remains active after worker tick',
+      retryAt: shouldRetry
+        ? callbackPending
+          ? Date.parse(response?.meta.callback?.nextAttemptAt ?? '') || Date.now() + 1_000
+          : Date.now() + 50
+        : undefined,
+      error: shouldRetry
+        ? callbackPending
+          ? 'Completion callback remains pending'
+          : 'Search remains active after worker tick'
+        : undefined,
     });
   } catch (error) {
     await queue.release({

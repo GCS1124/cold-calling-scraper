@@ -170,7 +170,23 @@ export const buildIntegrationOpenApi = () => ({
           },
           count: { type: 'integer', minimum: 50, maximum: 500 },
           phoneRequired: { const: true, description: 'Must remain true. Every returned lead needs public phone evidence.' },
+          callback: { $ref: '#/components/schemas/CompletionCallbackRequest' },
           filters: { type: 'object', additionalProperties: true },
+        },
+        additionalProperties: false,
+      },
+      CompletionCallbackRequest: {
+        type: 'object',
+        required: ['url'],
+        properties: {
+          url: {
+            type: 'string',
+            format: 'uri',
+            pattern: '^https://',
+            maxLength: 2_048,
+            description:
+              'Public HTTPS endpoint without credentials, query, or fragment. The server signs the JSON body with LEAD_FINDER_INTEGRATION_CALLBACK_SIGNING_SECRET.',
+          },
         },
         additionalProperties: false,
       },

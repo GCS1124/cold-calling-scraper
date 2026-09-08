@@ -9,6 +9,7 @@ import {
 import { authorizeSearchRequest } from '../../_lib/search-auth.js';
 
 const activeStatuses = new Set(['queued', 'discovering', 'enriching']);
+const callbackStatuses = new Set(['pending', 'retrying']);
 
 export default async function handler(req: any, res: any) {
   const requestId = getRequestId(req);
@@ -56,7 +57,10 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    if (activeStatuses.has(response.meta.status)) {
+    if (
+      activeStatuses.has(response.meta.status) ||
+      callbackStatuses.has(response.meta.callback?.status ?? '')
+    ) {
       waitUntil(
         service.advanceSearch(searchId).catch((error) => {
           console.error('[api/search/:id/resume] background search failed', error);

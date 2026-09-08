@@ -70,7 +70,7 @@ LinkedIn: expand public professional discovery through company leadership pages,
 
 AI: compile the brief into typed supported criteria; show which requirements are enforced versus still unverified. Route company/people discovery according to intent. Honor exclusions. Recover with deterministic query expansion if Gemini is unavailable. Do not label an unsupported criterion as matched. All three modes now expose the same provider-coverage states (`configured`, `not_configured`, `returned`, `failed`, and `partial`) so a zero result cannot be mistaken for an unattempted source.
 
-Acceptance: multi-industry fixtures (dentist, HVAC, plumbing, roofing, legal, software); region boundary tests; query diversity checks; simulated 429/403/timeout/restart/cancellation; complete searches without continuous browser polling when a worker is configured. Local tests now cover independent free-source execution and bounded website recovery; live multi-industry coverage and worker recovery remain pending.
+Acceptance: multi-industry fixtures (dentist, HVAC, plumbing, roofing, legal, software); region boundary tests; query diversity checks; simulated 429/403/timeout/restart/cancellation; complete searches without continuous browser polling when a worker is configured. Local tests now cover independent free-source execution, bounded website recovery, signed completion callbacks, and callback retry state; live multi-industry coverage and worker recovery remain pending.
 
 ### 4. Qualification and opportunity research (partial: source-family trust and role/org qualification implemented)
 
@@ -110,13 +110,14 @@ client uses.
 The preview now includes a dependency-free typed SDK, a hash-only Postgres
 key store with expiry, revocation, and last-use tracking, bounded audit events
 that exclude lead payloads and raw credentials, an OpenAPI 3.1 document served
-through capabilities, and an optional per-credential daily quota. Before
-production integration access, add a durable worker completion callback,
-contract compatibility tests, scheduled retention enforcement, and billing-aware
-customer quotas if commercial usage limits are required.
-Do not promise webhooks, SLAs, personal mobile data, email deliverability, or
+through capabilities, an optional per-credential daily quota, and an opt-in
+signed completion callback with durable retry state. Before production
+integration access, add contract compatibility tests, scheduled retention
+enforcement, and billing-aware customer quotas if commercial usage limits are
+required.
+Do not promise callback SLAs, personal mobile data, email deliverability, or
 all-internet coverage until the corresponding evidence and operational
-measurements exist.
+measurements exist. The callback contract is at-least-once, not a delivery SLA.
 
 Acceptance: an external client can discover capabilities, authenticate without
 sharing a browser session, start one of all three modes, safely retry a lost
@@ -138,7 +139,7 @@ Invite willing pilot users to evaluate blind samples from each mode against thei
 | Discovery reliability across three modes | Partial: GMB free-source merge, bounded public-phone recovery, shared provider-coverage contract, and durable replay-safe starts implemented locally | Recovery, retention reuse, and real-source smoke matrix still pending; stateless fallback cannot guarantee cross-instance replay |
 | Typed qualification / role and signal research | Partial: source-family trust, authority tiers, role normalization, organization hints, relationship persistence, opportunity taxonomy, and contradiction penalties implemented | Calibrated weights and independently reviewed multi-industry acceptance labels |
 | Dossiers / feedback / suppression | Partial: search responses and evidence dossiers expose lifecycle, contract, coverage, and quality summaries; source-family metadata, person-to-organization links, role fields, idempotent observation persistence, owner-scoped jobs, feedback storage, correction UI, and response/export suppression are implemented | Shared-workspace authorization, reviewed correction policy, and live export checks remain pending |
-| Versioned integration surface | Preview: `/api/v1` capabilities, owner-required route aliases, hashed API-key authentication, environment and Postgres key stores, expiry/revocation state, per-credential rate limiting, optional daily per-credential quotas, typed SDK, OpenAPI 3.1 discovery, bounded audit events with required-mode readiness gate, lifecycle/idempotency/error contract, and integration documentation are implemented | Scheduled retention enforcement, worker callbacks, production key operations, and live client interoperability |
+| Versioned integration surface | Preview: `/api/v1` capabilities, owner-required route aliases, hashed API-key authentication, environment and Postgres key stores, expiry/revocation state, per-credential rate limiting, optional daily per-credential quotas, typed SDK, OpenAPI 3.1 discovery, bounded audit events with required-mode readiness gate, durable signed completion callbacks with bounded retry state, lifecycle/idempotency/error contract, and integration documentation are implemented | Scheduled retention enforcement, production key operations, and live client interoperability |
 | Commercial quality benchmark | Pending | Reviewed dataset and measured results |
 | Production release | Pending | Commit, remote SHA, deployment, live readback |
 | Customer willingness to pay | Unproven | Pilot usage and customer feedback |

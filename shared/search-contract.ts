@@ -12,6 +12,23 @@ export type SearchApiErrorResponse = {
 
 export type SearchModeCode = 'gmb' | 'linkedin' | 'ai';
 
+export type SearchCallbackRequest = {
+  url: string;
+};
+
+export type SearchCallbackStatus = 'pending' | 'retrying' | 'delivered' | 'failed';
+
+export type SearchCallbackContract = {
+  configured: true;
+  eventId: string;
+  status: SearchCallbackStatus;
+  attempts: number;
+  lastAttemptAt?: string;
+  nextAttemptAt?: string;
+  lastStatusCode?: number;
+  deliveredAt?: string;
+};
+
 export type SearchExecutionContract =
   | {
       path: 'durable';

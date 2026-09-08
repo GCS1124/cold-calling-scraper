@@ -19,6 +19,23 @@ export type SearchFilters = {
   sources?: string[];
 };
 
+export type SearchCallbackRequest = {
+  url: string;
+};
+
+export type SearchCallbackStatus = 'pending' | 'retrying' | 'delivered' | 'failed';
+
+export type SearchCallbackContract = {
+  configured: true;
+  eventId: string;
+  status: SearchCallbackStatus;
+  attempts: number;
+  lastAttemptAt?: string;
+  nextAttemptAt?: string;
+  lastStatusCode?: number;
+  deliveredAt?: string;
+};
+
 export type SearchRequest = {
   companyType: string;
   sourceMode?: LeadFinderMode;
@@ -27,6 +44,7 @@ export type SearchRequest = {
   location: SearchLocation;
   count: number;
   phoneRequired: true;
+  callback?: SearchCallbackRequest;
   filters?: SearchFilters;
 };
 
@@ -156,6 +174,7 @@ export type SearchResponse = {
   meta: {
     sourceMode?: LeadFinderMode;
     execution?: SearchExecution;
+    callback?: SearchCallbackContract;
     requestId?: string;
     phonePolicy?: PhonePolicy;
     limitations?: string[];

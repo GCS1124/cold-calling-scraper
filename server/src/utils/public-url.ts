@@ -73,3 +73,25 @@ export const isPublicHttpUrl = (value: string | URL) => {
     return false;
   }
 };
+
+/**
+ * Callback destinations are stricter than ordinary public source URLs. They
+ * must be HTTPS, cannot carry credentials, and cannot hide a destination in
+ * a query string or fragment.
+ */
+export const isPublicHttpsCallbackUrl = (value: string | URL) => {
+  try {
+    const url = typeof value === 'string' ? new URL(value) : value;
+
+    return (
+      url.protocol === 'https:' &&
+      isPublicHttpUrl(url) &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+};

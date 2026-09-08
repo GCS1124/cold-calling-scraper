@@ -51,6 +51,12 @@ import { noUsableResultsWarning } from './search-finalization';
 import { bridgeLinkedInWithPublicListings } from './public-entity-matching';
 import { recordProviderCoverage } from './provider-coverage';
 import {
+  createSearchCallbackState,
+  deliverSearchCompletionCallback,
+  normalizeCallbackRequest,
+  type CallbackFetch,
+} from './search-completion-callback';
+import {
   createSearchRequestFingerprint,
   normalizeIdempotencyKey,
 } from './search-idempotency';
@@ -133,6 +139,8 @@ type VercelSearchServiceDeps = {
   now?: () => number;
   idFactory?: () => string;
   feedbackStore?: LeadFeedbackStore;
+  callbackFetch?: CallbackFetch;
+  deliverCallback?: typeof deliverSearchCompletionCallback;
 };
 
 const discoverGoogleMapsLeadsOnDemand: NonNullable<
@@ -1127,11 +1135,32 @@ export const createVercelSearchServiceWithDeps = (
     (process.env.NODE_ENV === 'test' ? undefined : discoverOsm);
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
+  const deliverCallback = deps.deliverCallback ?? deliverSearchCompletionCallback;
   const renderResponse = async (job: SearchJobRecord, ownerId?: string) => {
     const suppressionKeys = ownerId
       ? await feedbackStore.getSuppressionKeys(ownerId)
       : new Set<string>();
     return toSearchResponse(job, suppressionKeys);
+  };
+  const deliverCallbackForJob = async (job: SearchJobRecord) => {
+    if (!['complete', 'failed', 'cancelled'].includes(job.status)) {
+      return job;
+    }
+
+    try {
+      return await deliverCallback({
+        job,
+        response: await renderResponse(job, job.ownerId),
+        store,
+        now,
+        fetchImplementation: deps.callbackFetch,
+      });
+    } catch (error) {
+      // Callback delivery must not turn a completed search into a 500. The
+      // durable callback state remains pending and can be retried later.
+      console.error('[vercel-search-service] completion callback failed', error);
+      return job;
+    }
   };
   const getStoredSearch = async (searchId: string, context?: SearchAccessContext) => {
     await store.ensureSchema();
@@ -1183,7 +1212,8 @@ export const createVercelSearchServiceWithDeps = (
     inFlightTicks.set(searchId, tick);
 
     try {
-      return renderResponse(await tick, ownerId);
+      const processedJob = await deliverCallbackForJob(await tick);
+      return renderResponse(processedJob, ownerId);
     } finally {
       if (inFlightTicks.get(searchId) === tick) {
         inFlightTicks.delete(searchId);
@@ -1209,10 +1239,12 @@ export const createVercelSearchServiceWithDeps = (
       const startedAt = now();
       await store.deleteExpired(startedAt);
 
+      const normalizedCallback = normalizeCallbackRequest(request.callback);
       const normalizedRequest: SearchRequest = {
         ...request,
         phoneRequired: true,
         researchDepth: request.researchDepth ?? 'verified',
+        ...(normalizedCallback ? { callback: normalizedCallback } : { callback: undefined }),
       };
       const idempotencyKey = normalizeIdempotencyKey(context?.idempotencyKey);
       const requestFingerprint = createSearchRequestFingerprint(normalizedRequest);
@@ -1238,6 +1270,9 @@ export const createVercelSearchServiceWithDeps = (
         idempotencyKey,
         requestFingerprint,
         request: normalizedRequest,
+        callback: normalizedCallback
+          ? createSearchCallbackState(normalizedCallback.url, createdAt)
+          : undefined,
         query: `${normalizedRequest.companyType} in ${normalizedRequest.city}`,
         locationLabel: normalizedRequest.city,
         locationMode: 'local',
@@ -1267,7 +1302,13 @@ export const createVercelSearchServiceWithDeps = (
     async cancelSearch(searchId, context) {
       await store.ensureSchema();
       const cancelled = await store.requestCancel(searchId, now(), context?.ownerId);
-      return cancelled ? renderResponse(cancelled, context?.ownerId) : null;
+      if (!cancelled) return null;
+
+      const processed = await deliverCallbackForJob(cancelled);
+      if (processed.callback && ['pending', 'retrying'].includes(processed.callback.status)) {
+        await queue.enqueue(searchId, processed.callback.nextAttemptAt ?? now());
+      }
+      return renderResponse(processed, context?.ownerId);
     },
 
     async resumeSearch(searchId, context) {
@@ -1285,6 +1326,9 @@ export const createVercelSearchServiceWithDeps = (
         job.progress.currentSource = 'Resuming research';
         job.lastProgressAt = now();
         job.updatedAt = now();
+        if (job.request.callback) {
+          job.callback = createSearchCallbackState(job.request.callback.url, now());
+        }
         await store.upsert(job);
         await queue.enqueue(searchId, now());
       }
