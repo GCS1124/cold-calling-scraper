@@ -72,10 +72,21 @@ const job = createSearchJobRecord({
   },
 });
 
-const makePool = (failOn?: RegExp) => {
+const makePool = (failOn?: RegExp, missingIdempotencyKey = false) => {
   const query = vi.fn(async (text: string) => {
     if (failOn?.test(text)) {
       throw new Error('normalized table write failed');
+    }
+
+    if (
+      missingIdempotencyKey &&
+      /insert into research_verification_events/i.test(text) &&
+      /idempotency_key/i.test(text)
+    ) {
+      throw Object.assign(
+        new Error('column "idempotency_key" of relation "research_verification_events" does not exist'),
+        { code: '42703' },
+      );
     }
 
     if (text.includes('research_source_documents')) {
@@ -136,6 +147,23 @@ describe('persistNormalizedResearch', () => {
     await persistNormalizedResearch(fake.pool, { ...job, status: 'discovering' });
 
     expect(fake.connect).not.toHaveBeenCalled();
+  });
+
+  it('keeps normalized persistence working when the legacy verification table lacks idempotency', async () => {
+    const fake = makePool(undefined, true);
+
+    await persistNormalizedResearch(fake.pool, job);
+
+    const statements = fake.query.mock.calls.map(([statement]) => statement.toLowerCase());
+    expect(statements).toContain('rollback to savepoint research_verification_event_compat');
+    expect(
+      statements.some(
+        (statement) =>
+          statement.includes('insert into research_verification_events') &&
+          statement.includes('source_document_id, metadata'),
+      ),
+    ).toBe(true);
+    expect(statements.at(-1)).toBe('commit');
   });
 
   it('rolls back and releases the client when normalized persistence fails', async () => {

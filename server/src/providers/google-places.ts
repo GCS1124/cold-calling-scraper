@@ -73,6 +73,7 @@ const newSearchFieldMask =
   'places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,nextPageToken';
 const newDetailsFieldMask =
   'id,displayName,formattedAddress,nationalPhoneNumber,internationalPhoneNumber,websiteUri';
+const maxGooglePlaceLeads = 500;
 
 export const isGooglePlacesConfigured = () =>
   Boolean(process.env.GOOGLE_PLACES_API_KEY?.trim());
@@ -570,20 +571,34 @@ const collectCandidatesForQueries = async (
   maxLeadCount: number,
   candidates: Map<string, PlaceCandidate>,
   collectForQuery: (searchQuery: string) => Promise<PlaceCandidate[]>,
+  maxConcurrentSearches = 1,
 ) => {
-  for (const searchQuery of searchQueries) {
-    if (Date.now() >= deadlineMs || candidates.size >= maxLeadCount) {
-      break;
-    }
+  let nextQueryIndex = 0;
+  const worker = async () => {
+    while (nextQueryIndex < searchQueries.length) {
+      if (Date.now() >= deadlineMs || candidates.size >= maxLeadCount) {
+        return;
+      }
 
-    const queryCandidates = await collectForQuery(searchQuery);
-    for (const candidate of queryCandidates) {
-      upsertCandidate(candidates, candidate);
-      if (candidates.size >= maxLeadCount) {
-        break;
+      const searchQuery = searchQueries[nextQueryIndex];
+      nextQueryIndex += 1;
+      if (!searchQuery) return;
+
+      const queryCandidates = await collectForQuery(searchQuery);
+      for (const candidate of queryCandidates) {
+        upsertCandidate(candidates, candidate);
+        if (candidates.size >= maxLeadCount) {
+          return;
+        }
       }
     }
-  }
+  };
+
+  const workerCount = Math.max(
+    1,
+    Math.min(Math.round(maxConcurrentSearches), searchQueries.length),
+  );
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
 };
 
 const hydrateLegacyCandidate = async (
@@ -707,6 +722,7 @@ export const googlePlacesProvider: LeadProvider = {
     deadlineMs: requestDeadlineMs,
     maxLeadCount: requestedMaxLeadCount,
     maxSearchQueries: requestedMaxSearchQueries,
+    maxConcurrentSearches: requestedMaxConcurrentSearches,
   }: LeadProviderRequest) {
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
     if (!isGooglePlacesConfigured() || !apiKey) {
@@ -720,16 +736,20 @@ export const googlePlacesProvider: LeadProvider = {
         location.city?.trim(),
     );
     const defaultMaxLeadCount = isCityStateLocal
-      ? Math.min(Math.max(request.count * 2, 80), 120)
-      : Math.min(request.count, 60);
+      ? Math.min(Math.max(request.count * 2, 80), maxGooglePlaceLeads)
+      : Math.min(request.count, maxGooglePlaceLeads);
     const maxLeadCount = Math.min(
-      120,
+      maxGooglePlaceLeads,
       Math.max(1, requestedMaxLeadCount ?? defaultMaxLeadCount),
     );
     const defaultSearchQueryLimit = isCityStateLocal ? 80 : 10;
     const searchQueryLimit = Math.max(
       1,
       Math.min(requestedMaxSearchQueries ?? defaultSearchQueryLimit, 80),
+    );
+    const maxConcurrentSearches = Math.max(
+      1,
+      Math.min(Math.round(requestedMaxConcurrentSearches ?? 1), 2),
     );
     const searchQueries = uniqueQueries([query, ...queryVariants]).slice(0, searchQueryLimit);
 
@@ -748,6 +768,7 @@ export const googlePlacesProvider: LeadProvider = {
       maxLeadCount,
       candidateMap,
       (searchQuery) => collectNewCandidates(apiKey, searchQuery, deadlineMs, location),
+      maxConcurrentSearches,
     );
 
     if (candidateMap.size < maxLeadCount && expandedSearchQueries.length) {
@@ -757,6 +778,7 @@ export const googlePlacesProvider: LeadProvider = {
         maxLeadCount,
         candidateMap,
         (searchQuery) => collectNewCandidates(apiKey, searchQuery, deadlineMs, location),
+        maxConcurrentSearches,
       );
     }
 
@@ -767,6 +789,7 @@ export const googlePlacesProvider: LeadProvider = {
         maxLeadCount,
         candidateMap,
         (searchQuery) => collectLegacyCandidates(apiKey, searchQuery, deadlineMs),
+        maxConcurrentSearches,
       );
     }
 

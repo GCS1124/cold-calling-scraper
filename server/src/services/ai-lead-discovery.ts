@@ -68,6 +68,9 @@ const discoveryWindowMs = 24_000;
 const contactEnrichmentWindowMs = 18_000;
 const geminiListingEnrichmentWindowMs = 8_000;
 const maxGeminiListingSeeds = 40;
+const maxAiGmbCandidates = 500;
+const getAiGmbSearchQueryLimit = (requestedCount: number) =>
+  Math.min(16, Math.max(3, Math.ceil(Math.max(50, requestedCount) / 50) + 2));
 // Keep the orchestration budget at least as large as Gemini's grounded request
 // budget so the wrapper does not discard a response that the provider is still
 // allowed to finish.
@@ -92,6 +95,9 @@ const withTimeout = async <T>(promise: Promise<T>, deadlineMs: number, message: 
 
 const isTimeoutFailure = (error: unknown) =>
   error instanceof Error && /deadline|timed out|timeout/i.test(error.message);
+
+const isRateLimitFailure = (error: unknown) =>
+  error instanceof Error && /429|rate.?limit|too many requests|quota/i.test(error.message);
 
 const addWarning = (warnings: ProviderWarning[], warning: ProviderWarning) => {
   if (
@@ -212,8 +218,11 @@ const discoverGoogleBusinessListingsForAi: typeof discoverUsLeadsFromOsm = async
     request: googleRequest,
     location,
     deadlineMs,
-    maxLeadCount: Math.min(Math.max(request.count, 20), maxGeminiListingSeeds),
-    maxSearchQueries: 3,
+    maxLeadCount: Math.min(Math.max(request.count, 20), maxAiGmbCandidates),
+    maxSearchQueries: getAiGmbSearchQueryLimit(request.count),
+    // Two concurrent public query paths improve recall for larger requests
+    // without opening an unbounded request fan-out that would trigger throttling.
+    maxConcurrentSearches: request.count >= 100 ? 2 : 1,
   });
 };
 
@@ -417,23 +426,28 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
         return listingEnrichment;
       } catch (error) {
         const timedOut = isTimeoutFailure(error);
+        const rateLimited = isRateLimitFailure(error);
         geminiListingEnrichmentFailed = true;
         geminiListingEnrichmentTimedOut = timedOut;
         addWarning(warnings, {
           providerId: 'gemini-listing-enrichment',
           providerName: 'Gemini listing enrichment',
           message:
-            error instanceof Error
-              ? `${error.message} Original Google Business listing fields were preserved.`
-              : 'Gemini listing enrichment failed. Original business listing fields were preserved.',
+            rateLimited
+              ? 'Gemini free-tier quota or rate limit was reached; original Google Business listing fields and public phones were preserved.'
+              : error instanceof Error
+                ? `${error.message} Original Google Business listing fields were preserved.`
+                : 'Gemini listing enrichment failed. Original business listing fields were preserved.',
           severity: 'warning',
         });
         updateCoverage(coverage, 'gemini-listing-enrichment', {
-          status: timedOut ? 'partial' : 'failed',
+          status: timedOut || rateLimited ? 'partial' : 'failed',
           message:
-            error instanceof Error
-              ? error.message
-              : 'Gemini listing enrichment failed.',
+            rateLimited
+              ? 'Free Gemini quota or rate limit reached; original GMB company details and public phones remain available.'
+              : error instanceof Error
+                ? error.message
+                : 'Gemini listing enrichment failed.',
         });
         return emptyGeminiResearch();
       }

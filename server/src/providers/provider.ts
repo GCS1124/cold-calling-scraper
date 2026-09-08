@@ -12,6 +12,7 @@ export type LeadProviderRequest = {
   /** Internal bounded fan-out controls for callers with a tighter deadline. */
   maxLeadCount?: number;
   maxSearchQueries?: number;
+  maxConcurrentSearches?: number;
 };
 
 export type LeadProvider = {

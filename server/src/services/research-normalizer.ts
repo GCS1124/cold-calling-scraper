@@ -330,26 +330,53 @@ const insertVerificationEvent = async (
     normalizeKeyPart(valueKey),
   ].join('|').slice(0, 900);
 
-  await runner.query(
-    `
-      insert into research_verification_events (
-        search_id, entity_key, field_name, result, source_document_id, metadata, idempotency_key
-      ) values ($1, $2, $3, $4, $5, $6::jsonb, $7)
-      on conflict (search_id, idempotency_key) do update set
-        result = excluded.result,
-        source_document_id = coalesce(excluded.source_document_id, research_verification_events.source_document_id),
-        metadata = excluded.metadata
-    `,
-    [
-      job.searchId,
-      entityKey,
-      fieldName,
-      result,
-      document?.id ?? null,
-      JSON.stringify(metadata),
-      idempotencyKey,
-    ],
-  );
+  const modernInsert = `
+    insert into research_verification_events (
+      search_id, entity_key, field_name, result, source_document_id, metadata, idempotency_key
+    ) values ($1, $2, $3, $4, $5, $6::jsonb, $7)
+    on conflict (search_id, idempotency_key) do update set
+      result = excluded.result,
+      source_document_id = coalesce(excluded.source_document_id, research_verification_events.source_document_id),
+      metadata = excluded.metadata
+  `;
+  const values = [
+    job.searchId,
+    entityKey,
+    fieldName,
+    result,
+    document?.id ?? null,
+    JSON.stringify(metadata),
+    idempotencyKey,
+  ];
+
+  // Some production databases were created before the additive idempotency
+  // column migration. Keep terminal searches durable while that drift is
+  // repaired, without swallowing unrelated SQL failures.
+  await runner.query('savepoint research_verification_event_compat');
+  try {
+    await runner.query(modernInsert, values);
+    await runner.query('release savepoint research_verification_event_compat');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const errorCode = (error as { code?: unknown })?.code;
+    const missingIdempotencyColumn =
+      errorCode === '42703' && /idempotency_key/i.test(message);
+
+    await runner.query('rollback to savepoint research_verification_event_compat');
+    if (!missingIdempotencyColumn) {
+      throw error;
+    }
+
+    await runner.query(
+      `
+        insert into research_verification_events (
+          search_id, entity_key, field_name, result, source_document_id, metadata
+        ) values ($1, $2, $3, $4, $5, $6::jsonb)
+      `,
+      values.slice(0, 6),
+    );
+    await runner.query('release savepoint research_verification_event_compat');
+  }
 };
 
 const materializeLead = async (

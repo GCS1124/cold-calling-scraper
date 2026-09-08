@@ -354,6 +354,61 @@ describe('googlePlacesProvider', () => {
     ).toBe(true);
   });
 
+  it('honors a 500-result target without restoring the old 40-lead cap', async () => {
+    process.env.GOOGLE_PLACES_API_KEY = 'test-key';
+
+    const seenQueries: string[] = [];
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+
+    mockedPost.mockImplementation(async (url, body) => {
+      const endpoint = String(url);
+      if (!endpoint.includes('places.googleapis.com/v1/places:searchText')) {
+        throw new Error(`Unexpected request: ${endpoint}`);
+      }
+
+      const textQuery = String((body as { textQuery?: string } | undefined)?.textQuery ?? '');
+      seenQueries.push(textQuery);
+      const queryIndex = seenQueries.length;
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      activeRequests -= 1;
+
+      return {
+        data: {
+          places: Array.from({ length: 20 }, (_, placeIndex) => ({
+            id: `place-${queryIndex}-${placeIndex}`,
+            displayName: { text: `Austin HVAC ${queryIndex}-${placeIndex}` },
+            formattedAddress: 'Austin, TX',
+            nationalPhoneNumber: `(512) 555-${String(queryIndex * 20 + placeIndex).padStart(4, '0')}`,
+            websiteUri: `https://austin-hvac-${queryIndex}-${placeIndex}.example.com`,
+          })),
+        },
+      };
+    });
+
+    const leads = await googlePlacesProvider.fetchLeads({
+      rawQuery: 'HVAC Contractors',
+      query: 'HVAC Contractors in Austin, TX',
+      queryVariants: Array.from({ length: 24 }, (_, index) => `HVAC variant ${index + 1}`),
+      request: {
+        companyType: 'HVAC Contractors',
+        city: 'Austin, TX',
+        count: 500,
+      },
+      deadlineMs: Date.now() + 15_000,
+      maxLeadCount: 500,
+      maxSearchQueries: 25,
+      maxConcurrentSearches: 2,
+    });
+
+    expect(leads).toHaveLength(500);
+    expect(seenQueries).toHaveLength(25);
+    expect(maxActiveRequests).toBeLessThanOrEqual(2);
+    expect(leads[499]?.name).toBeTruthy();
+  });
+
   it('falls back to legacy Places only after expanded Places API (New) queries still come up short', async () => {
     process.env.GOOGLE_PLACES_API_KEY = 'test-key';
 
