@@ -104,6 +104,16 @@ fail closed instead of using that fallback when operating production traffic.
 The counter is per credential, not a substitute for customer-specific billing
 quotas or a full audit log.
 
+An optional daily request quota is available for controlled multi-tenant
+rollout. Set `LEAD_FINDER_INTEGRATION_DAILY_REQUEST_QUOTA` to a bounded
+positive integer; `0` or an absent value leaves the quota disabled. Enabled
+responses expose `X-Quota-Limit`, `X-Quota-Remaining`, and `X-Quota-Reset`, and
+exhausted credentials receive `429 INTEGRATION_QUOTA_EXCEEDED`. Apply
+`supabase/migrations/20260908200000_integration_quota_buckets.sql` and set
+`LEAD_FINDER_INTEGRATION_REQUIRE_DURABLE_QUOTA=true` before using quotas for
+production traffic. The quota is per credential and counts API requests, not
+returned leads or billing units.
+
 ## Start Request
 
 ```http
@@ -234,8 +244,9 @@ whether to retry.
 3. Apply the audit-event migration and set required audit mode for production
    traffic; keep durable rate limiting enabled. The built-in counter is a
    traffic guard, not a billing or usage ledger.
-4. Add key usage metrics, customer-specific quotas, worker callbacks, and
-   scheduled retention enforcement before production promotion.
+4. Add key usage metrics, worker callbacks, and scheduled retention enforcement
+   before production promotion; the optional per-credential daily quota is now
+   available for controlled rollout.
 5. Add a worker-backed completion callback only after durable job state and
    retry semantics are measured. Until then, poll using the advertised lifecycle
    flags; do not invent webhook delivery guarantees.

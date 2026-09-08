@@ -1,4 +1,7 @@
-import { enforceIntegrationRateLimit } from '../../server/src/http/integration-rate-limit.js';
+import {
+  enforceIntegrationQuota,
+  enforceIntegrationRateLimit,
+} from '../../server/src/http/integration-rate-limit.js';
 import {
   ensureIntegrationAuditReady,
   recordIntegrationAuditEvent,
@@ -34,6 +37,7 @@ export const requireIntegrationOwner = (handler: VercelHandler): VercelHandler =
   async (request, response) => {
     request.requireAuthenticatedOwner = true;
     if (!(await enforceIntegrationRateLimit(request, response))) return;
+    if (!(await enforceIntegrationQuota(request, response))) return;
 
     try {
       await ensureIntegrationAuditReady();
