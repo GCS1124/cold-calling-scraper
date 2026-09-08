@@ -126,6 +126,8 @@ describe('extractContactDetailsFromHtml', () => {
     const html = `
       <html><body>
         <p>Partner With Us</p>
+        <p>WHERE DEPENDABLE PARTNERSHIPS DRIVE DEALER SUCCESS</p>
+        <p>Free Estimate</p>
         <p>Call Us for a free estimate.</p>
         <p>Owner: Jordan Lee</p>
         <a href="tel:+15125550101">+1 (512) 555-0101</a>

@@ -16,7 +16,7 @@ const credentialPattern =
 const businessNamePattern =
   /\b(?:llc|l\.?t\.?d|inc\.?|incorporated|corp\.?|corporation|company|clinic|studio|group|services|solutions|systems|agency|practice|medical|health|dental|dentistry|hvac|plumbing|roofing|construction|realty|attorneys?|auto|electric|cleaning|consulting|business)\b/i;
 const nonPersonPhrasePattern =
-  /\b(?:with us|for us|contact us|call us|join us|meet (?:our|the) team|our team|our staff|about us|learn more|read more|click here|reach out)\b/i;
+  /\b(?:with us|for us|contact us|call us|join us|meet (?:our|the) team|our team|our staff|about us|learn more|read more|click here|reach out|free estimate|request (?:a|an)? quote|book (?:a|an)? appointment|schedule (?:a|an)? appointment|customer service|contact form|home services?|our mission|our values)\b/i;
 
 const normalizeWhitespace = (value: string) =>
   value
@@ -70,9 +70,13 @@ export const isLikelyPublicPersonName = (value?: string) => {
     .map((word) => word.replace(/[^\p{L}'’.-]/gu, ''))
     .filter(Boolean);
 
+  const allCapsMarketingPhrase =
+    words.length >= 3 && words.every((word) => word === word.toLocaleUpperCase());
+
   return (
     words.length >= 2 &&
     words.length <= 6 &&
+    !allCapsMarketingPhrase &&
     words.every((word) => {
       const letters = word.replace(/[.'’-]/g, '');
       return letters.length >= 2 && /\p{L}/u.test(letters);
