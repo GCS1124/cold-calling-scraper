@@ -17,10 +17,12 @@ const geminiTimeoutMs = Number.isFinite(parsedGeminiTimeoutMs)
   ? Math.min(7_000, Math.max(1_500, Math.round(parsedGeminiTimeoutMs)))
   : 5_500;
 
-const parsedLeadDiscoveryTimeoutMs = Number(process.env.GEMINI_LEAD_DISCOVERY_TIMEOUT_MS ?? 12_000);
+// Grounded search needs more time than a plain generation request, but remains
+// bounded so public LinkedIn and listing discovery can finish independently.
+const parsedLeadDiscoveryTimeoutMs = Number(process.env.GEMINI_LEAD_DISCOVERY_TIMEOUT_MS ?? 18_000);
 const geminiLeadDiscoveryTimeoutMs = Number.isFinite(parsedLeadDiscoveryTimeoutMs)
-  ? Math.min(15_000, Math.max(3_000, Math.round(parsedLeadDiscoveryTimeoutMs)))
-  : 12_000;
+  ? Math.min(20_000, Math.max(5_000, Math.round(parsedLeadDiscoveryTimeoutMs)))
+  : 18_000;
 
 const isExplicitlyDisabled = (name: string) =>
   process.env[name]?.trim().toLowerCase() === 'false';
@@ -397,7 +399,7 @@ export const discoverLeadsWithGemini = async (
         {
           parts: [
             {
-              text: `Use Google Search to find public, current US business lead candidates for this request. Search broadly across official company websites, public professional profile pages, trade associations, licensing or registry pages, news, public social links, and reputable business directories. Return JSON only with a candidates array, up to 40 records. Each record may include: name, organizationName, role, location, website, profileUrl, phone, email, sourceUrls, sourceTitles, evidence. Include only details actually visible in public search results or the cited page. Phone and email must be publicly listed business contact details, never guessed or inferred. Do not use private/authenticated profiles, Sales Navigator/Premium, paywalled pages, contact-reveal services, commercial lead databases, login sessions, or bypasses. Keep former or conflicting roles marked in evidence instead of presenting them as current. Always include sourceUrls for the pages that support the record; never fabricate a URL.\nCompany type: ${request.companyType}\nTarget location: ${locationLabel}\nResearch brief: ${request.researchBrief?.trim() || 'Find owner-led businesses and their publicly evidenced decision-makers.'}`,
+              text: `Use Google Search to find public, current US business lead candidates for this request. Search official company websites, public professional profile pages, trade associations, licensing or registry pages, news, public social links, and reputable business directories. Return JSON only with a candidates array, up to 40 concise records. Each record may include: name, organizationName, role, location, website, profileUrl, phone, email, sourceUrls, sourceTitles, evidence. Include only details visible in public search results or cited pages. Phone and email must be publicly listed business contact details, never guessed or inferred. Do not use private/authenticated profiles, Sales Navigator/Premium, paywalls, contact-reveal services, commercial lead databases, login sessions, or bypasses. Keep former or conflicting roles marked in evidence instead of presenting them as current. Always include sourceUrls for supporting pages; never fabricate a URL.\nCompany type: ${request.companyType}\nTarget location: ${locationLabel}\nResearch brief: ${request.researchBrief?.trim() || 'Find owner-led businesses and their publicly evidenced decision-makers.'}`,
             },
           ],
         },
@@ -405,7 +407,7 @@ export const discoverLeadsWithGemini = async (
       tools: [{ google_search: {} }],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 6_000,
+        maxOutputTokens: 4_000,
       },
     },
     geminiLeadDiscoveryTimeoutMs,
