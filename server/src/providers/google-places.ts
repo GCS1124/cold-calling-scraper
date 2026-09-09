@@ -4,6 +4,7 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { usStateNames, type UsStateCode } from '../data/us-states';
 import type { NormalizedUsLocation } from '../services/us-location';
 import { resolveCategoryProfile } from '../services/us-category-mapping';
+import { buildDiscoverySeeds } from '../services/discovery-seeds';
 import type { Lead } from '../types/lead';
 import type { LeadProvider, LeadProviderRequest } from './provider';
 
@@ -468,8 +469,15 @@ const collectNewCandidates = async (
 };
 
 const buildLocationTerms = (locationLabel: string, location?: NormalizedUsLocation) => {
-  if (location?.mode === 'nationwide') {
-    return ['United States'];
+  if (location?.mode === 'timezone' || location?.mode === 'nationwide') {
+    // Places cannot geocode a label such as "Eastern Time". Use concrete
+    // public city/state seeds so broad searches return real businesses.
+    return uniqueQueries([
+      ...buildDiscoverySeeds(location),
+      location.label,
+      location.stateCode,
+      locationLabel,
+    ]).slice(0, location.mode === 'timezone' ? 24 : 48);
   }
 
   const isCityStateLocal = Boolean(

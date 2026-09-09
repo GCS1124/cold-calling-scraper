@@ -37,6 +37,7 @@ import { noUsableResultsWarning } from './search-finalization';
 import { mergeLinkedInWithPublicListings } from './public-entity-matching';
 import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 import { buildDiscoveryQueryVariants } from './discovery-query-variants';
+import { buildDiscoverySeeds } from './discovery-seeds';
 import {
   buildSearchExecutionContract,
   buildSearchResponseContract,
@@ -70,8 +71,17 @@ const maxGeminiListingSeeds = 40;
 const maxAiGmbCandidates = 500;
 const getAiDiscoveryWindowMs = (requestedCount: number) =>
   requestedCount >= 100 ? 32_000 : discoveryWindowMs;
-const getAiGmbSearchQueryLimit = (requestedCount: number) =>
-  Math.min(16, Math.max(3, Math.ceil(Math.max(50, requestedCount) / 50) + 2));
+const getAiGmbSearchQueryLimit = (
+  requestedCount: number,
+  locationMode: NormalizedUsLocation['mode'],
+) =>
+  Math.min(
+    16,
+    Math.max(
+      locationMode === 'timezone' || locationMode === 'nationwide' ? 8 : 3,
+      Math.ceil(Math.max(50, requestedCount) / 50) + 2,
+    ),
+  );
 // Keep the orchestration budget at least as large as Gemini's grounded request
 // budget so the wrapper does not discard a response that the provider is still
 // allowed to finish.
@@ -191,6 +201,88 @@ const updateCoverage = (
   }
 };
 
+const uniqueSearchQueries = (values: string[]) => {
+  const seen = new Set<string>();
+
+  return values
+    .map((value) => value.trim().replace(/\s+/g, ' '))
+    .filter((value) => {
+      const key = value.toLowerCase();
+      if (!key || seen.has(key)) return false;
+
+      seen.add(key);
+      return true;
+    });
+};
+
+/**
+ * Google Places does not understand a timezone label as a geographic search
+ * area. Rotate concrete city/state seeds first so broad AI searches do not
+ * spend their entire query budget on "HVAC in Eastern Time".
+ */
+export const buildAiGmbSearchPlan = (
+  companyType: string,
+  location: NormalizedUsLocation,
+  profile: ReturnType<typeof resolveCategoryProfile>,
+) => {
+  const baselineQueries = buildDiscoveryQueryVariants(companyType, location, profile);
+  const isBroadLocation = location.mode === 'timezone' || location.mode === 'nationwide';
+
+  if (!isBroadLocation) {
+    return {
+      query: baselineQueries[0] ?? `${companyType} in ${location.label}`,
+      queryVariants: baselineQueries.slice(1),
+    };
+  }
+
+  const locationSeeds = buildDiscoverySeeds(location).slice(
+    0,
+    location.mode === 'timezone' ? 20 : 32,
+  );
+  const categoryTerms = uniqueSearchQueries([
+    companyType,
+    profile.label,
+    ...(profile.searchTerms ?? []),
+  ]).slice(0, 3);
+  const seededQueries: string[] = [];
+
+  // Interleave locations before synonyms. This gives an eight-query request
+  // real geographic coverage instead of eight variants for one city.
+  for (const categoryTerm of categoryTerms) {
+    for (const locationSeed of locationSeeds) {
+      seededQueries.push(`${categoryTerm} in ${locationSeed}`);
+    }
+  }
+
+  for (const categoryTerm of categoryTerms.slice(0, 2)) {
+    for (const locationSeed of locationSeeds) {
+      seededQueries.push(`${categoryTerm} near ${locationSeed}`);
+    }
+  }
+
+  const queries = uniqueSearchQueries([...seededQueries, ...baselineQueries]);
+
+  return {
+    query: queries[0] ?? `${companyType} in ${location.label}`,
+    queryVariants: queries.slice(1),
+  };
+};
+
+const buildGeminiLocationContext = (location: NormalizedUsLocation) => {
+  if (location.mode !== 'timezone' && location.mode !== 'nationwide') {
+    return location.label;
+  }
+
+  const seeds = buildDiscoverySeeds(location).slice(
+    0,
+    location.mode === 'timezone' ? 20 : 32,
+  );
+
+  return seeds.length
+    ? `${location.label}; search representative US locations instead of treating the label as a city: ${seeds.join(', ')}`
+    : location.label;
+};
+
 const discoverGoogleBusinessListingsForAi: typeof discoverUsLeadsFromOsm = async ({
   request,
   location,
@@ -206,24 +298,23 @@ const discoverGoogleBusinessListingsForAi: typeof discoverUsLeadsFromOsm = async
     count: request.count,
     phoneRequired: true,
   };
-  const query = `${request.companyType} in ${location.label}`;
+  const searchPlan = buildAiGmbSearchPlan(request.companyType, location, profile);
 
   return googlePlacesProvider.fetchLeads({
-    rawQuery: query,
-    query,
-    queryVariants: buildDiscoveryQueryVariants(
-      request.companyType,
-      location,
-      profile,
-    ).slice(0, 12),
+    rawQuery: `${request.companyType} in ${location.label}`,
+    query: searchPlan.query,
+    queryVariants: searchPlan.queryVariants,
     request: googleRequest,
     location,
     deadlineMs,
     maxLeadCount: Math.min(Math.max(request.count, 20), maxAiGmbCandidates),
-    maxSearchQueries: getAiGmbSearchQueryLimit(request.count),
+    maxSearchQueries: getAiGmbSearchQueryLimit(request.count, location.mode),
     // Two concurrent public query paths improve recall for larger requests
     // without opening an unbounded request fan-out that would trigger throttling.
-    maxConcurrentSearches: request.count >= 100 ? 2 : 1,
+    maxConcurrentSearches:
+      request.count >= 100 || location.mode === 'timezone' || location.mode === 'nationwide'
+        ? 2
+        : 1,
   });
 };
 
@@ -293,11 +384,12 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       deadlineMs,
       Date.now() + getAiDiscoveryWindowMs(request.count),
     );
+    const geminiLocationContext = buildGeminiLocationContext(location);
     // Gemini's candidate search does not depend on the query-lens response, so
     // start it immediately and keep it independent from LinkedIn's timeout.
     const geminiDiscoveryPromise: Promise<GeminiResearchDiscovery> = isGeminiLeadDiscoveryEnabled()
         ? withTimeout(
-          discoverGemini(request, location.label),
+          discoverGemini(request, location.label, [], geminiLocationContext),
           Math.min(discoveryDeadlineMs, Date.now() + geminiDiscoveryTimeoutMs),
           'Gemini public discovery timed out; other public sources were preserved.',
         ).catch((error): GeminiResearchDiscovery => {
@@ -420,7 +512,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
 
       try {
         const listingEnrichment = await withTimeout(
-          discoverGemini(request, location.label, listingSeeds),
+          discoverGemini(request, location.label, listingSeeds, geminiLocationContext),
           Math.min(discoveryDeadlineMs, Date.now() + geminiListingEnrichmentWindowMs),
           'Gemini listing enrichment timed out; original business listing fields were preserved.',
         );

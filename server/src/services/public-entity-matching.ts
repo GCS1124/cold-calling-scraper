@@ -60,15 +60,19 @@ const sameLocation = (person: Lead, listing: Lead) => {
 const hasStrongOrganizationMatch = (person: Lead, listing: Lead) => {
   if (['former', 'conflicting'].includes(person.employmentStatus ?? '')) return false;
   if (person.stateCode && listing.stateCode && person.stateCode !== listing.stateCode) return false;
-  if (!sameLocation(person, listing)) {
-    return false;
-  }
 
   const personDomain = toDomain(person.website);
   const listingDomain = toDomain(listing.website);
 
+  // An exact public company domain is stronger than a broad or differently
+  // formatted location string (for example, a profile in Miami matched to a
+  // timezone-scoped listing). State conflicts were rejected above.
   if (personDomain && listingDomain) {
     return personDomain === listingDomain;
+  }
+
+  if (!sameLocation(person, listing)) {
+    return false;
   }
 
   const organization = person.organizationName || extractOrganizationHint(person.headline);

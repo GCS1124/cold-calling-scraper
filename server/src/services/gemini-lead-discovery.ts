@@ -218,8 +218,14 @@ export const discoverGeminiResearch = async (
   request: SearchRequest,
   locationLabel: string,
   listingSeeds: Lead[] = [],
+  searchLocationContext = locationLabel,
 ): Promise<GeminiResearchDiscovery> => {
-  const result = await discoverLeadsWithGemini(request, locationLabel, listingSeeds);
+  const result = await discoverLeadsWithGemini(
+    request,
+    locationLabel,
+    listingSeeds,
+    searchLocationContext,
+  );
   return {
     ...result,
     leads: buildLeadsFromGeminiCandidates(result.candidates, request, locationLabel),

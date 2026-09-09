@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Lead, ResearchCandidate } from '../../types/lead';
-import { createAiLeadDiscovery } from '../ai-lead-discovery';
+import { buildAiGmbSearchPlan, createAiLeadDiscovery } from '../ai-lead-discovery';
+import { resolveCategoryProfile } from '../us-category-mapping';
 import type { NormalizedUsLocation } from '../us-location';
 
 const location: NormalizedUsLocation = {
@@ -17,6 +18,23 @@ const location: NormalizedUsLocation = {
     west: -98,
     north: 31,
     east: -97,
+  },
+  warnings: [],
+};
+
+const easternTimeLocation: NormalizedUsLocation = {
+  mode: 'timezone',
+  label: 'Eastern Time',
+  city: 'Eastern Time',
+  stateCode: '',
+  timeZoneCode: 'ET',
+  lat: 39.5,
+  lon: -78.5,
+  boundingBox: {
+    south: 24.3963,
+    west: -92,
+    north: 47.4597,
+    east: -66.9346,
   },
   warnings: [],
 };
@@ -67,6 +85,20 @@ afterEach(() => {
 });
 
 describe('free AI lead discovery', () => {
+  it('prioritizes concrete cities for a broad timezone GMB search', () => {
+    const plan = buildAiGmbSearchPlan(
+      'HVAC contractor',
+      easternTimeLocation,
+      resolveCategoryProfile('HVAC contractor'),
+    );
+
+    expect(plan.query).toMatch(/New York, NY/i);
+    expect(plan.query).not.toMatch(/Eastern Time/i);
+    expect(plan.queryVariants.slice(0, 7).some((query) => /Miami, FL|Atlanta, GA|Charlotte, NC/i.test(query))).toBe(
+      true,
+    );
+  });
+
   it('uses public LinkedIn and website sources without commercial credentials', async () => {
     const discoverLinkedin = vi.fn().mockResolvedValue({
       leads: [makeLead()],

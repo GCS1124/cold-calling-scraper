@@ -127,6 +127,40 @@ describe('contact attribution and identity', () => {
     });
   });
 
+  it('bridges an exact public company domain across broad location labels', () => {
+    const person = lead({
+      id: 'public-owner-timezone',
+      name: 'Avery Smith',
+      organizationName: 'Alpha Dental',
+      city: 'Miami',
+      stateCode: 'FL',
+      website: 'https://alpha-dental.com',
+      decisionMaker: true,
+      originalRole: 'Owner',
+      listingUrl: 'https://linkedin.com/in/avery-smith',
+      mobile: '',
+      hasPhone: false,
+      verifiedPhone: false,
+      source: 'LinkedIn',
+    });
+    const timezoneListing = lead({
+      id: 'alpha-timezone-listing',
+      city: 'Eastern Time',
+      stateCode: 'FL',
+      address: '123 Main St, Miami, FL',
+      website: 'https://www.alpha-dental.com',
+      listingUrl: 'https://www.google.com/maps/place/alpha-timezone',
+    });
+
+    const merged = bridgeLinkedInWithPublicListings([person], [timezoneListing]);
+
+    expect(merged[0]).toMatchObject({
+      decisionMakerName: 'Avery Smith',
+      mobile: '+1 512 555 0101',
+      organizationName: 'Alpha Dental',
+    });
+  });
+
   it.each(['former', 'conflicting'] as const)('does not attach an employer phone to a %s role', (employmentStatus) => {
     const person = lead({ mobile: '', hasPhone: false, listingUrl: 'https://linkedin.com/in/owner', employmentStatus });
     expect(bridgeLinkedInWithPublicListings([person], [lead()])[0]?.mobile).toBe('');

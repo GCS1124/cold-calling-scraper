@@ -2,6 +2,7 @@ import axios from 'axios';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { googlePlacesProvider } from '../google-places';
+import type { NormalizedUsLocation } from '../../services/us-location';
 
 vi.mock('axios', () => ({
   default: {
@@ -12,6 +13,23 @@ vi.mock('axios', () => ({
 
 const mockedGet = vi.mocked(axios.get);
 const mockedPost = vi.mocked(axios.post);
+
+const easternTimeLocation: NormalizedUsLocation = {
+  mode: 'timezone',
+  label: 'Eastern Time',
+  city: 'Eastern Time',
+  stateCode: '',
+  timeZoneCode: 'ET',
+  lat: 39.5,
+  lon: -78.5,
+  boundingBox: {
+    south: 24.3963,
+    west: -92,
+    north: 47.4597,
+    east: -66.9346,
+  },
+  warnings: [],
+};
 
 describe('googlePlacesProvider', () => {
   afterEach(() => {
@@ -626,5 +644,59 @@ describe('googlePlacesProvider', () => {
     expect(leads[1]?.name).toBe('Lone Star Smile');
     expect(leads[1]?.mobile).toBe('');
     expect(leads[1]?.website).toBe('');
+  });
+
+  it('uses concrete timezone seeds when the literal timezone label returns no places', async () => {
+    process.env.GOOGLE_PLACES_API_KEY = 'test-key';
+
+    const seenQueries: string[] = [];
+    mockedPost.mockImplementation(async (url, body) => {
+      const endpoint = String(url);
+      if (!endpoint.includes('places.googleapis.com/v1/places:searchText')) {
+        throw new Error(`Unexpected request: ${endpoint}`);
+      }
+
+      const textQuery = String((body as { textQuery?: string } | undefined)?.textQuery ?? '');
+      seenQueries.push(textQuery);
+
+      return {
+        data: {
+          places: /New York, NY/i.test(textQuery)
+            ? [
+                {
+                  id: 'et-hvac-1',
+                  displayName: { text: 'New York HVAC Co.' },
+                  formattedAddress: 'New York, NY',
+                  nationalPhoneNumber: '(212) 555-0101',
+                  websiteUri: 'https://new-york-hvac.example.com',
+                },
+              ]
+            : [],
+        },
+      };
+    });
+
+    const leads = await googlePlacesProvider.fetchLeads({
+      rawQuery: 'HVAC contractor in Eastern Time',
+      query: 'HVAC contractor in Eastern Time',
+      request: {
+        companyType: 'HVAC contractor',
+        city: 'Eastern Time',
+        count: 1,
+      },
+      location: easternTimeLocation,
+      deadlineMs: Date.now() + 15_000,
+      maxLeadCount: 1,
+      maxSearchQueries: 2,
+    });
+
+    expect(seenQueries.some((query) => /New York, NY/i.test(query))).toBe(true);
+    expect(seenQueries.some((query) => /Eastern Time/i.test(query))).toBe(true);
+    expect(leads).toHaveLength(1);
+    expect(leads[0]).toMatchObject({
+      name: 'New York HVAC Co.',
+      mobile: '+1 212 555 0101',
+      hasPhone: true,
+    });
   });
 });

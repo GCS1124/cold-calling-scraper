@@ -802,7 +802,9 @@ const buildQueries = (
     return [];
   }
 
-  const organization = extractOrganizationHint(headline, category);
+  const organization =
+    normalizeText(lead.organizationName).replace(/["'`]+/g, ' ') ||
+    extractOrganizationHint(headline, category);
   const locationTerms =
     location.mode === 'local'
       ? [location.label, location.city].filter(Boolean)
@@ -818,12 +820,15 @@ const buildQueries = (
   const identity = `"${name}" "${headline || category}"`;
 
   return [
+    ...(organization
+      ? [`"${organization}" "${primaryLocation}" official website phone email -site:linkedin.com`]
+      : []),
     `${identity} contact phone email -site:linkedin.com`,
     `${identity} "${primaryLocation}" phone email -site:linkedin.com`,
     organization
       ? `"${organization}" "${secondaryLocation}" official website phone email -site:linkedin.com`
       : `"${name}" "${category}" "${secondaryLocation}" official website -site:linkedin.com`,
-  ];
+  ].filter((query, index, queries) => queries.indexOf(query) === index);
 };
 
 const scoreResult = (
@@ -840,7 +845,8 @@ const scoreResult = (
   const surname = nameParts[nameParts.length - 1] ?? '';
   const headline = normalizeText(lead.headline);
   const organization = normalizeIdentityText(
-    extractOrganizationHint(headline, normalizeText(request.companyType || lead.category)),
+    lead.organizationName ||
+      extractOrganizationHint(headline, normalizeText(request.companyType || lead.category)),
   );
   const compactOrganization = organization.replace(/\s+/g, '');
   const hasOrganizationEvidence =

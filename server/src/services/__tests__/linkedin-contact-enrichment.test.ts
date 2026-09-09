@@ -465,6 +465,49 @@ AVMSmiles is a dentist in Austin, TX. Call (512) 555-0199 or email hello@avmsmil
     expect(result.leads[0]?.email).toBe('hello@avmsmiles.example');
   });
 
+  it('uses an explicit public organization name when the headline has no employer', async () => {
+    const publicOrganizationSearchBody = `Title: public website results
+
+Markdown Content:
+1. [Metro HVAC](https://metro-hvac.example/contact)
+Metro HVAC serves Austin, TX. Call (512) 555-0188.
+`;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('search.brave.com') || url.includes('bing.com')) {
+          return new Response(publicOrganizationSearchBody, {
+            status: 200,
+            headers: { 'Content-Type': 'text/plain' },
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      }) as typeof fetch,
+    );
+
+    vi.mocked(httpClient.get).mockResolvedValue({
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+      data: '<a href="tel:+15125550188">Call</a>',
+    } as never);
+
+    const explicitOrganizationLead = makeLead({ headline: 'Owner', organizationName: 'Metro HVAC' });
+    const result = await enrichLinkedinLeadsWithPublicContacts({
+      leads: [explicitOrganizationLead],
+      request: { companyType: 'HVAC contractor', city: 'Austin', count: 1 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 10_000,
+    });
+
+    const searchUrls = vi.mocked(fetch).mock.calls.map(([input]) => decodeURIComponent(String(input)));
+    expect(searchUrls.some((url) => /Metro HVAC/i.test(url))).toBe(true);
+    expect(result.leads[0]?.mobile).toBe('+1 512 555 0188');
+  });
+
   it('uses concrete metro seeds instead of a timezone label for contact lookup', async () => {
     const queries: string[] = [];
 
