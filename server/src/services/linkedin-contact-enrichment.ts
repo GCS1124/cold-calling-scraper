@@ -10,6 +10,8 @@ import {
   isPublicHttpUrl,
 } from './website-enrichment';
 import { buildDiscoverySeeds } from './discovery-seeds';
+import { readResponseTextBounded } from '../utils/bounded-fetch';
+import { isNotaryCafeHost } from '../utils/public-url';
 
 type PublicSearchResult = {
   title: string;
@@ -60,6 +62,12 @@ const searchTimeoutMs = readBoundedNumber(
   3_500,
   500,
   15_000,
+);
+const maxSearchBodyBytes = readBoundedNumber(
+  process.env.LINKEDIN_CONTACT_SEARCH_MAX_BODY_BYTES,
+  1_000_000,
+  64_000,
+  2_000_000,
 );
 const concurrency = readBoundedNumber(
   process.env.LINKEDIN_CONTACT_ENRICHMENT_CONCURRENCY,
@@ -349,6 +357,8 @@ const normalizeWebsite = (value: string) => {
 
 const isExcludedHost = (value: string) => {
   try {
+    if (isNotaryCafeHost(value)) return true;
+
     const hostname = new URL(value).hostname.toLowerCase();
     const withoutWww = hostname.replace(/^www\./, '');
 
@@ -578,7 +588,7 @@ const fetchTextWithTimeout = async (url: string, timeoutMs = searchTimeoutMs) =>
       throw new Error(`Search request failed with status ${response.status}`);
     }
 
-    return await response.text();
+    return await readResponseTextBounded(response, maxSearchBodyBytes);
   } finally {
     clearTimeout(timer);
   }
@@ -1042,6 +1052,52 @@ const attachContactProvenance = (lead: Lead, sourceUrl: string, hadContact: bool
   };
 };
 
+const isLeadShapeSafeForPublicEnrichment = (lead: Lead) => {
+  if (!lead || typeof lead !== 'object') {
+    return false;
+  }
+
+  const record = lead as unknown as Record<string, unknown>;
+  const requiredStringFields = [
+    'id',
+    'name',
+    'headline',
+    'mobile',
+    'email',
+    'website',
+    'address',
+    'category',
+    'city',
+    'source',
+    'scrapedAt',
+  ];
+
+  if (requiredStringFields.some((field) => typeof record[field] !== 'string')) {
+    return false;
+  }
+
+  const optionalStringFields = [
+    'listingUrl',
+    'contactSourceUrl',
+    'decisionMakerSourceUrl',
+    'decisionMakerName',
+    'decisionMakerRole',
+    'organizationName',
+  ];
+
+  if (
+    optionalStringFields.some(
+      (field) => record[field] !== undefined && typeof record[field] !== 'string',
+    )
+  ) {
+    return false;
+  }
+
+  return ['contactEvidence', 'evidence', 'opportunitySignals', 'publicSocialLinks'].every(
+    (field) => record[field] === undefined || Array.isArray(record[field]),
+  );
+};
+
 const enrichOneLead = async (
   lead: Lead,
   request: SearchRequest,
@@ -1050,6 +1106,19 @@ const enrichOneLead = async (
   providerHealth: Map<string, ContactProviderHealth>,
 ) => {
   const warnings: ProviderWarning[] = [];
+
+  if (!isLeadShapeSafeForPublicEnrichment(lead)) {
+    return {
+      lead,
+      warnings: [
+        buildWarning(
+          providerName,
+          'A malformed lead was preserved without public contact lookups; its original fields were preserved.',
+        ),
+      ],
+    };
+  }
+
   let enrichedLead = enrichLead(lead);
   let website = enrichedLead.website?.trim() ?? '';
 

@@ -10,6 +10,7 @@ import {
 } from '../../data/search-options';
 import { usStates } from '../../data/us-states';
 import { isSearchDraftComplete } from '../../utils/search-location';
+import { isNotaryRelatedCategory } from '../../utils/source-priority';
 import type { SearchDraft } from '../../types/lead';
 
 type SearchFormProps = {
@@ -39,6 +40,8 @@ export function SearchForm({
     : value.city.trim() && value.stateCode
       ? `${value.city.trim()}, ${value.stateCode}`
       : 'Choose a city and state';
+  const isNotarySearch = isAiMode && isNotaryRelatedCategory(value.companyType);
+  const canSearch = isSearchDraftComplete(value);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -95,7 +98,7 @@ export function SearchForm({
 
         <p className="text-xs font-normal leading-5 text-slate-500">
           {isAiMode
-            ? 'AI mode is the complete public-source workflow: Gemini plans and grounds research, public LinkedIn discovery finds people, GMB/listing sources corroborate businesses, and public websites verify contacts. No paid databases, private profiles, login sessions, or contact-reveal credits are used.'
+            ? 'AI mode is the complete public-source workflow: Gemini plans and grounds research, public LinkedIn and indexed NotaryCafe profiles find people, GMB/listing sources corroborate businesses, and public websites verify contacts. No paid databases, private profiles, login sessions, or contact-reveal credits are used.'
             : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
         </p>
 
@@ -119,33 +122,39 @@ export function SearchForm({
                 </p>
               </div>
               <span className="shrink-0 rounded-full border border-blue-300/30 bg-blue-300/10 px-3 py-1 text-[11px] font-bold text-blue-100">
-                Four public layers
+                Five public layers
               </span>
             </div>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">Public profiles</p>
+                <p className="text-sm font-bold">1 · NotaryCafe index</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  Search-indexed public profile references only
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-sm font-bold">2 · Pure public profiles</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
                   LinkedIn and professional profile signals
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">GMB corroboration</p>
+                <p className="text-sm font-bold">3 · LinkedIn + GMB fusion</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Business identity and public phone evidence
+                  Business identity and public phone corroboration
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">Gemini grounding</p>
+                <p className="text-sm font-bold">4 · Other public sources</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Multi-lens public research and named people
+                  Websites, listings, and other bounded context
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">Contact proof</p>
+                <p className="text-sm font-bold">5 · Gemini grounding</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Websites, social links, and a required public phone
+                  Multi-lens public research, never guessed details
                 </p>
               </div>
             </div>
@@ -182,6 +191,17 @@ export function SearchForm({
                 </div>
               </div>
             </div>
+
+            {isNotarySearch ? (
+              <div className="mt-3 rounded-xl border border-cyan-200/20 bg-cyan-300/10 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-200">
+                  Notary priority route active
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-200">
+                  1 NotaryCafe indexed profile evidence → 2 public LinkedIn → 3 LinkedIn + Google Business fusion. Direct NotaryCafe access stays disabled; only public-index evidence with a phone can qualify.
+                </p>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </fieldset>
@@ -433,7 +453,8 @@ export function SearchForm({
 
       <button
         className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400 md:col-span-2"
-        disabled={loading || !isSearchDraftComplete(value)}
+        aria-describedby="search-submit-help"
+        disabled={loading || !canSearch}
         type="submit"
       >
         {loading ? (
@@ -448,6 +469,11 @@ export function SearchForm({
           </>
         )}
       </button>
+      <p id="search-submit-help" className="text-center text-xs font-normal leading-5 text-slate-500 md:col-span-2">
+        {canSearch
+          ? 'Ready · public-phone eligibility is enforced automatically.'
+          : 'Add a company type and choose a US time zone or city/state to start.'}
+      </p>
     </form>
   );
 }

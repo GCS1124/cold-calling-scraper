@@ -149,6 +149,225 @@ describe('free AI lead discovery', () => {
     );
   });
 
+  it('merges indexed NotaryCafe phone leads into the same public evidence pipeline', async () => {
+    const notaryProfileUrl = 'https://notarycafe.com/Eric.Kaufmann';
+    const notaryLead = makeLead({
+      id: 'notarycafe-eric-kaufmann',
+      name: 'Eric Kaufmann',
+      headline: undefined,
+      organizationName: 'Colorado Notary & Signing Agent',
+      city: 'Austin',
+      stateCode: 'TX',
+      source: 'NotaryCafe, Indexed Public Search',
+      listingUrl: notaryProfileUrl,
+      contactSourceUrl: notaryProfileUrl,
+      mobile: '+13034084062',
+      contactEvidence: [{
+        field: 'phone',
+        value: '+13034084062',
+        sourceUrl: notaryProfileUrl,
+        sourceName: 'NotaryCafe, Indexed Public Search',
+        sourceKind: 'public_snippet',
+        association: 'business',
+      }],
+      hasPhone: false,
+      verifiedPhone: false,
+    });
+
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({
+        leads: [],
+        warnings: [],
+        blocked: false,
+      }) as never,
+      discoverNotaryCafe: vi.fn().mockResolvedValue({
+        leads: [notaryLead],
+        warnings: [],
+        coverage: { queriesAttempted: 1, providersChecked: 1, acceptedCandidates: 1 },
+      }) as never,
+      enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
+        leads,
+        warnings: [],
+        enrichedCount: 0,
+      })) as never,
+    })({
+      request: { companyType: 'Notary Public', city: 'Austin, TX', count: 50 },
+      location,
+    });
+
+    expect(result.leads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Eric Kaufmann',
+          source: 'NotaryCafe, Indexed Public Search',
+          hasPhone: true,
+          verifiedPhone: true,
+        }),
+      ]),
+    );
+    expect(result.coverage).toContainEqual(
+      expect.objectContaining({
+        providerId: 'notarycafe-indexed-search',
+        status: 'returned',
+        leadCount: 1,
+      }),
+    );
+  });
+
+  it('does not mix NotaryCafe profiles into unrelated categories', async () => {
+    const discoverNotaryCafe = vi.fn();
+
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({
+        leads: [],
+        warnings: [],
+        blocked: false,
+      }) as never,
+      discoverNotaryCafe: discoverNotaryCafe as never,
+    })({
+      request: { companyType: 'HVAC contractor', city: 'Austin, TX', count: 50 },
+      location,
+    });
+
+    expect(discoverNotaryCafe).not.toHaveBeenCalled();
+    expect(result.leads).toEqual([]);
+    expect(result.coverage).toContainEqual(
+      expect.objectContaining({
+        providerId: 'notarycafe-indexed-search',
+        leadCount: 0,
+        message: expect.stringContaining('skipped'),
+      }),
+    );
+  });
+
+  it('prioritizes NotaryCafe evidence before LinkedIn and GMB plus LinkedIn fusion', async () => {
+    const notaryCafe = makeLead({
+      id: 'notarycafe-priority',
+      name: 'NotaryCafe Priority',
+      category: 'Notary Public',
+      source: 'NotaryCafe, Indexed Public Search',
+      listingUrl: 'https://notarycafe.com/NotaryCafe.Priority',
+      contactSourceUrl: 'https://notarycafe.com/NotaryCafe.Priority',
+      website: '',
+      mobile: '+1 512 555 0101',
+      hasPhone: true,
+      verifiedPhone: true,
+      confidence: 55,
+      sourceScore: 55,
+      contactEvidence: [{
+        field: 'phone',
+        value: '+1 512 555 0101',
+        sourceUrl: 'https://notarycafe.com/NotaryCafe.Priority',
+        sourceName: 'NotaryCafe, Indexed Public Search',
+        sourceKind: 'public_snippet',
+        association: 'business',
+      }],
+    });
+    const linkedIn = makeLead({
+      id: 'linkedin-priority',
+      name: 'LinkedIn Priority',
+      category: 'Notary Public',
+      source: 'LinkedIn, Public Profile',
+      listingUrl: 'https://linkedin.com/in/linkedin-priority',
+      mobile: '+1 512 555 0102',
+      hasPhone: true,
+      verifiedPhone: true,
+      confidence: 75,
+      contactEvidence: [{
+        field: 'phone',
+        value: '+1 512 555 0102',
+        sourceUrl: 'https://linkedin.com/in/linkedin-priority',
+        sourceName: 'LinkedIn, Public Profile',
+        sourceKind: 'public_snippet',
+        association: 'person',
+      }],
+    });
+    const fused = makeLead({
+      id: 'gmb-linkedin-priority',
+      name: 'GMB LinkedIn Priority',
+      category: 'Notary Public',
+      source: 'LinkedIn, Public Profile, Google Places',
+      listingUrl: 'https://linkedin.com/in/gmb-linkedin-priority',
+      contactSourceUrl: 'https://www.google.com/maps/place/gmb-linkedin-priority',
+      mobile: '+1 512 555 0103',
+      hasPhone: true,
+      verifiedPhone: true,
+      confidence: 95,
+      contactEvidence: [{
+        field: 'phone',
+        value: '+1 512 555 0103',
+        sourceUrl: 'https://www.google.com/maps/place/gmb-linkedin-priority',
+        sourceName: 'Google Places',
+        sourceKind: 'business_listing',
+        association: 'business',
+      }],
+    });
+
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({
+        leads: [linkedIn, fused],
+        warnings: [],
+        blocked: false,
+      }) as never,
+      discoverNotaryCafe: vi.fn().mockResolvedValue({
+        leads: [notaryCafe],
+        warnings: [],
+        coverage: { queriesAttempted: 1, providersChecked: 1, acceptedCandidates: 1 },
+      }) as never,
+      enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
+        leads,
+        warnings: [],
+        enrichedCount: 0,
+      })) as never,
+    })({
+      request: { companyType: 'Notary Public', city: 'Austin, TX', count: 50 },
+      location,
+    });
+
+    expect(result.leads.slice(0, 3).map((lead) => lead.id)).toEqual([
+      'notarycafe-priority',
+      'linkedin-priority',
+      'gmb-linkedin-priority',
+    ]);
+  });
+
+  it('location-checks every provider before a result enters the fusion pool', async () => {
+    const outOfAreaListing = makeLead({
+      id: 'houston-listing',
+      city: 'Houston',
+      stateCode: 'TX',
+      address: 'Houston, TX',
+      listingUrl: 'https://www.google.com/maps/place/houston-listing',
+      mobile: '+1 713 555 0101',
+      hasPhone: true,
+      verifiedPhone: true,
+      contactEvidence: [{
+        field: 'phone',
+        value: '+1 713 555 0101',
+        sourceUrl: 'https://www.google.com/maps/place/houston-listing',
+        sourceName: 'Google Business',
+        sourceKind: 'business_listing',
+        association: 'business',
+      }],
+    });
+
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({ leads: [], warnings: [], blocked: false }) as never,
+      discoverPublicListings: vi.fn().mockResolvedValue([outOfAreaListing]) as never,
+    })({
+      request: { companyType: 'HVAC contractor', city: 'Austin, TX', count: 50 },
+      location,
+    });
+
+    expect(result.leads).toEqual([]);
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({
+        providerId: 'location-acceptance',
+        message: expect.stringContaining('out-of-area'),
+      }),
+    );
+  });
+
   it('keeps public results when website enrichment is unavailable', async () => {
     const publicLead = makeLead();
     const discovery = createAiLeadDiscovery({
@@ -197,6 +416,11 @@ describe('free AI lead discovery', () => {
     const result = await createAiLeadDiscovery({
       discoverLinkedin: discoverLinkedin as never,
       expandQuery: expandQuery as never,
+      discoverGemini: vi.fn().mockResolvedValue({
+        candidates: [],
+        groundingSources: [],
+        leads: [],
+      }) as never,
     })({
       request: { companyType: 'HVAC contractor', city: 'Austin, TX', count: 50 },
       location,
@@ -217,6 +441,128 @@ describe('free AI lead discovery', () => {
       status: 'returned',
       leadCount: 0,
     });
+  });
+
+  it('runs the deterministic LinkedIn baseline before Gemini and uses one bounded assisted fallback', async () => {
+    process.env.GEMINI_API_KEY = 'user-supplied-test-key';
+    process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = 'true';
+    process.env.GEMINI_LEAD_DISCOVERY_ENABLED = 'false';
+
+    let baselineStarted = false;
+    const discoverLinkedin = vi.fn().mockImplementation(async ({ queryHints }: { queryHints: string[] }) => {
+      if (!queryHints.length) {
+        baselineStarted = true;
+        return { leads: [], warnings: [], blocked: false };
+      }
+
+      return {
+        leads: [makeLead({
+          id: 'assisted-linkedin-lead',
+          mobile: '+1 512 555 0188',
+          hasPhone: true,
+          verifiedPhone: true,
+        })],
+        warnings: [],
+        blocked: false,
+      };
+    });
+    const expandQuery = vi.fn().mockImplementation(async () => {
+      expect(baselineStarted).toBe(true);
+      return 'HVAC service business owner Austin';
+    });
+
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: discoverLinkedin as never,
+      expandQuery: expandQuery as never,
+      enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
+        leads,
+        warnings: [],
+        enrichedCount: 0,
+      })) as never,
+    })({
+      request: { companyType: 'HVAC contractor', city: 'Austin, TX', count: 50 },
+      location,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(discoverLinkedin).toHaveBeenCalledTimes(2);
+    expect(discoverLinkedin).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ queryHints: [] }),
+    );
+    expect(discoverLinkedin).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        queryHints: ['HVAC service business owner Austin'],
+        request: expect.objectContaining({ researchDepth: 'quick' }),
+      }),
+    );
+    expect(result.leads).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'assisted-linkedin-lead', mobile: '+1 512 555 0188' }),
+    ]));
+    expect(result.coverage).toContainEqual(
+      expect.objectContaining({
+        providerId: 'linkedin-public-search',
+        leadCount: 1,
+        message: expect.stringContaining('bounded Gemini-assisted'),
+      }),
+    );
+  });
+
+  it('labels Gemini quota pressure without interrupting deterministic public expansion', async () => {
+    process.env.GEMINI_API_KEY = 'user-supplied-test-key';
+    process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = 'true';
+    process.env.GEMINI_LEAD_DISCOVERY_ENABLED = 'false';
+
+    const discoverLinkedin = vi.fn().mockResolvedValue({
+      leads: [],
+      warnings: [],
+      blocked: false,
+      coverage: {
+        queriesAttempted: 8,
+        providersChecked: 3,
+        providersPaused: 0,
+        acceptedCandidates: 0,
+        queryFamilies: ['role-led'],
+        queryFamilyCounts: { 'role-led': 8 },
+      },
+    });
+    const expandQuery = vi.fn().mockRejectedValue(
+      new Error('Request failed with status code 429'),
+    );
+
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: discoverLinkedin as never,
+      expandQuery: expandQuery as never,
+    })({
+      request: {
+        companyType: 'HVAC contractor',
+        city: 'Austin, TX',
+        count: 50,
+        researchBrief: 'owner-led service businesses',
+      },
+      location,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(result.aiAssistance).toBe('rate_limited');
+    expect(discoverLinkedin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryHints: ['owner-led service businesses'],
+      }),
+    );
+    expect(result.coverage.find((entry) => entry.providerId === 'gemini-query-assistance')).toMatchObject({
+      status: 'partial',
+      message: expect.stringContaining('free-tier quota'),
+    });
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerId: 'gemini-query-assistance',
+          message: expect.stringContaining('deterministic public expansion continued'),
+        }),
+      ]),
+    );
   });
 
   it('does not add unverified profiles when public search is blocked', async () => {
@@ -358,8 +704,8 @@ describe('free AI lead discovery', () => {
       location,
     });
 
-    expect(discoverGemini).toHaveBeenCalledTimes(2);
-    expect(discoverGemini.mock.calls[1]?.[2]).toEqual([gmbLead]);
+    expect(discoverGemini).toHaveBeenCalledTimes(1);
+    expect(discoverGemini.mock.calls[0]?.[2]).toEqual([gmbLead]);
     expect(result.researchCandidates).toEqual([candidate]);
     expect(result.coverage).toContainEqual(
       expect.objectContaining({

@@ -1,12 +1,22 @@
 import type { Lead, PublicSocialLink } from '../types/lead';
 import { enrichLead } from './lead-validation';
 import { collectContactEvidence, getContactEvidence, mergeContactEvidence } from './contact-evidence';
+import { isPublicHttpUrl } from '../utils/public-url';
 
 const companySuffixPattern =
   /\b(private limited|pvt ltd|pvt\. ltd\.?|limited|ltd\.?|llc|inc\.?|incorporated|corp\.?|corporation|company|co\.?)\b/gi;
 
-const normalizeText = (value?: string) =>
-  (value ?? '')
+const asString = (value: unknown) => (typeof value === 'string' ? value : '');
+
+const toPublicUrl = (value: unknown) => {
+  const candidate = asString(value).trim();
+  if (!candidate) return '';
+  const withProtocol = /^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`;
+  return isPublicHttpUrl(withProtocol) ? withProtocol : '';
+};
+
+const normalizeText = (value?: unknown) =>
+  asString(value)
     .toLowerCase()
     .replace(companySuffixPattern, ' ')
     .replace(/&/g, ' and ')
@@ -14,11 +24,12 @@ const normalizeText = (value?: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const toDomain = (value?: string) => {
-  if (!value?.trim()) return '';
+const toDomain = (value?: unknown) => {
+  const candidate = toPublicUrl(value);
+  if (!candidate) return '';
 
   try {
-    return new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`).hostname
+    return new URL(/^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`).hostname
       .replace(/^www\./i, '')
       .toLowerCase();
   } catch {
@@ -26,16 +37,22 @@ const toDomain = (value?: string) => {
   }
 };
 
-const isLinkedInProfileListing = (value?: string) =>
-  /(?:^|\/\/)(?:www\.)?linkedin\.com\/(?:in|pub)\//i.test(value ?? '');
+const isLinkedInProfileListing = (value?: unknown) => {
+  const candidate = toPublicUrl(value);
+  return Boolean(
+    candidate &&
+      isPublicHttpUrl(candidate) &&
+      /(?:^|\/\/)(?:www\.)?linkedin\.com\/(?:in|pub)\//i.test(candidate),
+  );
+};
 
-const toTokens = (value?: string) =>
+const toTokens = (value?: unknown) =>
   normalizeText(value)
     .split(' ')
     .filter((token) => token.length >= 3);
 
-export const extractOrganizationHint = (headline?: string) => {
-  const normalized = (headline ?? '').replace(/\s+/g, ' ').trim();
+export const extractOrganizationHint = (headline?: unknown) => {
+  const normalized = asString(headline).replace(/\s+/g, ' ').trim();
   const match = normalized.match(
     /\b(?:at|@|with|for|of|owner of|founder of|principal of)\s+(.+?)(?:\s*[|•·].*)?$/i,
   );
@@ -95,10 +112,28 @@ const hasStrongOrganizationMatch = (person: Lead, listing: Lead) => {
 
 const mergeSocialLinks = (person: Lead, listing: Lead): PublicSocialLink[] => {
   const links = new Map<string, PublicSocialLink>();
+  const supportedPlatforms = new Set<PublicSocialLink['platform']>([
+    'Facebook', 'Instagram', 'LinkedIn', 'X', 'TikTok', 'YouTube',
+    'Google Business', 'Yelp', 'Other',
+  ]);
 
-  for (const link of [...(person.publicSocialLinks ?? []), ...(listing.publicSocialLinks ?? [])]) {
-    if (link.url.trim() && !links.has(link.url.trim())) {
-      links.set(link.url.trim(), { ...link, url: link.url.trim() });
+  const candidates = [
+    ...(Array.isArray(person.publicSocialLinks) ? person.publicSocialLinks : []),
+    ...(Array.isArray(listing.publicSocialLinks) ? listing.publicSocialLinks : []),
+  ];
+
+  for (const link of candidates) {
+    if (!link || typeof link !== 'object' || typeof link.url !== 'string') continue;
+    const url = link.url.trim();
+    if (url && isPublicHttpUrl(url) && !links.has(url)) {
+      const platform = typeof link.platform === 'string' &&
+        supportedPlatforms.has(link.platform as PublicSocialLink['platform'])
+        ? link.platform as PublicSocialLink['platform']
+        : 'Other';
+      links.set(url, {
+        platform,
+        url,
+      });
     }
   }
 
@@ -106,68 +141,102 @@ const mergeSocialLinks = (person: Lead, listing: Lead): PublicSocialLink[] => {
 };
 
 const mergePersonWithListing = (person: Lead, listing: Lead) => {
-  const decisionMakerName = person.decisionMakerName || (
-    person.name &&
-    normalizeText(person.name) !== normalizeText(listing.name) &&
-    (person.organizationName || isLinkedInProfileListing(person.listingUrl))
-      ? person.name
+  const personName = asString(person.name);
+  const listingName = asString(listing.name);
+  const personOrganizationName = asString(person.organizationName);
+  const decisionMakerName = asString(person.decisionMakerName) || (
+    personName &&
+    normalizeText(personName) !== normalizeText(listingName) &&
+    (personOrganizationName || isLinkedInProfileListing(person.listingUrl))
+      ? personName
       : undefined
   );
+  const personPhoneEvidence = getContactEvidence(person, 'phone');
+  const listingPhoneEvidence = getContactEvidence(listing, 'phone');
+  const personEvidence = Array.isArray(person.evidence) ? person.evidence : [];
+  const listingEvidence = Array.isArray(listing.evidence) ? listing.evidence : [];
 
-  return enrichLead({
+  const merged = {
     ...person,
-    organizationName: listing.name,
+    name: personName,
+    headline: asString(person.headline),
+    category: asString(person.category),
+    city: asString(person.city),
+    scrapedAt: asString(person.scrapedAt),
+    organizationName: listingName,
     ...(decisionMakerName ? { decisionMakerName } : {}),
-    ...(decisionMakerName && (person.decisionMakerRole || person.originalRole || person.headline)
-      ? { decisionMakerRole: person.decisionMakerRole || person.originalRole || person.headline }
+    ...(decisionMakerName && (asString(person.decisionMakerRole) || asString(person.originalRole) || asString(person.headline))
+      ? { decisionMakerRole: asString(person.decisionMakerRole) || asString(person.originalRole) || asString(person.headline) }
       : {}),
-    ...(decisionMakerName && (person.decisionMakerSourceUrl || person.listingUrl)
-      ? { decisionMakerSourceUrl: person.decisionMakerSourceUrl || person.listingUrl }
+    ...(decisionMakerName && (asString(person.decisionMakerSourceUrl) || asString(person.listingUrl))
+      ? { decisionMakerSourceUrl: asString(person.decisionMakerSourceUrl) || asString(person.listingUrl) }
       : {}),
-    originalRole: person.originalRole || person.headline,
-    mobile: getContactEvidence(person, 'phone').length ? person.mobile : listing.mobile,
-    email: person.email || listing.email,
-    website: person.website || listing.website,
+    originalRole: asString(person.originalRole) || asString(person.headline),
+    mobile: personPhoneEvidence.length ? asString(person.mobile) : asString(listing.mobile),
+    email: asString(person.email) || asString(listing.email),
+    website: asString(person.website) || asString(listing.website),
     contactSourceUrl:
-      (getContactEvidence(person, 'phone').length ? getContactEvidence(person, 'phone')
-        : getContactEvidence(listing, 'phone'))[0]?.sourceUrl,
+      (personPhoneEvidence.length ? personPhoneEvidence : listingPhoneEvidence)[0]?.sourceUrl,
     contactEvidence: mergeContactEvidence([
       ...collectContactEvidence(person),
       ...collectContactEvidence(listing).map((item) => ({ ...item, association: 'business' as const })),
     ]),
     publicSocialLinks: mergeSocialLinks(person, listing),
-    address: person.address || listing.address,
-    state: person.state || listing.state,
-    stateCode: person.stateCode || listing.stateCode,
-    postalCode: person.postalCode || listing.postalCode,
-    zip: person.zip || listing.zip,
-    source: [person.source, listing.source].filter(Boolean).join(', '),
-    confidence: Math.max(person.confidence, listing.confidence),
+    address: asString(person.address) || asString(listing.address),
+    state: asString(person.state) || asString(listing.state),
+    stateCode: asString(person.stateCode) || asString(listing.stateCode),
+    postalCode: asString(person.postalCode) || asString(listing.postalCode),
+    zip: asString(person.zip) || asString(listing.zip),
+    source: [asString(person.source), asString(listing.source)].filter(Boolean).join(', '),
+    confidence: Math.max(
+      typeof person.confidence === 'number' && Number.isFinite(person.confidence) ? person.confidence : 0,
+      typeof listing.confidence === 'number' && Number.isFinite(listing.confidence) ? listing.confidence : 0,
+    ),
     evidence: [
-      ...(person.evidence ?? []),
-      ...(listing.evidence ?? []),
+      ...personEvidence,
+      ...listingEvidence,
       ...(listing.listingUrl
         ? [
             {
-              sourceUrl: listing.listingUrl,
-              sourceName: listing.source || 'Public business listing',
-              claim: `Public business listing corroborates ${person.name}'s organization and contact route.`,
+              sourceUrl: asString(listing.listingUrl),
+              sourceName: asString(listing.source) || 'Public business listing',
+              claim: `Public business listing corroborates ${personName}'s organization and contact route.`,
               status: 'corroborated' as const,
               observedAt: listing.scrapedAt,
             },
           ]
         : []),
     ],
-  });
+  };
+
+  try {
+    return enrichLead(merged);
+  } catch {
+    // A provider or persisted payload can be structurally malformed even when
+    // its required identity fields look valid. Preserve the person record,
+    // but never let one bad bridge candidate break the entire search.
+    return merged;
+  }
 };
 
 const matchLinkedInPeopleToPublicListings = (
   linkedinLeads: Lead[],
   publicListingLeads: Lead[],
 ) => {
+  const isLeadRecord = (value: unknown): value is Lead => Boolean(
+    value &&
+      typeof value === 'object' &&
+      typeof (value as Lead).name === 'string' &&
+      typeof (value as Lead).id === 'string' &&
+      typeof (value as Lead).category === 'string' &&
+      typeof (value as Lead).city === 'string' &&
+      typeof (value as Lead).source === 'string',
+  );
+  const safeLinkedInLeads = (Array.isArray(linkedinLeads) ? linkedinLeads : []).filter(isLeadRecord);
+  const safePublicListingLeads = (Array.isArray(publicListingLeads) ? publicListingLeads : []).filter(isLeadRecord);
   const usedListingIds = new Set<string>();
-  const mergedPeople = linkedinLeads.map((person) => {
-    const matches = publicListingLeads.filter(
+  const mergedPeople = safeLinkedInLeads.map((person) => {
+    const matches = safePublicListingLeads.filter(
       (listing) => hasStrongOrganizationMatch(person, listing),
     );
 
@@ -182,7 +251,7 @@ const matchLinkedInPeopleToPublicListings = (
     return mergePersonWithListing(person, listing);
   });
 
-  return { mergedPeople, usedListingIds };
+  return { mergedPeople, usedListingIds, safePublicListingLeads };
 };
 
 /**
@@ -199,13 +268,13 @@ export const mergeLinkedInWithPublicListings = (
   linkedinLeads: Lead[],
   publicListingLeads: Lead[],
 ) => {
-  const { mergedPeople, usedListingIds } = matchLinkedInPeopleToPublicListings(
+  const { mergedPeople, usedListingIds, safePublicListingLeads } = matchLinkedInPeopleToPublicListings(
     linkedinLeads,
     publicListingLeads,
   );
 
   return [
     ...mergedPeople,
-    ...publicListingLeads.filter((listing) => !usedListingIds.has(listing.id)),
+    ...safePublicListingLeads.filter((listing) => !usedListingIds.has(listing.id)),
   ];
 };

@@ -252,7 +252,7 @@ export type SearchResponse = {
       publicQueryFamilies?: string[];
       publicQueryFamilyCounts?: Record<string, number>;
       providerCoverage?: ProviderCoverage[];
-      aiAssistance?: 'enabled' | 'disabled' | 'failed';
+      aiAssistance?: 'enabled' | 'disabled' | 'failed' | 'rate_limited';
       totalCandidates: number;
       requestedCount: number;
       foundCount: number;

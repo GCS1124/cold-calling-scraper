@@ -4,6 +4,7 @@ import type { Lead } from '../types/lead';
 import { attachLeadResearchSignals } from './lead-research-signals';
 import { collectContactEvidence } from './contact-evidence';
 import { withLeadQuality } from './lead-quality';
+import { isNotaryCafeHost, isPublicHttpUrl } from '../utils/public-url';
 
 export type LeadQualityLevel = 'excellent' | 'good' | 'fair' | 'weak' | 'rejected';
 
@@ -46,13 +47,51 @@ const badEmailPrefixes = new Set([
   'name',
 ]);
 
+const publicSocialPlatforms = new Set([
+  'Facebook',
+  'Instagram',
+  'LinkedIn',
+  'X',
+  'TikTok',
+  'YouTube',
+  'Google Business',
+  'Yelp',
+  'Other',
+]);
+
+const evidenceStatuses = new Set([
+  'confirmed',
+  'corroborated',
+  'inferred',
+  'stale',
+  'conflicting',
+  'rejected',
+  'unknown',
+]);
+
+const evidenceSourceFamilies = new Set([
+  'official_business',
+  'government_or_licensing',
+  'trade_association',
+  'news',
+  'business_listing',
+  'professional_profile',
+  'public_website',
+  'social',
+  'directory',
+  'search_engine',
+  'unknown',
+]);
+
+const evidenceAuthorityTiers = new Set(['A', 'B', 'C', 'D']);
+
 const blockedRejectionReasons = new Set([
   'blocked_website',
   'blocked_google',
 ]);
 
 const normalizeEmail = (value?: string) => {
-  const trimmed = value?.trim().toLowerCase() ?? '';
+  const trimmed = typeof value === 'string' ? value.trim().toLowerCase() : '';
 
   if (!trimmed) {
     return '';
@@ -118,7 +157,7 @@ const isLikelyBusinessEmail = (value: string) => {
 };
 
 const normalizeWebsite = (value?: string) => {
-  const trimmed = value?.trim() ?? '';
+  const trimmed = typeof value === 'string' ? value.trim() : '';
 
   if (!trimmed) {
     return '';
@@ -139,6 +178,10 @@ const normalizeWebsite = (value?: string) => {
       return '';
     }
 
+    if (url.username || url.password) {
+      return '';
+    }
+
     url.hash = '';
     const pathname =
       url.pathname !== '/' && url.pathname.endsWith('/')
@@ -154,7 +197,7 @@ const normalizeWebsite = (value?: string) => {
 };
 
 const isLinkedInProfileListing = (value?: string) => {
-  if (!value?.trim()) {
+  if (typeof value !== 'string' || !value.trim()) {
     return false;
   }
 
@@ -172,7 +215,7 @@ const isLinkedInProfileListing = (value?: string) => {
 };
 
 const normalizeUsPhone = (value?: string) => {
-  const trimmed = value?.trim() ?? '';
+  const trimmed = typeof value === 'string' ? value.trim() : '';
 
   if (!trimmed) {
     return '';
@@ -196,7 +239,7 @@ const isValidUsPhone = (value?: string) => {
 const normalizeSource = (source?: string) => {
   return [
     ...new Set(
-      (source ?? '')
+      (typeof source === 'string' ? source : '')
         .split(',')
         .map((part) => part.trim())
         .filter(Boolean),
@@ -213,13 +256,13 @@ const hasSource = (lead: Lead, sourceName: string) => {
 };
 
 const hasUsefulAddress = (address?: string) => {
-  const trimmed = address?.trim() ?? '';
+  const trimmed = typeof address === 'string' ? address.trim() : '';
 
   return trimmed.length >= 8;
 };
 
 const getSourceScore = (lead: Lead) => {
-  if (typeof lead.sourceScore === 'number') {
+  if (typeof lead.sourceScore === 'number' && Number.isFinite(lead.sourceScore)) {
     return lead.sourceScore;
   }
 
@@ -320,11 +363,11 @@ const getRejectionReason = ({
     return 'missing_contact';
   }
 
-  if (lead.mobile?.trim() && !hasPhone) {
+  if (typeof lead.mobile === 'string' && lead.mobile.trim() && !hasPhone) {
     return 'invalid_phone';
   }
 
-  if (lead.email?.trim() && !hasEmail) {
+  if (typeof lead.email === 'string' && lead.email.trim() && !hasEmail) {
     return 'invalid_email';
   }
 
@@ -336,7 +379,7 @@ const getRejectionReason = ({
     return undefined;
   }
 
-  if (lead.email?.trim() && !verifiedEmail) {
+  if (typeof lead.email === 'string' && lead.email.trim() && !verifiedEmail) {
     return 'missing_email';
   }
 
@@ -346,21 +389,83 @@ const getRejectionReason = ({
 export const enrichLead = (lead: Lead): Lead => {
   const email = normalizeEmail(lead.email);
   const mobile = normalizeUsPhone(lead.mobile);
-  const website = normalizeWebsite(lead.website);
+  const normalizedWebsite = normalizeWebsite(lead.website);
+  const website = isPublicHttpUrl(normalizedWebsite) ? normalizedWebsite : '';
+  const normalizedListingUrl = normalizeWebsite(lead.listingUrl);
+  const listingUrl = isPublicHttpUrl(normalizedListingUrl) ? normalizedListingUrl : '';
+  const normalizedContactSourceUrl = normalizeWebsite(lead.contactSourceUrl);
+  const contactSourceUrl = isPublicHttpUrl(normalizedContactSourceUrl)
+    ? normalizedContactSourceUrl
+    : undefined;
+  const normalizedDecisionMakerSourceUrl = normalizeWebsite(lead.decisionMakerSourceUrl);
+  const decisionMakerSourceUrl = isPublicHttpUrl(normalizedDecisionMakerSourceUrl)
+    ? normalizedDecisionMakerSourceUrl
+    : undefined;
   const source = normalizeSource(lead.source);
+
+  const publicSocialLinks = Array.isArray(lead.publicSocialLinks)
+    ? lead.publicSocialLinks
+        .flatMap((link) => {
+          if (!link || typeof link !== 'object' || typeof link.url !== 'string') return [];
+          const normalized = normalizeWebsite(link.url);
+          if (!isPublicHttpUrl(normalized)) return [];
+          const platform = typeof link.platform === 'string' && publicSocialPlatforms.has(link.platform)
+            ? link.platform
+            : 'Other';
+          return [{ platform, url: normalized }];
+        })
+        .slice(0, 20)
+    : undefined;
+  const evidence = Array.isArray(lead.evidence)
+    ? lead.evidence.flatMap((item) => {
+        if (!item || typeof item !== 'object' || typeof item.sourceUrl !== 'string') return [];
+        const sourceUrl = normalizeWebsite(item.sourceUrl);
+        if (!isPublicHttpUrl(sourceUrl)) return [];
+        const sourceName = typeof item.sourceName === 'string' ? item.sourceName.trim() : '';
+        const claim = typeof item.claim === 'string' ? item.claim.trim().slice(0, 2_000) : '';
+        if (!sourceName || !claim) return [];
+        const status = typeof item.status === 'string' && evidenceStatuses.has(item.status)
+          ? item.status
+          : 'unknown';
+        const sourceFamily = typeof item.sourceFamily === 'string' && evidenceSourceFamilies.has(item.sourceFamily)
+          ? item.sourceFamily
+          : undefined;
+        const authorityTier = typeof item.authorityTier === 'string' && evidenceAuthorityTiers.has(item.authorityTier)
+          ? item.authorityTier
+          : undefined;
+        return [{
+          sourceUrl,
+          sourceName,
+          ...(sourceFamily ? { sourceFamily } : {}),
+          ...(authorityTier ? { authorityTier } : {}),
+          claim,
+          status,
+          ...(typeof item.observedAt === 'string'
+            ? { observedAt: item.observedAt.trim().slice(0, 80) }
+            : {}),
+        }];
+      })
+        .slice(0, 30)
+    : undefined;
 
   const hasEmail = isValidEmail(email);
   const verifiedEmail = isLikelyBusinessEmail(email);
 
   const hasPhone = isValidUsPhone(mobile);
   const hasWebsite = Boolean(
-    website || (lead.listingUrl?.trim() && !isLinkedInProfileListing(lead.listingUrl)),
+    (website && !isNotaryCafeHost(website)) ||
+      (listingUrl &&
+        !isLinkedInProfileListing(listingUrl) &&
+        !isNotaryCafeHost(listingUrl)),
   );
 
   const sourceScore = getSourceScore({
     ...lead,
     source,
   });
+  const confidence = typeof lead.confidence === 'number' && Number.isFinite(lead.confidence)
+    ? lead.confidence
+    : 0;
 
   const rejectionReason = getRejectionReason({
     lead,
@@ -375,6 +480,11 @@ export const enrichLead = (lead: Lead): Lead => {
     email: hasEmail ? email : '',
     mobile,
     website,
+    listingUrl: listingUrl || undefined,
+    contactSourceUrl,
+    decisionMakerSourceUrl,
+    ...(publicSocialLinks?.length ? { publicSocialLinks } : { publicSocialLinks: undefined }),
+    ...(evidence?.length ? { evidence } : { evidence: undefined }),
     source,
     rejectionReason,
     hasEmail,
@@ -388,10 +498,7 @@ export const enrichLead = (lead: Lead): Lead => {
   return withLeadQuality(attachLeadResearchSignals({
     ...enriched,
     contactEvidence: collectContactEvidence(lead),
-    confidence: Math.max(
-      Number(enriched.confidence ?? 0),
-      scoreLead(enriched),
-    ),
+    confidence: Math.max(confidence, scoreLead(enriched)),
 
     /**
      * Add this optional field to Lead if possible:

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Lead } from '../../types/lead';
 import { deduplicateLeads } from '../lead-deduplication';
+import { isPhoneQualifiedLead } from '../phone-requirement';
 
 const makeLead = (overrides: Partial<Lead>): Lead => ({
   id: 'lead-base',
@@ -235,5 +236,56 @@ describe('deduplicateLeads', () => {
 
     expect(leads).toHaveLength(2);
     expect(leads.map((lead) => lead.name)).toEqual(['Alicia Stone', 'Jordan Carter']);
+  });
+
+  it('recomputes merged phone flags from the selected normalized number', () => {
+    const [merged] = deduplicateLeads([
+      makeLead({
+        id: 'stale-phone-flags',
+        mobile: '(512) 555-0101',
+        hasPhone: false,
+        verifiedPhone: false,
+        contactEvidence: [{
+          field: 'phone',
+          value: '+1 512 555 0101',
+          sourceUrl: 'https://alpha-dental.example/contact',
+          sourceName: 'Public business website',
+          sourceKind: 'business_website',
+          association: 'business',
+          observedAt: '2026-09-08T00:00:00.000Z',
+        }],
+      }),
+      makeLead({
+        id: 'same-business',
+        website: 'https://alpha-dental.example',
+        hasWebsite: true,
+      }),
+    ]);
+
+    expect(merged).toMatchObject({
+      mobile: '(512) 555-0101',
+      hasPhone: true,
+      verifiedPhone: true,
+    });
+    expect(isPhoneQualifiedLead(merged!)).toBe(true);
+  });
+
+  it('fails closed when an untyped provider record contains malformed merge fields', () => {
+    const malformed = makeLead({
+      id: 'malformed-provider-record',
+      source: { provider: 'unknown' } as never,
+      evidence: { sourceUrl: 'http://localhost' } as never,
+      publicSocialLinks: { url: 'http://127.0.0.1' } as never,
+      opportunitySignals: { signal: 'unknown' } as never,
+    });
+    const malformedListing = makeLead({
+      id: 'malformed-listing-record',
+      listingUrl: { url: 'http://localhost' } as never,
+    });
+
+    expect(() => deduplicateLeads([malformed, makeLead({ id: 'valid-record' })])).not.toThrow();
+    expect(deduplicateLeads([malformed, makeLead({ id: 'valid-record' })])).toHaveLength(1);
+    expect(deduplicateLeads([malformed, makeLead({ id: 'valid-record' })])[0]?.id).toBe('valid-record');
+    expect(() => deduplicateLeads([malformedListing, makeLead({ id: 'valid-record' })])).not.toThrow();
   });
 });

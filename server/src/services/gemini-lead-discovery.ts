@@ -4,13 +4,16 @@ import {
   type GeminiLeadDiscoveryResult,
 } from '../providers/gemini';
 import type { SearchRequest } from '../types/search';
+import { isPublicHttpUrl } from '../utils/public-url';
 
 export type GeminiResearchDiscovery = GeminiLeadDiscoveryResult & {
   leads: Lead[];
 };
 
-const normalizeIdentityPart = (value?: string) =>
-  value
+const asString = (value: unknown) => (typeof value === 'string' ? value : '');
+
+const normalizeIdentityPart = (value?: unknown) =>
+  asString(value)
     ?.trim()
     .toLowerCase()
     .replace(/https?:\/\//g, '')
@@ -35,19 +38,36 @@ const researchCandidateKey = (candidate: ResearchCandidate) => {
   return `id:${candidate.id}`;
 };
 
-const uniqueStrings = (values: string[]) => [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+const uniqueStrings = (values: unknown[]) => [
+  ...new Set(
+    values
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.trim())
+      .filter(Boolean),
+  ),
+];
 
 const mergeResearchCandidate = (
   current: ResearchCandidate,
   incoming: ResearchCandidate,
 ): ResearchCandidate => {
   const grounded = current.grounded || incoming.grounded;
-  const evidence = uniqueStrings([current.evidence ?? '', incoming.evidence ?? '']).join(' | ');
+  const evidence = uniqueStrings([current.evidence, incoming.evidence]).join(' | ');
+  const sourceUrls = uniqueStrings([
+    ...(Array.isArray(current.sourceUrls) ? current.sourceUrls : []),
+    ...(Array.isArray(incoming.sourceUrls) ? incoming.sourceUrls : []),
+  ]).filter(isPublicHttpUrl).slice(0, 12);
   const socialLinks = [
-    ...(current.socialLinks ?? []),
-    ...(incoming.socialLinks ?? []),
+    ...(Array.isArray(current.socialLinks) ? current.socialLinks : []),
+    ...(Array.isArray(incoming.socialLinks) ? incoming.socialLinks : []),
   ].filter(
-    (link, index, links) => links.findIndex((candidate) => candidate.url === link.url) === index,
+    (link, index, links) => Boolean(
+      link &&
+        typeof link === 'object' &&
+        typeof link.url === 'string' &&
+        isPublicHttpUrl(link.url) &&
+        links.findIndex((candidate) => candidate?.url === link.url) === index,
+    ),
   );
 
   return {
@@ -62,15 +82,15 @@ const mergeResearchCandidate = (
     profileUrl: current.profileUrl || incoming.profileUrl,
     reportedPhone: current.reportedPhone || incoming.reportedPhone,
     reportedEmail: current.reportedEmail || incoming.reportedEmail,
-    sourceUrls: uniqueStrings([...current.sourceUrls, ...incoming.sourceUrls]).slice(0, 12),
+    sourceUrls,
     sourceTitles: uniqueStrings([
-      ...(current.sourceTitles ?? []),
-      ...(incoming.sourceTitles ?? []),
+      ...(Array.isArray(current.sourceTitles) ? current.sourceTitles : []),
+      ...(Array.isArray(incoming.sourceTitles) ? incoming.sourceTitles : []),
     ]).slice(0, 12),
-    ...(socialLinks.length ? { socialLinks: socialLinks.slice(0, 12) } : {}),
-    ...(evidence ? { evidence: evidence.slice(0, 2_000) } : {}),
-    grounded,
-    status: grounded ? 'needs_phone_validation' : 'needs_source_review',
+    socialLinks: socialLinks.length ? socialLinks.slice(0, 12) : undefined,
+    evidence: evidence ? evidence.slice(0, 2_000) : undefined,
+    grounded: grounded && sourceUrls.length > 0,
+    status: grounded && sourceUrls.length > 0 ? 'needs_phone_validation' : 'needs_source_review',
   };
 };
 
@@ -78,7 +98,8 @@ const mergeResearchCandidate = (
 export const mergeResearchCandidates = (candidates: ResearchCandidate[]) => {
   const merged = new Map<string, ResearchCandidate>();
 
-  for (const candidate of candidates) {
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    if (!candidate || typeof candidate !== 'object' || typeof candidate.id !== 'string') continue;
     const key = researchCandidateKey(candidate);
     const current = merged.get(key);
     merged.set(key, current ? mergeResearchCandidate(current, candidate) : candidate);
@@ -92,7 +113,8 @@ export const mergeGroundingSources = (
 ) => {
   const merged = new Map<string, GeminiResearchDiscovery['groundingSources'][number]>();
 
-  for (const source of sources) {
+  for (const source of Array.isArray(sources) ? sources : []) {
+    if (!source || typeof source.url !== 'string' || !isPublicHttpUrl(source.url)) continue;
     if (!merged.has(source.url)) merged.set(source.url, source);
   }
 
@@ -114,12 +136,15 @@ const supportedSocialPlatforms = new Map<string, PublicSocialLink['platform']>([
 ]);
 
 const toPublicSocialLinks = (candidate: ResearchCandidate): PublicSocialLink[] => {
-  const links = (candidate.socialLinks ?? [])
+  const links = (Array.isArray(candidate.socialLinks) ? candidate.socialLinks : [])
     .map((link) => {
+      if (!link || typeof link !== 'object' || typeof link.url !== 'string' || typeof link.platform !== 'string') {
+        return undefined;
+      }
       const url = link.url.trim();
       const platform = supportedSocialPlatforms.get(link.platform.trim().toLowerCase());
 
-      return url && platform ? { platform, url } : undefined;
+      return url && platform && isPublicHttpUrl(url) ? { platform, url } : undefined;
     })
     .filter((link): link is PublicSocialLink => Boolean(link));
 
@@ -137,68 +162,89 @@ const toLead = (
   locationLabel: string,
   index: number,
 ): Lead | undefined => {
+  if (!candidate || typeof candidate !== 'object') return undefined;
   // Ungrounded records remain visible as research candidates but cannot enter
   // the lead pipeline because their identity has no attributable web source.
-  if (!candidate.grounded || !candidate.sourceUrls.length) return undefined;
+  const sourceUrls = (Array.isArray(candidate.sourceUrls) ? candidate.sourceUrls : [])
+    .filter((sourceUrl): sourceUrl is string => typeof sourceUrl === 'string' && isPublicHttpUrl(sourceUrl))
+    .slice(0, 12);
+  if (candidate.grounded !== true || !sourceUrls.length || !asString(candidate.id).trim()) return undefined;
 
-  const name = candidate.name || candidate.organizationName || candidate.personName;
+  const candidateName = asString(candidate.name);
+  const candidateOrganizationName = asString(candidate.organizationName);
+  const candidatePersonName = asString(candidate.personName);
+  const originalRole = asString(candidate.originalRole);
+  const candidateLocation = asString(candidate.location);
+  const websiteCandidate = asString(candidate.website);
+  const website = isPublicHttpUrl(websiteCandidate) ? websiteCandidate : '';
+  const profileCandidate = asString(candidate.profileUrl);
+  const profileUrl = isPublicHttpUrl(profileCandidate) ? profileCandidate : '';
+  const name = candidateName || candidateOrganizationName || candidatePersonName;
   if (!name) return undefined;
-  const decisionMakerName = candidate.personName || (
-    candidate.organizationName &&
-    candidate.name &&
-    candidate.name !== candidate.organizationName
-      ? candidate.name
+  const decisionMakerName = candidatePersonName || (
+    candidateOrganizationName &&
+    candidateName &&
+    candidateName !== candidateOrganizationName
+      ? candidateName
       : undefined
   );
-  const decisionMakerSourceUrl = candidate.profileUrl || candidate.sourceUrls[0];
+  const decisionMakerSourceUrl = profileUrl || sourceUrls[0];
 
-  const now = candidate.discoveredAt || new Date().toISOString();
-  const sourceTitles = candidate.sourceTitles ?? [];
+  const now = asString(candidate.discoveredAt) || new Date().toISOString();
+  const sourceTitles = (Array.isArray(candidate.sourceTitles) ? candidate.sourceTitles : [])
+    .filter((title): title is string => typeof title === 'string')
+    .slice(0, 12);
   const sourceName = 'Gemini, Grounded Public Search';
   const publicSocialLinks = toPublicSocialLinks(candidate);
 
   return {
-    id: `gemini-lead-${index + 1}-${candidate.id.slice(-16)}`,
+    id: `gemini-lead-${index + 1}-${asString(candidate.id).slice(-16)}`,
     name,
-    ...(candidate.originalRole ? { originalRole: candidate.originalRole } : {}),
-    ...(candidate.organizationName ? { organizationName: candidate.organizationName } : {}),
+    ...(originalRole ? { originalRole } : {}),
+    ...(candidateOrganizationName ? { organizationName: candidateOrganizationName } : {}),
     ...(decisionMakerName ? { decisionMakerName } : {}),
-    ...(decisionMakerName && candidate.originalRole ? { decisionMakerRole: candidate.originalRole } : {}),
+    ...(decisionMakerName && originalRole ? { decisionMakerRole: originalRole } : {}),
     ...(decisionMakerName && decisionMakerSourceUrl ? { decisionMakerSourceUrl } : {}),
-    ...(candidate.originalRole
-      ? { decisionMaker: decisionMakerRole.test(candidate.originalRole) }
+    ...(originalRole
+      ? { decisionMaker: decisionMakerRole.test(originalRole) }
       : {}),
     employmentStatus: 'unverified',
     mobile: '',
     email: '',
-    ...(candidate.website ? { website: candidate.website } : {}),
+    ...(website ? { website } : {}),
     ...(publicSocialLinks.length ? { publicSocialLinks } : {}),
-    address: candidate.location || locationLabel,
+    address: candidateLocation || locationLabel,
     category: request.companyType,
     city: locationLabel,
     source: sourceName,
-    confidence: Math.min(78, 52 + Math.min(candidate.sourceUrls.length, 4) * 5),
+    confidence: Math.min(78, 52 + Math.min(sourceUrls.length, 4) * 5),
     sourceScore: 48,
-    listingUrl: candidate.profileUrl || candidate.website || candidate.sourceUrls[0],
+    listingUrl: decisionMakerSourceUrl,
     publicEvidence: {
-      profileTitle: titleForCandidate(candidate) || undefined,
-      profileSnippet: candidate.evidence || undefined,
-      sources: candidate.sourceUrls.slice(0, 12).map((sourceUrl, sourceIndex) => ({
+      profileTitle: titleForCandidate({
+        ...candidate,
+        name: candidateName,
+        personName: candidatePersonName,
+        organizationName: candidateOrganizationName,
+        originalRole,
+      }) || undefined,
+      profileSnippet: asString(candidate.evidence) || undefined,
+      sources: sourceUrls.map((sourceUrl, sourceIndex) => ({
         providerName: sourceName,
         profileTitle: sourceTitles[sourceIndex] || undefined,
-        profileSnippet: candidate.evidence || undefined,
+        profileSnippet: asString(candidate.evidence) || undefined,
       })),
     },
-    evidence: candidate.sourceUrls.slice(0, 12).map((sourceUrl, sourceIndex) => ({
+    evidence: sourceUrls.map((sourceUrl, sourceIndex) => ({
       sourceUrl,
       sourceName: sourceTitles[sourceIndex] || sourceName,
-      claim: candidate.evidence || `Public candidate reference for ${name}.`,
+      claim: asString(candidate.evidence) || `Public candidate reference for ${name}.`,
       status: 'unknown' as const,
       observedAt: now,
     })),
     hasEmail: false,
     hasPhone: false,
-    hasWebsite: Boolean(candidate.website),
+    hasWebsite: Boolean(website),
     verifiedPhone: false,
     verifiedEmail: false,
     scrapedAt: now,
@@ -210,7 +256,7 @@ export const buildLeadsFromGeminiCandidates = (
   request: SearchRequest,
   locationLabel: string,
 ) =>
-  candidates
+  (Array.isArray(candidates) ? candidates : [])
     .map((candidate, index) => toLead(candidate, request, locationLabel, index))
     .filter((lead): lead is Lead => Boolean(lead));
 
@@ -219,12 +265,14 @@ export const discoverGeminiResearch = async (
   locationLabel: string,
   listingSeeds: Lead[] = [],
   searchLocationContext = locationLabel,
+  timeoutMs?: number,
 ): Promise<GeminiResearchDiscovery> => {
   const result = await discoverLeadsWithGemini(
     request,
     locationLabel,
     listingSeeds,
     searchLocationContext,
+    timeoutMs,
   );
   return {
     ...result,

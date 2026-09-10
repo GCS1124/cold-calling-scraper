@@ -102,7 +102,7 @@ export type SearchProgress = {
   /** Status of each provider involved in AI mode discovery. */
   providerCoverage?: ProviderCoverage[];
   /** Whether Gemini public search assistance ran. A configured key enables it unless disabled. */
-  aiAssistance?: 'enabled' | 'disabled' | 'failed';
+  aiAssistance?: 'enabled' | 'disabled' | 'failed' | 'rate_limited';
   totalCandidates: number;
   requestedCount: number;
   foundCount: number;

@@ -13,6 +13,7 @@ import { isPublicHttpUrl } from '../utils/public-url';
 import { getResearchDepthConfig } from './research-depth';
 import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
 import { extractOrganizationHint } from './public-entity-matching';
+import { readResponseTextBounded } from '../utils/bounded-fetch';
 
 type SearchResult = {
   title: string;
@@ -121,6 +122,12 @@ const searchTimeoutMs = readBoundedNumber(
   4_500,
   500,
   15_000,
+);
+const maxSearchBodyBytes = readBoundedNumber(
+  process.env.LINKEDIN_SEARCH_MAX_BODY_BYTES,
+  1_000_000,
+  64_000,
+  2_000_000,
 );
 // Keep the healthy phase fast while retaining a small cap on outbound public
 // search traffic. Once a provider fails, runLinkedInQuerySet serializes work.
@@ -982,6 +989,9 @@ const normalizeLinkedInProfileUrl = (value?: string) => {
 
   try {
     const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+    if (url.username || url.password || !isPublicHttpUrl(url)) {
+      return null;
+    }
     const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
     if (hostname !== 'linkedin.com' && !hostname.endsWith('.linkedin.com')) {
       return null;
@@ -1786,7 +1796,7 @@ const fetchTextWithTimeout = async (url: string, timeoutMs: number) => {
       throw new Error(`Search request failed with status ${response.status}`);
     }
 
-    return await response.text();
+    return await readResponseTextBounded(response, maxSearchBodyBytes);
   } finally {
     clearTimeout(timer);
   }

@@ -61,7 +61,7 @@ export const searchRequestSchema = z.object({
       hasEmail: z.boolean().optional(),
       hasPhone: z.boolean().optional(),
       hasWebsite: z.boolean().optional(),
-      sources: z.array(z.string()).optional(),
+      sources: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
     })
     .optional(),
 });

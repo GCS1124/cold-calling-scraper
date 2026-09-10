@@ -12,6 +12,18 @@ import { assessOpportunitySignals } from '../../../shared/opportunity-signals';
 
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 
+const safeEvidence = (lead: Lead): LeadEvidence[] => (
+  Array.isArray(lead.evidence)
+    ? lead.evidence.filter((item): item is LeadEvidence => Boolean(
+        item &&
+          typeof item === 'object' &&
+          typeof item.sourceUrl === 'string' &&
+          typeof item.sourceName === 'string' &&
+          typeof item.claim === 'string',
+      ))
+    : []
+);
+
 const sourceObservations = (lead: Lead) =>
   collectLeadSourceObservations(lead, collectContactEvidence(lead));
 
@@ -45,8 +57,11 @@ export const scoreLeadResearch = (lead: Lead): LeadScores => {
   const sources = sourceFamilies.length;
   const strongestAuthority = getStrongestAuthorityTier(observations);
   const authorityScore = { A: 100, B: 85, C: 65, D: 30 }[strongestAuthority];
+  const sourceScore = typeof lead.sourceScore === 'number' && Number.isFinite(lead.sourceScore)
+    ? lead.sourceScore
+    : 50;
   const trust = clamp(
-    (lead.sourceScore ?? 50) * 0.4 +
+    sourceScore * 0.4 +
       Math.min(30, sources * 12) +
       authorityScore * 0.2 +
       (lead.publicEvidence ? 6 : 0) +
@@ -66,14 +81,17 @@ export const scoreLeadResearch = (lead: Lead): LeadScores => {
       (lead.verifiedEmail ? 10 : 0) +
       (lead.hasWebsite ? 5 : 0),
   );
-  const opportunityAnalysis = assessOpportunitySignals(lead.opportunitySignals ?? []);
+  const opportunitySignals = Array.isArray(lead.opportunitySignals)
+    ? lead.opportunitySignals.filter((signal): signal is string => typeof signal === 'string')
+    : [];
+  const opportunityAnalysis = assessOpportunitySignals(opportunitySignals);
   const opportunity = clamp(
     opportunityAnalysis.positiveCount * 25 - opportunityAnalysis.negativeCount * 40,
   );
   const contradictionFlags = [
     ...(lead.employmentStatus === 'former' ? ['Former employment signal'] : []),
     ...(lead.employmentStatus === 'conflicting' ? ['Conflicting employment signal'] : []),
-    ...((lead.evidence ?? []).some((item) => item.status === 'conflicting')
+    ...(safeEvidence(lead).some((item) => item.status === 'conflicting')
       ? ['Conflicting public evidence']
       : []),
     ...(lead.websiteAssessment?.status === 'unrelated' ? ['Website identity is unrelated'] : []),
@@ -112,14 +130,16 @@ export const scoreLeadResearch = (lead: Lead): LeadScores => {
 export const buildLeadEvidence = (lead: Lead): LeadEvidence[] => {
   const observedAt = lead.scrapedAt;
   const evidence: LeadEvidence[] = [];
+  const listingUrl = typeof lead.listingUrl === 'string' ? lead.listingUrl.trim() : '';
+  const website = typeof lead.website === 'string' ? lead.website.trim() : '';
 
-  if (lead.listingUrl?.trim()) {
+  if (listingUrl) {
     const sourceFamily = sourceFamilyForEvidence({
-      sourceUrl: lead.listingUrl,
+      sourceUrl: listingUrl,
       sourceName: lead.source || 'Public listing',
     });
     evidence.push({
-      sourceUrl: lead.listingUrl,
+      sourceUrl: listingUrl,
       sourceName: lead.source || 'Public listing',
       sourceFamily,
       authorityTier: authorityTierFor(sourceFamily),
@@ -129,14 +149,14 @@ export const buildLeadEvidence = (lead: Lead): LeadEvidence[] => {
     });
   }
 
-  if (lead.website?.trim()) {
+  if (website) {
     const sourceFamily = sourceFamilyForEvidence({
-      sourceUrl: lead.website,
+      sourceUrl: website,
       sourceName: 'Public website',
       officialWebsite: ['confirmed', 'probable'].includes(lead.websiteAssessment?.status ?? ''),
     });
     evidence.push({
-      sourceUrl: lead.website,
+      sourceUrl: website,
       sourceName: 'Public website',
       sourceFamily,
       authorityTier: authorityTierFor(sourceFamily),
@@ -168,15 +188,18 @@ export const buildLeadEvidence = (lead: Lead): LeadEvidence[] => {
     });
   }
 
-  if (lead.website?.trim()) {
-    for (const signal of lead.opportunitySignals ?? []) {
+  if (website) {
+    const opportunitySignals = Array.isArray(lead.opportunitySignals)
+      ? lead.opportunitySignals.filter((signal): signal is string => typeof signal === 'string')
+      : [];
+    for (const signal of opportunitySignals) {
       const sourceFamily = sourceFamilyForEvidence({
-        sourceUrl: lead.website,
+        sourceUrl: website,
         sourceName: 'Public website opportunity scan',
         officialWebsite: ['confirmed', 'probable'].includes(lead.websiteAssessment?.status ?? ''),
       });
       evidence.push({
-        sourceUrl: lead.website,
+        sourceUrl: website,
         sourceName: 'Public website opportunity scan',
         sourceFamily,
         authorityTier: authorityTierFor(sourceFamily),
@@ -191,7 +214,7 @@ export const buildLeadEvidence = (lead: Lead): LeadEvidence[] => {
 };
 
 export const attachLeadResearchSignals = (lead: Lead): Lead => {
-  const evidence = [...(lead.evidence ?? []), ...buildLeadEvidence(lead)].filter(
+  const evidence = [...safeEvidence(lead), ...buildLeadEvidence(lead)].filter(
     (item, index, all) =>
       all.findIndex(
         (candidate) =>

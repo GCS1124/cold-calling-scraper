@@ -56,7 +56,7 @@ const makeLead = (mode, index = 1) => ({
   category: 'HVAC contractor',
   city: 'Austin, TX',
   source: mode === 'ai'
-    ? 'Public LinkedIn, Google Business, Public Website'
+    ? 'Public LinkedIn, Public Profile'
     : 'Google Places',
   publicSocialLinks: mode === 'ai'
     ? [{ platform: 'LinkedIn', url: 'https://www.linkedin.com/in/public-business-owner' }]
@@ -87,18 +87,50 @@ const makeLead = (mode, index = 1) => ({
   ],
 });
 
+const makeAiSourceSequenceLeads = () => {
+  const pureLinkedIn = makeLead('ai', 1);
+
+  return [
+    {
+      ...pureLinkedIn,
+      id: 'e2e-ai-notarycafe',
+      name: 'NotaryCafe Public Lead',
+      source: 'NotaryCafe, Indexed Public Search',
+      listingUrl: 'https://notarycafe.com/Sequence.Notary',
+      contactSourceUrl: 'https://notarycafe.com/Sequence.Notary',
+    },
+    pureLinkedIn,
+    {
+      ...pureLinkedIn,
+      id: 'e2e-ai-fusion',
+      name: 'AI LinkedIn Google Lead',
+      source: 'Public LinkedIn, Google Business',
+      listingUrl: 'https://www.linkedin.com/in/public-business-owner',
+      contactSourceUrl: 'https://www.google.com/maps/place/public-business',
+    },
+    {
+      ...pureLinkedIn,
+      id: 'e2e-ai-other',
+      name: 'AI Other Public Lead',
+      source: 'OpenStreetMap, Public Website',
+      listingUrl: 'https://www.openstreetmap.org/node/public-business',
+      publicSocialLinks: undefined,
+    },
+  ];
+};
+
 const makeResponse = (mode, failed = false) => ({
   searchId: `e2e-${mode}-${failed ? 'failed' : 'complete'}`,
-  leads: failed ? [] : [makeLead(mode)],
+  leads: failed ? [] : mode === 'ai' ? makeAiSourceSequenceLeads() : [makeLead(mode)],
   meta: {
     query: `HVAC contractor in Austin, TX`,
     locationLabel: 'Austin, TX',
     researchDepth: mode === 'ai' ? 'pro' : 'verified',
     status: failed ? 'failed' : 'complete',
     progress: {
-      discovered: failed ? 0 : 1,
-      enriched: failed ? 0 : 1,
-      publicContactsFound: failed ? 0 : 1,
+      discovered: failed ? 0 : mode === 'ai' ? 4 : 1,
+      enriched: failed ? 0 : mode === 'ai' ? 4 : 1,
+      publicContactsFound: failed ? 0 : mode === 'ai' ? 4 : 1,
       publicQueriesAttempted: mode === 'ai' ? 4 : 1,
       publicProvidersChecked: mode === 'ai' ? 4 : 1,
       providerCoverage: mode === 'gmb'
@@ -109,8 +141,18 @@ const makeResponse = (mode, failed = false) => ({
             leadCount: 1,
           }]
         : [{
+            providerId: 'notarycafe-indexed-search',
+            providerName: 'NotaryCafe, Indexed Public Search',
+            status: 'returned',
+            leadCount: 1,
+          }, {
             providerId: 'linkedin-public-search',
             providerName: 'Public LinkedIn Search',
+            status: 'returned',
+            leadCount: 1,
+          }, {
+            providerId: 'google-places-ai',
+            providerName: 'Google Business (GMB) listings',
             status: 'returned',
             leadCount: 1,
           }, {
@@ -122,22 +164,22 @@ const makeResponse = (mode, failed = false) => ({
             providerId: 'gemini-public-discovery',
             providerName: 'Gemini public discovery',
             status: 'returned',
-            leadCount: 1,
+            leadCount: 4,
           }],
       aiAssistance: mode === 'ai' ? 'enabled' : undefined,
-      totalCandidates: failed ? 0 : 1,
+      totalCandidates: failed ? 0 : mode === 'ai' ? 4 : 1,
       requestedCount: 50,
-      foundCount: failed ? 0 : 1,
+      foundCount: failed ? 0 : mode === 'ai' ? 4 : 1,
       duplicatesRemoved: 0,
       currentSource: failed ? 'Failed' : 'Complete',
       batchesCompleted: 1,
-      estimatedRemaining: failed ? 50 : 49,
+      estimatedRemaining: failed ? 50 : mode === 'ai' ? 46 : 49,
     },
     totals: {
-      total: failed ? 0 : 1,
-      withEmail: failed ? 0 : Number(mode === 'ai'),
-      withPhone: failed ? 0 : 1,
-      withWebsite: failed ? 0 : 1,
+      total: failed ? 0 : mode === 'ai' ? 4 : 1,
+      withEmail: failed ? 0 : mode === 'ai' ? 4 : 0,
+      withPhone: failed ? 0 : mode === 'ai' ? 4 : 1,
+      withWebsite: failed ? 0 : mode === 'ai' ? 4 : 1,
     },
     providerWarnings: failed
       ? [{
@@ -197,16 +239,16 @@ const run = async () => {
   const page = await browser.newPage();
   const browserErrors = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
-  const inspectQuality = async (mode) => {
-    await page.getByRole('button', { name: `Inspect ${mode} Public Lead`, exact: true }).click();
+  const inspectQuality = async (mode, expectedCount = 1, leadName = `${mode} Public Lead`) => {
+    await page.getByRole('button', { name: `Inspect ${leadName}`, exact: true }).click();
     await page.getByText(`${mode} Decision Maker`, { exact: true }).first().waitFor();
     await page.getByRole('link', { name: 'Open public name source', exact: true }).waitFor();
-    await page.getByRole('region', { name: `Contact evidence for ${mode} Public Lead` }).waitFor();
+    await page.getByRole('region', { name: `Contact evidence for ${leadName}` }).waitFor();
     await page.getByText('Line type, reachability, email delivery', { exact: true }).waitFor();
     assert(await page.getByRole('link', { name: 'Phone source 1', exact: true }).getAttribute('href') === 'https://public-business.example/contact', 'Phone evidence URL was not retained');
     await page.getByRole('button', { name: 'Needs review 0', exact: true }).click();
-    assert(await page.getByRole('button', { name: new RegExp(`^(Inspect|Hide) ${mode} Public Lead$`) }).count() === 0, 'Quality filter did not hide the row');
-    await page.getByRole('button', { name: 'All public-phone leads 1', exact: true }).click();
+    assert(await page.getByRole('button', { name: new RegExp(`^(Inspect|Hide) ${leadName}$`) }).count() === 0, 'Quality filter did not hide the row');
+    await page.getByRole('button', { name: `All public-phone leads ${expectedCount}`, exact: true }).click();
   };
   let aiFailureNext = false;
 
@@ -230,6 +272,12 @@ const run = async () => {
   });
 
   try {
+    await page.goto(baseUrl);
+    assert(await page.getByRole('link', { name: 'Skip to lead finder workspace', exact: true }).count() === 1, 'Skip link is missing');
+    await page.getByRole('button', { name: /^AI mode/i }).click();
+    await page.locator('input[list="company-type-options"]').fill('Notary Public');
+    assert(await page.getByText('Notary priority route active', { exact: true }).count() === 1, 'Notary priority route is not surfaced in the form');
+
     await fillSearch(page, 'gmb', 'cityState');
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
     await page.getByText('GMB source coverage', { exact: true }).waitFor();
@@ -241,7 +289,29 @@ const run = async () => {
     await page.getByText('AI mode coverage', { exact: true }).waitFor();
     assert(await page.getByText('AI interpretation preview').count() === 1, 'AI preview is missing');
     assert(await page.getByText('Public Business Listings').count() === 1, 'AI public listing coverage is missing');
-    await inspectQuality('ai');
+    const aiRows = await page.locator('tbody tr').allTextContents();
+    const requiredOrder = [
+      'NotaryCafe Public Lead',
+      'ai Public Lead',
+      'AI LinkedIn Google Lead',
+      'AI Other Public Lead',
+    ];
+    let lastRowIndex = -1;
+    for (const expectedLead of requiredOrder) {
+      const rowIndex = aiRows.findIndex((row) => row.includes(expectedLead));
+      assert(rowIndex > lastRowIndex, `AI source sequence is incorrect for ${expectedLead}`);
+      lastRowIndex = rowIndex;
+    }
+    for (const priorityLabel of [
+      '1 · NotaryCafe indexed evidence',
+      '2 · Pure public LinkedIn evidence',
+      '3 · LinkedIn + Google Business fusion',
+      '4 · Other public evidence',
+    ]) {
+      const escapedLabel = priorityLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      assert(await page.locator('tbody').getByText(new RegExp(`^${escapedLabel}$`, 'i')).count() === 1, `Missing visible source tier: ${priorityLabel}`);
+    }
+    await inspectQuality('ai', 4, 'NotaryCafe Public Lead');
     if (process.env.E2E_ARTIFACT_DIR) {
       await mkdir(process.env.E2E_ARTIFACT_DIR, { recursive: true });
       await page.screenshot({ path: path.join(process.env.E2E_ARTIFACT_DIR, 'quality-desktop.png'), fullPage: true });
@@ -260,15 +330,15 @@ const run = async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await fillSearch(page, 'ai', 'cityState');
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
-    await inspectQuality('ai');
+    await inspectQuality('ai', 4, 'NotaryCafe Public Lead');
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'Mobile page overflows horizontally');
-    const evidenceBox = await page.getByRole('region', { name: 'Contact evidence for ai Public Lead' }).boundingBox();
+    const evidenceBox = await page.getByRole('region', { name: 'Contact evidence for NotaryCafe Public Lead' }).boundingBox();
     assert(evidenceBox && evidenceBox.width < 390, 'Contact evidence panel is clipped on mobile');
     const modeBox = await page.getByRole('button', { name: /^AI mode/i }).boundingBox();
     assert(modeBox && modeBox.x + modeBox.width <= 390, 'Source selector is clipped on mobile');
     if (process.env.E2E_ARTIFACT_DIR) {
       await page.screenshot({ path: path.join(process.env.E2E_ARTIFACT_DIR, 'quality-mobile.png'), fullPage: true });
-      await page.getByRole('region', { name: 'Contact evidence for ai Public Lead' }).screenshot({ path: path.join(process.env.E2E_ARTIFACT_DIR, 'quality-mobile-evidence.png') });
+      await page.getByRole('region', { name: 'Contact evidence for NotaryCafe Public Lead' }).screenshot({ path: path.join(process.env.E2E_ARTIFACT_DIR, 'quality-mobile-evidence.png') });
     }
     assert(browserErrors.length === 0, `Browser errors: ${browserErrors.join('; ')}`);
   } catch (error) {

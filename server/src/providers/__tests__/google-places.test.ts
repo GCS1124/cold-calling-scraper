@@ -544,6 +544,53 @@ describe('googlePlacesProvider', () => {
     expect(leads[1]?.name).toBe('Congress Dental');
   });
 
+  it('keeps place-detail hydration bounded when a search returns many candidates', async () => {
+    process.env.GOOGLE_PLACES_API_KEY = 'test-key';
+    let activeDetails = 0;
+    let peakDetails = 0;
+
+    mockedPost.mockResolvedValue({
+      data: {
+        places: Array.from({ length: 8 }, (_, index) => ({
+          id: `place-detail-${index + 1}`,
+          displayName: { text: `Detail Place ${index + 1}` },
+          formattedAddress: 'Austin, TX',
+        })),
+      },
+    });
+    mockedGet.mockImplementation(async (url) => {
+      if (!String(url).includes('/v1/places/')) {
+        throw new Error(`Unexpected request: ${String(url)}`);
+      }
+
+      activeDetails += 1;
+      peakDetails = Math.max(peakDetails, activeDetails);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      activeDetails -= 1;
+
+      return {
+        data: {
+          displayName: { text: 'Hydrated Place' },
+          formattedAddress: 'Austin, TX',
+          nationalPhoneNumber: '(512) 555-0101',
+        },
+      };
+    });
+
+    const leads = await googlePlacesProvider.fetchLeads({
+      rawQuery: 'HVAC contractor in Austin, TX',
+      query: 'HVAC contractor in Austin, TX',
+      request: { companyType: 'HVAC contractor', city: 'Austin, TX', count: 50 },
+      maxLeadCount: 8,
+      maxSearchQueries: 1,
+      maxConcurrentSearches: 1,
+      deadlineMs: Date.now() + 8_000,
+    });
+
+    expect(leads).toHaveLength(8);
+    expect(peakDetails).toBeLessThanOrEqual(6);
+  });
+
   it('keeps partial Google results when a later page or detail call fails', async () => {
     process.env.GOOGLE_PLACES_API_KEY = 'test-key';
 

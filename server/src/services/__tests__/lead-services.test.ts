@@ -114,6 +114,56 @@ describe('enrichLead', () => {
     expect(enriched.website).toBe('');
   });
 
+  it('does not count an indexed NotaryCafe profile reference as a business website', () => {
+    const enriched = enrichLead({
+      id: 'notarycafe-lead',
+      name: 'Eric Kaufmann',
+      mobile: '+1 303 408 4062',
+      email: '',
+      website: '',
+      address: 'Denver, CO',
+      category: 'Notary Public',
+      city: 'Denver',
+      source: 'NotaryCafe, Indexed Public Search',
+      confidence: 72,
+      listingUrl: 'https://notarycafe.com/Eric.Kaufmann',
+      hasEmail: false,
+      hasPhone: true,
+      hasWebsite: true,
+      verifiedPhone: true,
+      verifiedEmail: false,
+      scrapedAt: '2026-04-21T00:00:00.000Z',
+    });
+
+    expect(enriched.hasWebsite).toBe(false);
+    expect(enriched.website).toBe('');
+  });
+
+  it('does not count a NotaryCafe profile accidentally supplied in website as a business website', () => {
+    const enriched = enrichLead({
+      id: 'notarycafe-website-lead',
+      name: 'Eric Kaufmann',
+      mobile: '+1 303 408 4062',
+      email: '',
+      website: 'https://notarycafe.com/Eric.Kaufmann',
+      address: 'Denver, CO',
+      category: 'Notary Public',
+      city: 'Denver',
+      source: 'NotaryCafe, Indexed Public Search',
+      confidence: 72,
+      listingUrl: 'https://notarycafe.com/Eric.Kaufmann',
+      hasEmail: false,
+      hasPhone: true,
+      hasWebsite: true,
+      verifiedPhone: true,
+      verifiedEmail: false,
+      scrapedAt: '2026-04-21T00:00:00.000Z',
+    });
+
+    expect(enriched.hasWebsite).toBe(false);
+    expect(enriched.website).toBe('https://notarycafe.com/Eric.Kaufmann');
+  });
+
   it('does not treat a lookalike domain as a LinkedIn profile listing', () => {
     const enriched = enrichLead({
       id: 'lookalike-linkedin-lead',
@@ -136,6 +186,83 @@ describe('enrichLead', () => {
     });
 
     expect(enriched.hasWebsite).toBe(true);
+  });
+
+  it('drops private-network website and listing URLs at the lead boundary', () => {
+    const enriched = enrichLead({
+      id: 'unsafe-url-lead',
+      name: 'Unsafe URL Lead',
+      mobile: '',
+      email: '',
+      website: 'http://127.0.0.1/admin',
+      address: '',
+      category: 'Dentist',
+      city: 'Austin, TX',
+      source: 'Public Web',
+      confidence: 40,
+      listingUrl: 'http://[::ffff:127.0.0.1]/internal',
+      hasEmail: false,
+      hasPhone: false,
+      hasWebsite: true,
+      verifiedPhone: false,
+      verifiedEmail: false,
+      scrapedAt: '2026-04-21T00:00:00.000Z',
+    });
+
+    expect(enriched.website).toBe('');
+    expect(enriched.listingUrl).toBeUndefined();
+    expect(enriched.hasWebsite).toBe(false);
+  });
+
+  it('filters unsafe contact, evidence, and social URLs before export', () => {
+    const enriched = enrichLead({
+      id: 'unsafe-evidence-lead',
+      name: 'Evidence Lead',
+      mobile: '',
+      email: '',
+      website: 'https://evidence.example',
+      contactSourceUrl: 'http://localhost/contact',
+      decisionMakerSourceUrl: 'http://[::ffff:7f00:1]/person',
+      publicSocialLinks: [
+        { platform: 'Other', url: 'http://127.0.0.1/social' },
+        { platform: 'Other', url: 'https://evidence.example/social' },
+      ],
+      evidence: [
+        {
+          sourceUrl: 'http://192.168.1.5/internal',
+          sourceName: 'Private',
+          claim: 'Do not export this',
+          status: 'unknown',
+        },
+        {
+          sourceUrl: 'https://evidence.example/about',
+          sourceName: 'Public page',
+          claim: 'Publicly visible business evidence',
+          status: 'confirmed',
+        },
+      ],
+      address: 'Austin, TX',
+      category: 'Dentist',
+      city: 'Austin, TX',
+      source: 'Public Web',
+      confidence: 40,
+      hasEmail: false,
+      hasPhone: false,
+      hasWebsite: true,
+      verifiedPhone: false,
+      verifiedEmail: false,
+      scrapedAt: '2026-04-21T00:00:00.000Z',
+    });
+
+    expect(enriched.contactSourceUrl).toBeUndefined();
+    expect(enriched.decisionMakerSourceUrl).toBeUndefined();
+    expect(enriched.publicSocialLinks).toEqual([
+      { platform: 'Other', url: 'https://evidence.example/social' },
+    ]);
+    expect(enriched.evidence?.map((item) => item.sourceUrl)).toEqual([
+      'https://evidence.example/about',
+      'https://evidence.example',
+    ]);
   });
 });
 

@@ -87,18 +87,24 @@ export const collectContactEvidence = (lead: Lead): ContactEvidence[] => {
     });
   }
 
-  for (const evidence of lead.evidence ?? []) {
+  const legacyEvidence = Array.isArray(lead.evidence) ? lead.evidence : [];
+  for (const evidence of legacyEvidence) {
+    if (!evidence || typeof evidence !== 'object') continue;
+    const claim = typeof evidence.claim === 'string' ? evidence.claim : '';
+    const sourceUrl = typeof evidence.sourceUrl === 'string' ? evidence.sourceUrl : '';
+    const sourceName = typeof evidence.sourceName === 'string' ? evidence.sourceName : '';
+
     if (!['confirmed', 'corroborated'].includes(evidence.status) ||
-      !isPublicContactSource(evidence.sourceUrl) || isProfessionalProfile(evidence.sourceUrl)) continue;
+      !isPublicContactSource(sourceUrl) || isProfessionalProfile(sourceUrl)) continue;
     // A listing-identity claim or a rejected phone claim is not contact evidence.
-    if (phone && /\b(phone|telephone)\b/i.test(evidence.claim) &&
-      !/\b(no|not|unverified|invalid|missing|unconfirmed)\b/i.test(evidence.claim)) {
-      const statedNumber = evidence.claim.match(/\+?\d[\d\s().-]{8,}\d/)?.[0];
+    if (phone && /\b(phone|telephone)\b/i.test(claim) &&
+      !/\b(no|not|unverified|invalid|missing|unconfirmed)\b/i.test(claim)) {
+      const statedNumber = claim.match(/\+?\d[\d\s().-]{8,}\d/)?.[0];
       if (statedNumber && normalizeContactPhone(statedNumber) !== phone) continue;
       observations.push({
-        field: 'phone', value: phone, sourceUrl: evidence.sourceUrl,
-        sourceName: evidence.sourceName,
-        sourceKind: isBusinessListing(evidence.sourceUrl) ? 'business_listing' : 'business_website',
+        field: 'phone', value: phone, sourceUrl,
+        sourceName,
+        sourceKind: isBusinessListing(sourceUrl) ? 'business_listing' : 'business_website',
         observedAt: evidence.observedAt ?? lead.scrapedAt, association: 'business',
       });
     }

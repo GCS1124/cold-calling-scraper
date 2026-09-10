@@ -66,6 +66,19 @@ and normalized role, employment status, decision-maker signal, and independent
 source-family metadata. These are additive fields; consumers should continue
 to enforce `phonePolicy.required` and inspect each lead's source evidence.
 
+NotaryCafe coverage uses a bounded public-search-index adapter. It queries
+public search engines for `notarycafe.com` profile references, keeps only
+records whose indexed snippet exposes a parseable US phone, and sends those
+records through the same normalization, evidence, deduplication, and export
+gate as every other source. It does not fetch NotaryCafe pages directly or
+bypass Cloudflare, CAPTCHA, login, geo restrictions, or private profile
+controls. Indexed references may be stale and should be reverified before
+outreach.
+The adapter bounds query count, provider timeout, result count, and response-body
+bytes (`NOTARYCAFE_INDEX_MAX_QUERIES`, `NOTARYCAFE_INDEX_TIMEOUT_MS`,
+`NOTARYCAFE_INDEX_MAX_RESULTS`, and `NOTARYCAFE_INDEX_MAX_BODY_BYTES`). The
+LinkedIn and public contact-search paths apply the same response-body guard.
+
 ## HTTP errors and tracing
 
 Vercel search and evidence routes preserve the human-readable `error` string
@@ -176,11 +189,36 @@ the final phone gate still applies.
 Gemini can expand public search lenses and return grounded public research
 candidates. Candidates and cited source details remain available for review even
 when the required public-phone gate excludes them from export. Public discovery
-providers supply independently validated lead and contact facts. Apollo, Lusha,
+providers supply independently validated lead and contact facts, including
+search-indexed NotaryCafe public profile references. Apollo, Lusha,
 ZoomInfo, and RocketReach are audited for limitation messaging only and are never
 called; no paid lead database is required. Gemini usage remains subject to the
-configured account's limits or charges.
+configured account's limits or charges. The server serializes Gemini requests,
+rotates across the configured key pool on `429`, honors short `Retry-After`
+hints, and opens a bounded in-process cooldown only after the available pool is
+exhausted. Each AI search uses one
+seed-aware grounded Gemini pass; GMB/public-listing seeds are folded into that
+pass instead of triggering a second grounded request. If Gemini is rate-limited,
+`meta.progress.aiAssistance` is `rate_limited`, the coverage entry is `partial`,
+and deterministic public discovery continues unchanged. Tune the optional
+`GEMINI_MIN_REQUEST_GAP_MS`, `GEMINI_MAX_RETRIES`, `GEMINI_MAX_RETRY_WAIT_MS`,
+`GEMINI_RATE_LIMIT_COOLDOWN_MS`, and `GEMINI_FALLBACK_RETRY_MS` environment
+variables, plus `GEMINI_KEY_ROTATION_ATTEMPTS`,
+`GEMINI_AUTH_FAILURE_COOLDOWN_MS`, `GEMINI_TRANSIENT_FAILURE_COOLDOWN_MS`, and
+`GEMINI_QUERY_CACHE_TTL_MS`, when the configured account has different quota
+characteristics.
 
 The evidence/dossier response also carries `researchCandidates` separately from
 `leads`, so requesting evidence does not discard AI-mode references that still
 need source or phone review.
+
+For quota resilience, configure either `GEMINI_API_KEYS` as a comma/newline/
+semicolon-separated pool or individual `GEMINI_API_KEY_1` through
+`GEMINI_API_KEY_20` variables. The legacy `GEMINI_API_KEY` variable remains
+supported and is added to the pool. Requests rotate round-robin across healthy
+keys; a `429` quarantines only the active key, then retries each configured key
+once per request before returning `rate_limited`. Raw keys are never included in
+coverage, logs, or response payloads. `GEMINI_KEY_ROTATION_ATTEMPTS` can lower
+the per-request rotation cap when needed. A bounded in-process LRU cache reuses
+successful query plans for the configured TTL, and invalid or transiently failed
+keys are isolated without interrupting deterministic public discovery.

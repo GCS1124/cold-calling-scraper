@@ -9,6 +9,7 @@ import type {
   SearchStatus,
 } from '../types/search';
 import { deduplicateLeads } from './lead-deduplication';
+import { enrichLead } from './lead-validation';
 import { enforcePhoneRequirement } from './phone-requirement';
 import { noUsableResultsWarning } from './search-finalization';
 import { persistNormalizedResearch } from './research-normalizer';
@@ -28,6 +29,7 @@ import {
   sanitizeCallbackState,
   type SearchCallbackState,
 } from './search-completion-callback';
+import { isPublicHttpUrl } from '../utils/public-url';
 
 export type SearchLocationMode =
   | 'local'
@@ -273,6 +275,102 @@ const normalizeLocationMode = (mode: unknown): SearchLocationMode => {
   return 'local';
 };
 
+const normalizeStoredLeads = (value: unknown): Lead[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object') {
+      return [];
+    }
+
+    try {
+      return [enrichLead(candidate as Lead)];
+    } catch {
+      // A malformed persisted record must never break polling or leak an
+      // unvalidated URL/contact claim into the response.
+      return [];
+    }
+  });
+};
+
+const readStoredString = (value: unknown, maxLength: number) =>
+  typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+
+const normalizeStoredPublicUrl = (value: unknown) => {
+  const candidate = readStoredString(value, 2_048);
+  if (!candidate || !isPublicHttpUrl(candidate)) {
+    return '';
+  }
+
+  try {
+    const url = new URL(candidate);
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+};
+
+const normalizeStoredResearchCandidates = (value: unknown): ResearchCandidate[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object') {
+      return [];
+    }
+
+    const record = candidate as unknown as Record<string, unknown>;
+    const id = readStoredString(record.id, 160);
+    if (!id) {
+      return [];
+    }
+
+    const sourceUrls = Array.isArray(record.sourceUrls)
+      ? [...new Set(record.sourceUrls.map(normalizeStoredPublicUrl).filter(Boolean))].slice(0, 12)
+      : [];
+    const sourceTitles = Array.isArray(record.sourceTitles)
+      ? [...new Set(record.sourceTitles.map((title) => readStoredString(title, 240)).filter(Boolean))].slice(0, 12)
+      : undefined;
+    const socialLinks = Array.isArray(record.socialLinks)
+      ? record.socialLinks.flatMap((link) => {
+          if (!link || typeof link !== 'object') return [];
+          const social = link as Record<string, unknown>;
+          const url = normalizeStoredPublicUrl(social.url);
+          const platform = readStoredString(social.platform, 80);
+          return url && platform ? [{ platform, url }] : [];
+        }).slice(0, 12)
+      : undefined;
+    const status = record.status === 'needs_phone_validation' || record.status === 'needs_source_review'
+      ? record.status
+      : 'needs_source_review';
+    const discoveredAt = readStoredString(record.discoveredAt, 80) || new Date().toISOString();
+
+    return [{
+      id,
+      ...(readStoredString(record.name, 180) ? { name: readStoredString(record.name, 180) } : {}),
+      ...(readStoredString(record.personName, 180) ? { personName: readStoredString(record.personName, 180) } : {}),
+      ...(readStoredString(record.organizationName, 220) ? { organizationName: readStoredString(record.organizationName, 220) } : {}),
+      ...(readStoredString(record.originalRole, 180) ? { originalRole: readStoredString(record.originalRole, 180) } : {}),
+      ...(readStoredString(record.location, 180) ? { location: readStoredString(record.location, 180) } : {}),
+      ...(normalizeStoredPublicUrl(record.website) ? { website: normalizeStoredPublicUrl(record.website) } : {}),
+      ...(normalizeStoredPublicUrl(record.profileUrl) ? { profileUrl: normalizeStoredPublicUrl(record.profileUrl) } : {}),
+      ...(readStoredString(record.reportedPhone, 80) ? { reportedPhone: readStoredString(record.reportedPhone, 80) } : {}),
+      ...(readStoredString(record.reportedEmail, 240) ? { reportedEmail: readStoredString(record.reportedEmail, 240) } : {}),
+      ...(socialLinks?.length ? { socialLinks } : {}),
+      sourceUrls,
+      ...(sourceTitles?.length ? { sourceTitles } : {}),
+      ...(readStoredString(record.evidence, 2_000) ? { evidence: readStoredString(record.evidence, 2_000) } : {}),
+      grounded: Boolean(record.grounded) && sourceUrls.length > 0,
+      status,
+      discoveredAt,
+    } satisfies ResearchCandidate];
+  }).slice(0, 100);
+};
+
 const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
   const currentTime = nowMs();
 
@@ -308,8 +406,8 @@ const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
     locationLabel: job.locationLabel?.trim() ?? '',
     locationMode: normalizeLocationMode(job.locationMode),
     progress: clampProgress(job.progress),
-    leads: deduplicateLeads(Array.isArray(job.leads) ? job.leads : []),
-    researchCandidates: Array.isArray(job.researchCandidates) ? job.researchCandidates : [],
+    leads: deduplicateLeads(normalizeStoredLeads(job.leads)),
+    researchCandidates: normalizeStoredResearchCandidates(job.researchCandidates),
     providerWarnings: dedupeWarnings(
       Array.isArray(job.providerWarnings) ? job.providerWarnings : [],
     ),
@@ -1200,7 +1298,10 @@ export const toSearchResponse = (
   job: SearchJobRecord,
   suppressionKeys: ReadonlySet<string> = new Set(),
 ): SearchResponse => {
-  const qualification = enforcePhoneRequirement(deduplicateLeads(job.leads), job.request);
+  const qualification = enforcePhoneRequirement(
+    deduplicateLeads(normalizeStoredLeads(job.leads)),
+    job.request,
+  );
   const suppression = filterSuppressedLeads(qualification.leads, suppressionKeys);
   const leads = suppression.leads.slice(0, job.request.count);
   const emptyCompletion = job.status === 'complete' && !leads.length && !suppression.suppressedCount;
@@ -1238,7 +1339,9 @@ export const toSearchResponse = (
     ...contract,
     searchId: job.searchId,
     leads,
-    ...(job.researchCandidates?.length ? { researchCandidates: job.researchCandidates } : {}),
+    ...(normalizeStoredResearchCandidates(job.researchCandidates).length
+      ? { researchCandidates: normalizeStoredResearchCandidates(job.researchCandidates) }
+      : {}),
     meta: {
       ...contract.meta,
       query: job.query,

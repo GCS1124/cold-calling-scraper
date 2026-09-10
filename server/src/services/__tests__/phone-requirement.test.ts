@@ -81,4 +81,101 @@ describe('phone requirement', () => {
     expect(result.leads).toHaveLength(0);
     expect(result.warning?.providerId).toBe('phone-required');
   });
+
+  it('keeps the requested NotaryCafe, LinkedIn, then GMB plus LinkedIn order', () => {
+    const notaryCafe = makeLead({
+      id: 'notarycafe-first',
+      name: 'NotaryCafe First',
+      source: 'NotaryCafe, Indexed Public Search',
+      listingUrl: 'https://notarycafe.com/NotaryCafe.First',
+      contactSourceUrl: 'https://notarycafe.com/NotaryCafe.First',
+      website: '',
+      confidence: 55,
+    });
+    const linkedIn = makeLead({
+      id: 'linkedin-second',
+      name: 'LinkedIn Second',
+      source: 'LinkedIn, Public Profile',
+      listingUrl: 'https://linkedin.com/in/linkedin-second',
+      contactEvidence: [{
+        field: 'phone',
+        value: '+1 512 555 0101',
+        sourceUrl: 'https://linkedin.com/in/linkedin-second',
+        sourceName: 'LinkedIn, Public Profile',
+        sourceKind: 'public_snippet',
+        association: 'person',
+      }],
+      confidence: 75,
+    });
+    const fused = makeLead({
+      id: 'gmb-linkedin-third',
+      name: 'GMB LinkedIn Third',
+      source: 'LinkedIn, Public Profile, Google Places',
+      listingUrl: 'https://linkedin.com/in/gmb-linkedin-third',
+      contactSourceUrl: 'https://www.google.com/maps/place/gmb-linkedin-third',
+      confidence: 95,
+    });
+
+    const result = enforcePhoneRequirement(
+      [fused, linkedIn, notaryCafe],
+      { companyType: 'Notary Public', city: 'Austin, TX', count: 50, phoneRequired: true },
+    );
+
+    expect(result.leads.map((lead) => lead.id)).toEqual([
+      'notarycafe-first',
+      'linkedin-second',
+      'gmb-linkedin-third',
+    ]);
+  });
+
+  it('keeps all four AI source groups in the required sequence', () => {
+    const notaryCafe = makeLead({
+      id: 'sequence-notarycafe',
+      source: 'NotaryCafe, Indexed Public Search',
+      listingUrl: 'https://notarycafe.com/Sequence.Notary',
+      contactSourceUrl: 'https://notarycafe.com/Sequence.Notary',
+    });
+    const pureLinkedIn = makeLead({
+      id: 'sequence-linkedin',
+      source: 'LinkedIn, Public Profile',
+      listingUrl: 'https://linkedin.com/in/sequence-linkedin',
+      contactEvidence: [{
+        field: 'phone',
+        value: '+1 512 555 0101',
+        sourceUrl: 'https://linkedin.com/in/sequence-linkedin',
+        sourceName: 'LinkedIn, Public Profile',
+        sourceKind: 'public_snippet',
+        association: 'person',
+      }],
+    });
+    const fused = makeLead({
+      id: 'sequence-fusion',
+      source: 'LinkedIn, Public Profile, Google Business',
+      listingUrl: 'https://linkedin.com/in/sequence-fusion',
+      contactSourceUrl: 'https://www.google.com/maps/place/sequence-fusion',
+    });
+    const other = makeLead({
+      id: 'sequence-other',
+      source: 'OpenStreetMap, Public Website',
+      listingUrl: 'https://www.openstreetmap.org/node/sequence-other',
+    });
+
+    const result = enforcePhoneRequirement(
+      [other, fused, pureLinkedIn, notaryCafe],
+      {
+        companyType: 'HVAC contractor',
+        sourceMode: 'ai',
+        city: 'Austin, TX',
+        count: 50,
+        phoneRequired: true,
+      },
+    );
+
+    expect(result.leads.map((lead) => lead.id)).toEqual([
+      'sequence-notarycafe',
+      'sequence-linkedin',
+      'sequence-fusion',
+      'sequence-other',
+    ]);
+  });
 });

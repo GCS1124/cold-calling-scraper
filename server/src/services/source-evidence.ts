@@ -5,7 +5,7 @@ import type {
 } from '../../../shared/source-evidence';
 
 import type { Lead } from '../types/lead';
-import { isPublicHttpUrl } from '../utils/public-url';
+import { isNotaryCafeHost, isPublicHttpUrl } from '../utils/public-url';
 
 export type SourceObservation = {
   sourceUrl?: string;
@@ -15,8 +15,8 @@ export type SourceObservation = {
   observedAt?: string;
 };
 
-const normalizeHost = (value?: string) => {
-  if (!value?.trim() || !isPublicHttpUrl(value)) {
+const normalizeHost = (value?: unknown) => {
+  if (typeof value !== 'string' || !value.trim() || !isPublicHttpUrl(value)) {
     return '';
   }
 
@@ -46,15 +46,20 @@ const sourceFamilyFor = ({
   sourceKind?: ContactEvidence['sourceKind'];
   officialWebsite?: boolean;
 }): EvidenceSourceFamily => {
-  const name = sourceName?.trim().toLowerCase() ?? '';
+  const name = typeof sourceName === 'string' ? sourceName.trim().toLowerCase() : '';
   const host = normalizeHost(sourceUrl);
   const isGoogleSearchResult =
     hostMatches(host, /(?:^|\.)google\.[a-z.]+$/) &&
-    !/\/maps\b/i.test(sourceUrl ?? '') &&
+    !/\/maps\b/i.test(typeof sourceUrl === 'string' ? sourceUrl : '') &&
     /search|snippet/i.test(name);
   const isGoogleMapsResult =
-    hostMatches(host, /(?:^|\.)google\.com$/) && /\/maps\b/i.test(sourceUrl ?? '');
+    hostMatches(host, /(?:^|\.)google\.com$/) && /\/maps\b/i.test(typeof sourceUrl === 'string' ? sourceUrl : '');
   const isOpenStreetMapResult = hostMatches(host, /(?:^|\.)openstreetmap\.org$/);
+  const isNotaryCafeSource = isNotaryCafeHost(sourceUrl ?? '');
+
+  if (isNotaryCafeSource) {
+    return 'search_engine';
+  }
 
   if (officialWebsite === true) {
     return 'official_business';
@@ -168,6 +173,14 @@ export const collectLeadSourceObservations = (
   contactEvidence: ContactEvidence[] = lead.contactEvidence ?? [],
 ): SourceObservation[] => {
   const observations: SourceObservation[] = [];
+  const safeContactEvidence = Array.isArray(contactEvidence)
+    ? contactEvidence.filter((contact): contact is ContactEvidence => Boolean(
+        contact &&
+          typeof contact === 'object' &&
+          typeof contact.sourceUrl === 'string' &&
+          typeof contact.sourceName === 'string',
+      ))
+    : [];
   const officialWebsite = ['confirmed', 'probable'].includes(lead.websiteAssessment?.status ?? '');
 
   if (lead.listingUrl && isPublicHttpUrl(lead.listingUrl)) {
@@ -196,7 +209,7 @@ export const collectLeadSourceObservations = (
     });
   }
 
-  for (const contact of contactEvidence) {
+  for (const contact of safeContactEvidence) {
     addObservation(observations, {
       sourceUrl: contact.sourceUrl,
       sourceName: contact.sourceName,
@@ -209,7 +222,15 @@ export const collectLeadSourceObservations = (
     });
   }
 
-  for (const evidence of lead.evidence ?? []) {
+  const safeEvidence = Array.isArray(lead.evidence)
+    ? lead.evidence.filter((evidence) => Boolean(
+        evidence &&
+          typeof evidence === 'object' &&
+          typeof evidence.sourceUrl === 'string' &&
+          typeof evidence.sourceName === 'string',
+      ))
+    : [];
+  for (const evidence of safeEvidence) {
     if (evidence.status === 'rejected' || !isPublicHttpUrl(evidence.sourceUrl)) continue;
 
     addObservation(observations, {

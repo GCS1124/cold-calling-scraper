@@ -853,7 +853,9 @@ Restimulate Health is a dental practice in Austin, TX. Call (512) 555-0188.
       deadlineMs: Date.now() + 10_000,
     });
 
-    expect(result.leads.map((lead) => lead.website)).toEqual(unsafeWebsites);
+    expect(result.leads.map((lead) => lead.website)).toEqual(
+      unsafeWebsites.map(() => ''),
+    );
     expect(httpClient.get).not.toHaveBeenCalled();
   });
 

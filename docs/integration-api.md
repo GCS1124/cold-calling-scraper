@@ -258,9 +258,17 @@ Gemini can expand public search wording and return grounded public research
 candidates. Every returned candidate and cited source is retained for review,
 even when it does not pass the required public-phone gate. Public discovery and
 deterministic validation supply the exportable lead facts and contact evidence.
-If Gemini is unavailable, deterministic query expansion continues where
-supported. AI never manufactures a person, owner claim, phone, email,
-employment relationship, or verification result.
+If Gemini is rate-limited or unavailable, `meta.progress.aiAssistance` reports
+`rate_limited` or `failed` and deterministic public expansion continues. AI never
+manufactures a person, owner claim, phone, email, employment relationship, or
+verification result.
+
+AI mode also includes a bounded, indexed-only NotaryCafe path. It uses public
+search-engine snippets that expose a profile reference and US phone, then sends
+the record through the normal evidence and phone gate. It never fetches
+NotaryCafe pages or bypasses Cloudflare, CAPTCHA, login, geo restrictions, or
+private-profile controls; indexed records may be stale and should be reverified
+before outreach.
 
 ## Error Handling
 

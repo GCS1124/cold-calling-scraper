@@ -4,7 +4,7 @@ export const buildIntegrationOpenApi = () => ({
     title: 'Lead Finder Integration API',
     version: '1.0.0',
     description:
-      'Provider-agnostic public lead discovery for Google Business and AI-mode public-source fusion. Every returned lead must satisfy the public-phone evidence policy.',
+      'Provider-agnostic public lead discovery for Google Business and AI-mode public-source fusion, including indexed NotaryCafe profile references. Every returned lead must satisfy the public-phone evidence policy.',
   },
   servers: [{ url: '/', description: 'Current Lead Finder deployment' }],
   security: [{ apiKey: [] }, { bearerAuth: [] }],

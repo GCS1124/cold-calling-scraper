@@ -40,6 +40,7 @@ import { buildDiscoveryQueryVariants } from './discovery-query-variants';
 import { buildDiscoverySeeds } from './discovery-seeds';
 import { getResearchDepthConfig } from './research-depth';
 import { getLeadDiscoveryCandidateTarget } from './lead-discovery-budget';
+import { prioritizeLeadsForRequest } from './notarycafe-search';
 import { createResearchQueue, type ResearchQueue } from './research-queue';
 import { reverifyLeads } from './research-reverification';
 import { noUsableResultsWarning } from './search-finalization';
@@ -243,8 +244,11 @@ const dedupeWithCount = (leads: Lead[]) => {
   };
 };
 
-const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
-  rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
+const trimCandidatePool = (leads: Lead[], request: SearchRequest) =>
+  prioritizeLeadsForRequest(
+    rankDiscoveryCandidates(leads),
+    request,
+  ).slice(0, Math.min(maxCandidatePool, request.count * 5));
 
 const finalizeLeads = (job: SearchJobRecord) => {
   const phoneRequirement = enforcePhoneRequirement(job.leads, job.request);
@@ -283,7 +287,7 @@ const mergeLeads = (
   if (countDuplicates) {
     job.progress.duplicatesRemoved += duplicatesRemoved;
   }
-  job.leads = trimCandidatePool(leads, job.request.count);
+  job.leads = trimCandidatePool(leads, job.request);
   if (job.leads.length > previousCount) {
     job.lastProgressAt = now();
   }

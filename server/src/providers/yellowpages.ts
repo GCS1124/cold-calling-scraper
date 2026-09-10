@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 
 import type { Lead } from '../types/lead';
+import { publicProviderAxiosLimits } from '../utils/provider-http-limits';
 import type { LeadProvider } from './provider';
 
 const userAgent =
@@ -20,6 +21,7 @@ export const yellowPagesProvider: LeadProvider = {
         geo_location_terms: request.city,
       },
       headers: { 'User-Agent': userAgent },
+      ...publicProviderAxiosLimits,
       timeout: 10000,
       validateStatus: () => true,
     });

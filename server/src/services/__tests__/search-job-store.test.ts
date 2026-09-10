@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Lead } from '../../types/lead';
+import type { Lead, ResearchCandidate } from '../../types/lead';
 
 vi.mock('pg', () => {
   const query = vi.fn().mockResolvedValue({ rows: [] });
@@ -138,6 +138,121 @@ describe('createSearchJobStore', () => {
     expect(emptyCompletion.meta.status).toBe('failed');
     expect(emptyCompletion.meta.progress.phoneExcludedCount).toBe(1);
     expect(emptyCompletion.meta.providerWarnings.some((warning) => warning.providerId === 'no-usable-results')).toBe(true);
+  });
+
+  it('sanitizes unsafe URLs at the durable response boundary', async () => {
+    const { createSearchJobRecord, toSearchResponse } = await import('../search-job-store');
+    const contactEvidence = [{
+      field: 'phone' as const,
+      value: '+15125550199',
+      sourceUrl: 'https://maps.google.com/maps/place/example',
+      sourceName: 'Google Places',
+      sourceKind: 'business_listing' as const,
+      association: 'business' as const,
+      observedAt: '2026-09-01T00:00:00.000Z',
+    }];
+    const lead: Lead = {
+      id: 'unsafe-persisted-lead',
+      name: 'Austin Dentist',
+      headline: 'Owner',
+      mobile: '+15125550199',
+      email: '',
+      website: 'http://127.0.0.1/admin',
+      listingUrl: 'https://user:password@public.example/listing',
+      contactSourceUrl: 'http://localhost/contact',
+      decisionMakerSourceUrl: 'https://[::1]/profile',
+      publicSocialLinks: [{ platform: 'LinkedIn', url: 'http://192.168.1.10/profile' }],
+      evidence: [{
+        sourceUrl: 'https://[::1]/evidence',
+        sourceName: 'Unsafe source',
+        claim: 'Phone listed',
+        status: 'confirmed',
+        observedAt: '2026-09-01T00:00:00.000Z',
+      }],
+      contactEvidence,
+      address: '1 Congress Ave, Austin, TX',
+      category: 'Dentist',
+      city: 'Austin, TX',
+      source: 'Google Places',
+      confidence: 90,
+      sourceScore: 90,
+      hasEmail: false,
+      hasPhone: true,
+      hasWebsite: true,
+      verifiedPhone: true,
+      verifiedEmail: false,
+      scrapedAt: '2026-09-01T00:00:00.000Z',
+    };
+    const job = createSearchJobRecord({
+      searchId: 'unsafe-response',
+      request: {
+        companyType: 'Dentist',
+        sourceMode: 'gmb',
+        city: 'Austin, TX',
+        count: 1,
+      },
+      query: 'Dentist in Austin, TX',
+      locationLabel: 'Austin, TX',
+      locationMode: 'local',
+      leads: [],
+      status: 'complete',
+      progress: {
+        discovered: 1,
+        enriched: 1,
+        totalCandidates: 1,
+        requestedCount: 1,
+        foundCount: 1,
+        duplicatesRemoved: 0,
+        currentSource: 'Complete',
+        batchesCompleted: 1,
+        estimatedRemaining: 0,
+      },
+    });
+
+    const unsafeResearchCandidate: ResearchCandidate = {
+      id: 'unsafe-research-candidate',
+      name: 'Austin Dentist',
+      website: 'http://127.0.0.1/research',
+      profileUrl: 'https://user:password@public.example/profile',
+      socialLinks: [
+        { platform: 'LinkedIn', url: 'http://192.168.1.10/profile' },
+        { platform: 'Website', url: 'https://safe.example/profile' },
+      ],
+      sourceUrls: ['http://localhost/source', 'https://safe.example/source'],
+      grounded: true,
+      status: 'needs_phone_validation',
+      discoveredAt: '2026-09-01T00:00:00.000Z',
+    };
+    const response = toSearchResponse({
+      ...job,
+      leads: [lead],
+      researchCandidates: [unsafeResearchCandidate],
+    });
+    const [sanitized] = response.leads;
+    const [sanitizedResearch] = response.researchCandidates ?? [];
+
+    expect(sanitized?.mobile).toBe('+1 512 555 0199');
+    expect(sanitized?.website).toBe('');
+    expect(sanitized?.listingUrl).toBeUndefined();
+    expect(sanitized?.contactSourceUrl).toBeUndefined();
+    expect(sanitized?.decisionMakerSourceUrl).toBeUndefined();
+    expect(sanitized?.publicSocialLinks).toBeUndefined();
+    expect(sanitized?.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceUrl: 'https://maps.google.com/maps/place/example',
+        }),
+      ]),
+    );
+    expect(
+      sanitized?.evidence?.some((item) => item.sourceUrl.includes('::1')),
+    ).toBe(false);
+    expect(sanitizedResearch?.website).toBeUndefined();
+    expect(sanitizedResearch?.profileUrl).toBeUndefined();
+    expect(sanitizedResearch?.sourceUrls).toEqual(['https://safe.example/source']);
+    expect(sanitizedResearch?.socialLinks).toEqual([
+      { platform: 'Website', url: 'https://safe.example/profile' },
+    ]);
   });
 
   it('reuses a durable memory job for the same idempotency key and rejects changed criteria', async () => {

@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 
 import type { Lead } from '../types/lead';
+import { publicProviderAxiosLimits } from '../utils/provider-http-limits';
 import type { LeadProvider } from './provider';
 
 const userAgent =
@@ -17,6 +18,7 @@ export const indiaMartProvider: LeadProvider = {
         cq: request.city,
       },
       headers: { 'User-Agent': userAgent },
+      ...publicProviderAxiosLimits,
       timeout: 10000,
       validateStatus: (status) => status < 500,
     });

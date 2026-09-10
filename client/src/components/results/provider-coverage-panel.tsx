@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, CircleDashed, Info } from 'lucide-react';
 
 import type { ProviderCoverage } from '../../types/lead';
+import { sortProviderCoverageForDisplay } from '../../utils/source-priority';
 
 type ProviderCoveragePanelProps = {
   coverage: ProviderCoverage[];
@@ -17,7 +18,7 @@ const modeCopy = {
   ai: {
     title: 'AI mode coverage',
     description:
-      'One public-source fusion pass combines GMB listings, public LinkedIn discovery, Gemini grounded research, public websites, and published social links. Evidence and the required phone gate decide which records become exportable leads. Commercial lead databases are audited but never called.',
+      'AI mode displays the four public-source tiers in a stable order: indexed NotaryCafe evidence, pure public LinkedIn, LinkedIn + Google Business fusion, then other sources. Evidence and the required phone gate decide which records become exportable leads; Gemini, public websites, and social links only add bounded public context. Commercial lead databases are audited but never called.',
     badge: 'Public-source fusion',
   },
 } as const;
@@ -33,7 +34,11 @@ const getStatusLabel = (provider: ProviderCoverage) => {
           ? `${provider.leadCount} details retained`
       : `${provider.leadCount} observed`;
   }
-  if (provider.status === 'partial') return 'Partial';
+  if (provider.status === 'partial') {
+    return /quota|rate.?limit|cooling down/i.test(provider.message ?? '')
+      ? 'Quota cooling down'
+      : 'Partial';
+  }
   if (provider.status === 'failed') return 'Unavailable';
   return 'Ready';
 };
@@ -58,6 +63,7 @@ export function ProviderCoveragePanel({ coverage, mode }: ProviderCoveragePanelP
   if (!coverage.length) return null;
 
   const copy = modeCopy[mode];
+  const orderedCoverage = mode === 'ai' ? sortProviderCoverageForDisplay(coverage) : coverage;
 
   return (
     <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
@@ -73,8 +79,36 @@ export function ProviderCoveragePanel({ coverage, mode }: ProviderCoveragePanelP
         </span>
       </div>
 
+      {mode === 'ai' ? (
+        <div
+          aria-label="Required AI source sequence"
+          className="mt-4 rounded-xl border border-blue-200 bg-white/75 p-3"
+        >
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">
+            Required AI source sequence
+          </p>
+          <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg bg-blue-50 px-3 py-2 text-blue-950">
+              <span className="font-black">1</span> · NotaryCafe indexed profile
+            </div>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
+              <span className="font-black">2</span> · Pure public LinkedIn evidence
+            </div>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
+              <span className="font-black">3</span> · LinkedIn + Google Business fusion
+            </div>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
+              <span className="font-black">4</span> · Other public sources
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] leading-4 text-slate-500">
+            Ranking order only; every accepted row still needs a public US phone and source evidence.
+          </p>
+        </div>
+      ) : null}
+
       <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {coverage.map((provider) => (
+        {orderedCoverage.map((provider) => (
           <div
             className="rounded-xl border border-white/80 bg-white/80 p-3"
             key={provider.providerId}

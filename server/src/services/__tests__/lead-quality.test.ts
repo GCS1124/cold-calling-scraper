@@ -2,11 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ContactEvidence } from '../../../../shared/lead-quality';
 import type { Lead } from '../../types/lead';
 import { collectContactEvidence, getContactEvidence, mergeContactEvidence } from '../contact-evidence';
-import { assessLeadQuality } from '../lead-quality';
+import { assessLeadQuality, rankQualifiedLeads } from '../lead-quality';
 import { enrichLead } from '../lead-validation';
 import { enforcePhoneRequirement, isPhoneQualifiedLead } from '../phone-requirement';
 import { bridgeLinkedInWithPublicListings } from '../public-entity-matching';
 import { deduplicateLeads } from '../lead-deduplication';
+import { collectLeadSourceObservations } from '../source-evidence';
 import { enrichLeadFromWebsite } from '../website-enrichment';
 import { httpClient } from '../../utils/http-client';
 
@@ -95,6 +96,24 @@ describe('public contact quality contract', () => {
 });
 
 describe('contact attribution and identity', () => {
+  it('classifies NotaryCafe evidence as indexed search evidence even if mislabeled', () => {
+    expect(
+      collectLeadSourceObservations(
+        lead({
+          website: 'https://notarycafe.com/Eric.Kaufmann',
+          listingUrl: 'https://notarycafe.com/Eric.Kaufmann',
+          websiteAssessment: { status: 'confirmed' } as never,
+        }),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceFamily: 'search_engine',
+        }),
+      ]),
+    );
+  });
+
   it('shares a business route without collapsing distinct people', () => {
     const people = ['owner', 'manager'].map((id) => lead({ id, name: id, mobile: '', hasPhone: false, verifiedPhone: false, source: 'LinkedIn', listingUrl: `https://linkedin.com/in/${id}`, employmentStatus: 'probable' }));
     const merged = bridgeLinkedInWithPublicListings(people, [enrichLead(lead())]);
@@ -166,6 +185,32 @@ describe('contact attribution and identity', () => {
     expect(bridgeLinkedInWithPublicListings([person], [lead()])[0]?.mobile).toBe('');
   });
 
+  it('skips malformed bridge fields without breaking valid listing enrichment', () => {
+    const malformedPerson = lead({
+      id: 'malformed-person',
+      name: 'Avery Smith',
+      organizationName: 'Alpha Dental',
+      listingUrl: 'https://linkedin.com/in/avery-smith',
+      website: {} as never,
+      decisionMakerName: {} as never,
+      publicSocialLinks: [null as never, { platform: 'LinkedIn', url: 'http://127.0.0.1/profile' } as never],
+      evidence: [null as never],
+      mobile: '',
+      hasPhone: false,
+      verifiedPhone: false,
+      source: 'LinkedIn',
+    });
+
+    expect(() => bridgeLinkedInWithPublicListings([malformedPerson], [lead()])).not.toThrow();
+    const [merged] = bridgeLinkedInWithPublicListings([malformedPerson], [lead()]);
+    expect(merged).toMatchObject({
+      name: 'Avery Smith',
+      organizationName: 'Alpha Dental',
+      mobile: '+1 512 555 0101',
+    });
+    expect(merged?.publicSocialLinks).toBeUndefined();
+  });
+
   it('does not conflate two branches through a company domain and missing-location bridge', () => {
     const branches = deduplicateLeads([
       lead({ id: 'one' }),
@@ -199,9 +244,57 @@ describe('contact attribution and identity', () => {
     expect(merged?.contactSourceUrl).toBe('https://alpha-dental.com/contact');
     expect(isPhoneQualifiedLead(merged!)).toBe(true);
   });
+
+  it('uses research priority as a deterministic tie-break for equally qualified phones', () => {
+    const lowPriority = lead({
+      id: 'low-priority',
+      scores: {
+        trust: 70,
+        fit: 70,
+        contactability: 70,
+        opportunity: 0,
+        priority: 20,
+        independentSourceCount: 1,
+        sourceFamilies: ['directory'],
+        reasons: [],
+      },
+    });
+    const highPriority = lead({
+      id: 'high-priority',
+      scores: {
+        trust: 70,
+        fit: 70,
+        contactability: 70,
+        opportunity: 75,
+        priority: 90,
+        independentSourceCount: 1,
+        sourceFamilies: ['directory'],
+        reasons: [],
+      },
+    });
+
+    expect(rankQualifiedLeads([lowPriority, highPriority]).map((item) => item.id)).toEqual([
+      'high-priority',
+      'low-priority',
+    ]);
+  });
 });
 
 describe('website contact provenance', () => {
+  it('skips direct crawling for indexed NotaryCafe profile references', async () => {
+    const get = vi.spyOn(httpClient, 'get');
+    const result = await enrichLeadFromWebsite(
+      lead({
+        website: 'https://notarycafe.com/Eric.Kaufmann',
+        listingUrl: 'https://notarycafe.com/Eric.Kaufmann',
+      }),
+    );
+
+    expect(get).not.toHaveBeenCalled();
+    expect(result.lead.website).toBe('https://notarycafe.com/Eric.Kaufmann');
+    expect(result.warnings[0]?.message).toMatch(/indexed-only|direct page crawling was skipped/i);
+  });
+
   it('records the exact page for each phone/email and recovers from an invalid existing number', async () => {
     vi.spyOn(httpClient, 'get').mockImplementation(async (url) => ({ status: 200, headers: { 'content-type': 'text/html' }, data: String(url).includes('/contact')
       ? '<a href="tel:+15125550101">Call</a><a href="mailto:office@alpha-dental.com">Email</a>'

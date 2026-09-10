@@ -1,5 +1,9 @@
 import type { Lead } from '../types/lead';
-import { usStateNames, type UsStateCode } from '../data/us-states';
+import {
+  usStateNames,
+  usStateProfiles,
+  type UsStateCode,
+} from '../data/us-states';
 import { timezoneStateQueries, type UsTimeZoneCode } from './us-timezones';
 import type { NormalizedUsLocation } from './us-location';
 
@@ -51,7 +55,7 @@ const cityDecorationTokens = new Set([
 const zipPattern = /\b\d{5}(?:-\d{4})?\b/;
 
 const foreignCountrySuffixPattern =
-  /(?:^|[,;\n|])\s*(?:india|canada|mexico|brazil|australia|new zealand|singapore|pakistan|bangladesh|philippines|germany|france|spain|italy|china|japan|south africa|united kingdom|uae|united arab emirates)\s*$/i;
+  /(?:^|[,;\n|])\s*(?:india|canada|mexico|brazil|australia|new zealand|singapore|pakistan|bangladesh|philippines|germany|france|spain|italy|china|japan|south africa|united kingdom|uae|united arab emirates)\b(?:\s+\d{4,8}(?:[-\s]\d{2,8})?)?\s*$/i;
 
 const stateAliases: StateAliasEntry[] = [];
 
@@ -406,6 +410,14 @@ const matchesCoordinateLocation = (
   location: NormalizedUsLocation,
 ) => isPointInsideBoundingBox(lead, location.boundingBox);
 
+const matchesAnyUsStateCoordinate = (lead: LeadLocationCandidate) =>
+  usStateProfiles.some((state) => isPointInsideBoundingBox(lead, state.boundingBox));
+
+const matchesNationwideLocation = (
+  lead: LeadLocationCandidate,
+  evidence: ParsedAddressEvidence | null,
+) => Boolean(evidence?.stateCode || matchesAnyUsStateCoordinate(lead));
+
 const matchesStateLocation = (
   evidence: ParsedAddressEvidence | null,
   location: NormalizedUsLocation,
@@ -485,11 +497,15 @@ export const leadMatchesLocation = (
   lead: LeadLocationCandidate,
   location: NormalizedUsLocation,
 ) => {
-  if (location.mode === 'nationwide') {
-    return true;
-  }
-
   const evidence = parseLeadLocationEvidence(lead);
+
+  if (location.mode === 'nationwide') {
+    // Nationwide still means US-only. Do not let a provider's missing or
+    // malformed location fields turn the broadest scope into a global scope.
+    // Use state evidence first so Alaska/Hawaii are not lost to the contiguous
+    // US fallback box; coordinates are accepted only inside a known US state.
+    return matchesNationwideLocation(lead, evidence);
+  }
 
   if (location.mode === 'timezone') {
     if (!location.timeZoneCode) {

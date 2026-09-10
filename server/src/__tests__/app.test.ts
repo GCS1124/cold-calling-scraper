@@ -46,4 +46,38 @@ describe('createApp', () => {
     expect(search.status).toBe(401);
     expect(search.body).toMatchObject({ code: 'AUTH_REQUIRED' });
   });
+
+  it('returns the JSON error contract for malformed request bodies', async () => {
+    const response = await request(createApp())
+      .post('/api/search')
+      .set('content-type', 'application/json')
+      .send('{"companyType":');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      code: 'INVALID_JSON_BODY',
+      retryable: false,
+      requestId: expect.any(String),
+    });
+    expect(response.headers['content-type']).toMatch(/application\/json/);
+  });
+
+  it('rejects oversized JSON before route processing', async () => {
+    const response = await request(createApp())
+      .post('/api/search')
+      .set('content-type', 'application/json')
+      .send(JSON.stringify({
+        companyType: 'Dentist',
+        location: { mode: 'timezone', timeZone: 'EST' },
+        count: 50,
+        researchBrief: 'x'.repeat(70_000),
+      }));
+
+    expect(response.status).toBe(413);
+    expect(response.body).toMatchObject({
+      code: 'REQUEST_BODY_TOO_LARGE',
+      retryable: false,
+      requestId: expect.any(String),
+    });
+  });
 });

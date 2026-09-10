@@ -738,10 +738,11 @@ describe('App', () => {
     await clickElement(getButton(container, /ai mode/i));
     expect(normalizedText(container)).toContain('All public sources');
     expect(normalizedText(container)).toContain('AI public-source fusion');
-    expect(normalizedText(container)).toContain('Public profiles');
-    expect(normalizedText(container)).toContain('GMB corroboration');
+    expect(normalizedText(container)).toContain('1 · NotaryCafe index');
+    expect(normalizedText(container)).toContain('2 · Pure public profiles');
+    expect(normalizedText(container)).toContain('3 · LinkedIn + GMB fusion');
+    expect(normalizedText(container)).toContain('4 · Other public sources');
     expect(normalizedText(container)).toContain('Gemini grounding');
-    expect(normalizedText(container)).toContain('Contact proof');
     expect(normalizedText(container)).toContain('Live search blueprint');
     expect(normalizedText(container)).toContain('Category');
     expect(normalizedText(container)).toContain('Your business type');

@@ -103,6 +103,8 @@ describe('normalizeUsLocation', () => {
     expect(result.label).toBe('Erie, PA');
     expect(result.city).toBe('Erie');
     expect(result.stateCode).toBe('PA');
+    expect(result.boundingBox.east).toBeLessThan(-74);
+    expect(result.boundingBox.west).toBeGreaterThan(-81);
     expect(result.warnings[0]?.providerId).toBe('nominatim');
     expect(result.warnings[0]?.message).toContain('429');
   });

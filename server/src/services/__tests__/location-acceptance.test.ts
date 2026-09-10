@@ -77,6 +77,23 @@ const centralTimeLocation: NormalizedUsLocation = {
   warnings: [],
 };
 
+const nationwideLocation: NormalizedUsLocation = {
+  mode: 'nationwide',
+  label: 'United States',
+  city: '',
+  stateCode: '',
+  postalCode: undefined,
+  lat: 39.8283,
+  lon: -98.5795,
+  boundingBox: {
+    south: 24.3963,
+    west: -125,
+    north: 49.3845,
+    east: -66.9346,
+  },
+  warnings: [],
+};
+
 describe('location-acceptance', () => {
   it('accepts exact city/state evidence and rejects same-state outliers or missing addresses', () => {
     const goodLead = makeLead({
@@ -201,5 +218,58 @@ describe('location-acceptance', () => {
     expect(leadMatchesLocation(outOfStateLead, californiaLocation)).toBe(false);
     expect(leadMatchesLocation(coordinateOnlyLead, californiaLocation)).toBe(true);
     expect(filterLeadsForLocation([inStateLead, outOfStateLead, coordinateOnlyLead], californiaLocation)).toHaveLength(2);
+  });
+
+  it('keeps nationwide searches US-only while retaining non-contiguous states', () => {
+    const usLead = makeLead({
+      address: '500 Congress Ave, Austin, TX 78701',
+      city: 'Austin, TX',
+    });
+    const foreignLead = makeLead({
+      id: 'lead-2',
+      address: '14 MG Road, Bengaluru, Karnataka 560001, India',
+      city: 'Bengaluru, India',
+      stateCode: 'IN',
+    });
+    const foreignPostalAfterCountryLead = makeLead({
+      id: 'lead-6',
+      address: '14 MG Road, Bengaluru, Karnataka, India 560001',
+      city: 'Bengaluru, India',
+      stateCode: 'IN',
+    });
+    const alaskaLead = makeLead({
+      id: 'lead-3',
+      address: '100 4th St, Anchorage, AK 99501',
+      city: 'Anchorage, AK',
+    });
+    const hawaiiCoordinateLead = makeLead({
+      id: 'lead-4',
+      address: '',
+      city: '',
+      stateCode: '',
+      latitude: 21.3069,
+      longitude: -157.8583,
+    });
+    const unknownLead = makeLead({
+      id: 'lead-5',
+      address: 'Suite 200, Example Plaza',
+      city: 'Example',
+      stateCode: '',
+      latitude: undefined,
+      longitude: undefined,
+    });
+
+    expect(leadMatchesLocation(usLead, nationwideLocation)).toBe(true);
+    expect(leadMatchesLocation(foreignLead, nationwideLocation)).toBe(false);
+    expect(leadMatchesLocation(foreignPostalAfterCountryLead, nationwideLocation)).toBe(false);
+    expect(leadMatchesLocation(alaskaLead, nationwideLocation)).toBe(true);
+    expect(leadMatchesLocation(hawaiiCoordinateLead, nationwideLocation)).toBe(true);
+    expect(leadMatchesLocation(unknownLead, nationwideLocation)).toBe(false);
+    expect(
+      filterLeadsForLocation(
+        [usLead, foreignLead, alaskaLead, hawaiiCoordinateLead, unknownLead],
+        nationwideLocation,
+      ),
+    ).toHaveLength(3);
   });
 });

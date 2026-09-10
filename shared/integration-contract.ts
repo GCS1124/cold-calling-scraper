@@ -45,7 +45,7 @@ export const buildIntegrationCapabilities = () => ({
     'Every returned lead passed the mandatory public-phone evidence gate.',
     'Search retries can reuse the same bounded Idempotency-Key.',
     'Responses include request correlation and machine-readable error codes.',
-    'Only public, legally accessible sources are used; provider credentials stay server-side.',
+    'Only public, legally accessible sources are used; indexed NotaryCafe references never trigger direct page, login, CAPTCHA, Cloudflare, or geo-block bypasses; provider credentials stay server-side.',
     'Durable searches may emit an at-least-once signed completion callback; receivers must deduplicate by eventId.',
   ] as const,
 });

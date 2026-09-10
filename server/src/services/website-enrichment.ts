@@ -4,7 +4,7 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import type { Lead, PublicSocialLink } from '../types/lead';
 import type { ProviderWarning } from '../types/search';
 import { httpClient } from '../utils/http-client';
-import { isPublicHttpUrl } from '../utils/public-url';
+import { isNotaryCafeHost, isPublicHttpUrl } from '../utils/public-url';
 import {
   extractPublicDecisionMakerMentions,
   normalizePublicPersonName,
@@ -56,11 +56,37 @@ const obfuscatedEmailPatterns = [
 const phonePattern =
   /(?:\+?1[\s.-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4}(?:\s*(?:x|ext|extension)\s*\d{1,6})?/gi;
 
-const maxPages = Number(process.env.WEBSITE_CRAWL_MAX_PAGES ?? 14);
-const maxDepth = Number(process.env.WEBSITE_CRAWL_MAX_DEPTH ?? 2);
-const requestTimeoutMs = Number(process.env.WEBSITE_CRAWL_TIMEOUT_MS ?? 8_000);
-const maxHtmlBytes = Number(process.env.WEBSITE_CRAWL_MAX_HTML_BYTES ?? 1_500_000);
-const robotsCacheTtlMs = Number(process.env.WEBSITE_ROBOTS_CACHE_TTL_MS ?? 300_000);
+const readBoundedNumber = (
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+) => {
+  const parsed = value?.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, Math.round(parsed)));
+};
+
+const maxPages = readBoundedNumber(process.env.WEBSITE_CRAWL_MAX_PAGES, 14, 1, 50);
+const maxDepth = readBoundedNumber(process.env.WEBSITE_CRAWL_MAX_DEPTH, 2, 0, 6);
+const requestTimeoutMs = readBoundedNumber(
+  process.env.WEBSITE_CRAWL_TIMEOUT_MS,
+  8_000,
+  500,
+  30_000,
+);
+const maxHtmlBytes = readBoundedNumber(
+  process.env.WEBSITE_CRAWL_MAX_HTML_BYTES,
+  1_500_000,
+  64_000,
+  5_000_000,
+);
+const robotsCacheTtlMs = readBoundedNumber(
+  process.env.WEBSITE_ROBOTS_CACHE_TTL_MS,
+  300_000,
+  0,
+  3_600_000,
+);
 const robotsPolicyCache = new Map<string, { expiresAt: number; policy: RobotsPolicy }>();
 
 const socialHosts = new Set([
@@ -1123,6 +1149,17 @@ export const enrichLeadFromWebsite = async (
     return {
       lead,
       warnings: [createWarning(`Invalid website URL for ${lead.name ?? 'lead'}.`)],
+    };
+  }
+
+  if (isNotaryCafeHost(origin)) {
+    return {
+      lead,
+      warnings: [
+        createWarning(
+          'NotaryCafe profile references are indexed-only in this workflow; direct page crawling was skipped.',
+        ),
+      ],
     };
   }
 

@@ -54,6 +54,7 @@ import {
   isHighFitLinkedInLead,
   type LinkedInSortMode,
 } from '../utils/linkedin-quality';
+import { comparePublicSourcePriority } from '../utils/source-priority';
 import { sourceModeLabelsByCode } from '../data/search-options';
 import type { Lead, SearchDraft, SearchRequest, SearchResponse } from '../types/lead';
 
@@ -165,6 +166,10 @@ export function HomePage({ searchApi }: HomePageProps) {
         return true;
       })
       .sort((left, right) => {
+        if (activeSourceMode === 'ai') {
+          const sourcePriority = comparePublicSourcePriority(left, right);
+          if (sourcePriority) return sourcePriority;
+        }
         const qualityOrder = compareLeadQuality(left, right);
         if (qualityOrder) return qualityOrder;
         if (activeSourceMode === 'ai') {
@@ -321,7 +326,7 @@ export function HomePage({ searchApi }: HomePageProps) {
       ? `Your ${activeSourceLabel} search is waiting to begin.`
       : result.meta.status === 'discovering'
         ? activeSourceMode === 'ai'
-          ? 'Running Gemini grounding, public profile discovery, GMB corroboration, and website checks in parallel while retaining every research candidate.'
+          ? 'Running Gemini grounding, public profile and indexed NotaryCafe discovery, GMB corroboration, and website checks in parallel while retaining every research candidate.'
           : 'Scanning matching businesses and removing duplicates.'
       : result.meta.status === 'enriching'
               ? 'Adding emails, phone numbers, websites, and source details.'
@@ -633,6 +638,12 @@ export function HomePage({ searchApi }: HomePageProps) {
   return (
     <>
       <div className="relative min-h-screen overflow-hidden bg-slate-50 text-slate-950">
+        <a
+          className="sr-only z-50 rounded-xl bg-slate-950 px-4 py-3 text-sm font-bold text-white focus:not-sr-only focus:absolute focus:left-4 focus:top-4"
+          href="#lead-finder-workspace"
+        >
+          Skip to lead finder workspace
+        </a>
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -left-32 top-[-10rem] h-96 w-96 rounded-full bg-blue-200/60 blur-3xl" />
           <div className="absolute right-[-8rem] top-20 h-96 w-96 rounded-full bg-cyan-200/60 blur-3xl" />
@@ -702,7 +713,11 @@ export function HomePage({ searchApi }: HomePageProps) {
           </motion.div>
         </section>
 
-        <main className="relative mx-auto flex max-w-7xl flex-col gap-6 px-4 pb-28 md:px-8">
+        <main
+          className="relative mx-auto flex max-w-7xl flex-col gap-6 px-4 pb-28 md:px-8"
+          id="lead-finder-workspace"
+          tabIndex={-1}
+        >
           {result ? (
             <ResultsSummary
               location={
@@ -923,6 +938,8 @@ export function HomePage({ searchApi }: HomePageProps) {
                     <p className="mt-3 text-xs leading-5 text-slate-500">
                       {result.meta.progress.aiAssistance === 'enabled'
                         ? 'Gemini expanded public search lenses and returned grounded research candidates. Public evidence and phone validation decide which records become exportable leads.'
+                        : result.meta.progress.aiAssistance === 'rate_limited'
+                          ? 'Gemini is configured but its free-tier quota is cooling down. Deterministic public expansion continued and no unverified details were promoted.'
                         : result.meta.progress.aiAssistance === 'failed'
                           ? 'Gemini assistance was unavailable; deterministic public expansion continued and no unverified details were promoted.'
                           : isWaiting
@@ -1179,6 +1196,7 @@ export function HomePage({ searchApi }: HomePageProps) {
                   onSelectAll={toggleSelectAll}
                   onToggleSelect={toggleSelected}
                   selectedIds={selectedIds}
+                  showSourceSequence={activeSourceMode === 'ai'}
                 />
               </div>
             </section>

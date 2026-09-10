@@ -32,6 +32,7 @@ import { normalizeUsLocation, type NormalizedUsLocation } from './us-location';
 import { filterLeadsForLocation } from './location-acceptance';
 import { enforcePhoneRequirement, isPhoneQualifiedLead } from './phone-requirement';
 import { buildDiscoverySeeds } from './discovery-seeds';
+import { prioritizeLeadsForRequest } from './notarycafe-search';
 import {
   leadSourceModeLabels,
   normalizeLeadSourceMode,
@@ -158,6 +159,7 @@ const getDiscoveryStallMs = (requestedCount: number) =>
   requestedCount >= 50 ? 45_000 : 20_000;
 const getDiscoveryStallLabel = (requestedCount: number) =>
   requestedCount >= 50 ? '45 seconds' : '20 seconds';
+const locationNormalizationConcurrency = 4;
 
 const isTimeoutFailure = (error: unknown) =>
   error instanceof Error && /deadline|timed out|timeout/i.test(error.message);
@@ -189,6 +191,57 @@ const buildNormalizationWarning = (seed: string, error: unknown) => ({
       ? `${error.message} while normalizing ${seed}`
       : `US location normalization failed for ${seed}`,
 });
+
+/**
+ * Normalize broad-location seeds without bursting the public geocoder. The
+ * result order follows the seed order so geographic coverage stays stable;
+ * warnings are emitted by the caller in the same order as the input.
+ */
+const normalizeDiscoverySeeds = async (
+  seeds: string[],
+  normalizeLocation: (rawLocation: string) => Promise<NormalizedUsLocation>,
+) => {
+  const normalized: Array<NormalizedUsLocation | null> = Array.from(
+    { length: seeds.length },
+    () => null,
+  );
+  const errors: Array<{ seed: string; error: unknown } | null> = Array.from(
+    { length: seeds.length },
+    () => null,
+  );
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const seed = seeds[index];
+      if (!seed) return;
+
+      try {
+        normalized[index] = await normalizeLocation(seed);
+      } catch (error) {
+        errors[index] = { seed, error };
+      }
+    }
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(locationNormalizationConcurrency, seeds.length) },
+      () => worker(),
+    ),
+  );
+
+  return {
+    locations: normalized.filter(
+      (location): location is NormalizedUsLocation => Boolean(location),
+    ),
+    errors: errors.filter(
+      (entry): entry is { seed: string; error: unknown } => Boolean(entry),
+    ),
+  };
+};
 
 const rankDiscoveryCandidates = (leads: Lead[]) =>
   [...leads].sort((left, right) => {
@@ -349,8 +402,11 @@ const hasWebsiteDecisionMakerCandidates = (job: SearchJob) =>
     !lead.crawlAttempts,
   );
 
-const trimCandidatePool = (leads: Lead[], requestedCount: number) =>
-  rankDiscoveryCandidates(leads).slice(0, Math.min(maxCandidatePool, requestedCount * 5));
+const trimCandidatePool = (leads: Lead[], request: SearchRequest) =>
+  prioritizeLeadsForRequest(
+    rankDiscoveryCandidates(leads),
+    request,
+  ).slice(0, Math.min(maxCandidatePool, request.count * 5));
 
 const finalizeLeads = (job: SearchJob) => {
   const phoneRequirement = enforcePhoneRequirement(job.leads, job.request);
@@ -389,7 +445,7 @@ const upsertLeads = (
   if (countDuplicates) {
     job.progress.duplicatesRemoved += duplicatesRemoved;
   }
-  job.leads = trimCandidatePool(leads, job.request.count);
+  job.leads = trimCandidatePool(leads, job.request);
   if (job.leads.length > previousCount) {
     job.lastProgressAt = now();
   }
@@ -813,19 +869,16 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     const discoverySeeds = buildDiscoverySeeds(location);
 
     const discoveryLocations = [location];
-    const normalizedSeeds = await Promise.all(
-      discoverySeeds.map(async (seed) => {
-        try {
-          return await normalizeLocation(seed);
-        } catch (error) {
-          job.providerWarnings.push(buildNormalizationWarning(seed, error));
-          return null;
-        }
-      }),
+    const normalizedSeedResult = await normalizeDiscoverySeeds(
+      discoverySeeds,
+      normalizeLocation,
     );
+    for (const { seed, error } of normalizedSeedResult.errors) {
+      job.providerWarnings.push(buildNormalizationWarning(seed, error));
+    }
 
     discoveryLocations.push(
-      ...normalizedSeeds.filter((entry): entry is NormalizedUsLocation => Boolean(entry)),
+      ...normalizedSeedResult.locations,
     );
 
     for (const regionalLocation of discoveryLocations) {

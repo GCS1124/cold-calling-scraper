@@ -12,6 +12,7 @@ import { buildIntegrationCapabilities } from '../../shared/integration-contract'
 import {
   enforceIntegrationRateLimit,
 } from './http/integration-rate-limit';
+import { getRequestId, sendSearchError } from './http/search-http-contract';
 
 type AppDeps = {
   search?: SearchService;
@@ -78,7 +79,10 @@ export const createApp = (deps: AppDeps = {}) => {
   };
 
   app.use(cors());
-  app.use(express.json());
+  // Search requests are small structured payloads. A hard parser limit keeps
+  // malformed or oversized bodies from consuming the process before Zod can
+  // apply field-level validation.
+  app.use(express.json({ limit: '64kb' }));
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
@@ -94,6 +98,49 @@ export const createApp = (deps: AppDeps = {}) => {
     enforceIntegrationTrafficProtection,
     createSearchRouter(search),
   );
+
+  // Keep parser and unexpected middleware failures on the same versioned
+  // error contract as route failures; Express' default HTML/stack response is
+  // not safe for an API client or production logs.
+  app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
+    if (res.headersSent) return;
+
+    const requestId = getRequestId(req);
+    const type = error && typeof error === 'object'
+      ? (error as { type?: unknown }).type
+      : undefined;
+
+    if (type === 'entity.too.large') {
+      sendSearchError(res, 413, {
+        code: 'REQUEST_BODY_TOO_LARGE',
+        message: 'Request body is too large.',
+        retryable: false,
+        requestId,
+      });
+      return;
+    }
+
+    if (type === 'entity.parse.failed') {
+      sendSearchError(res, 400, {
+        code: 'INVALID_JSON_BODY',
+        message: 'Request body must be valid JSON.',
+        retryable: false,
+        requestId,
+      });
+      return;
+    }
+
+    console.error('[app] unhandled request error', {
+      requestId,
+      message: error instanceof Error ? error.message : 'Unknown request error',
+    });
+    sendSearchError(res, 500, {
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Request could not be completed.',
+      retryable: true,
+      requestId,
+    });
+  });
 
   return app;
 };

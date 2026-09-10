@@ -11,6 +11,10 @@ import {
   hasPublicOwnerSignal,
   isHighFitLinkedInLead,
 } from '../../utils/linkedin-quality';
+import {
+  getPublicSourcePriority,
+  publicSourcePriorityLabels,
+} from '../../utils/source-priority';
 
 type ResultsTableProps = {
   leads: Lead[];
@@ -20,6 +24,7 @@ type ResultsTableProps = {
   onSelectAll: () => void;
   onCopyRow: (lead: Lead) => void;
   onFeedback: (lead: Lead, eventType: LeadFeedbackEventType) => void;
+  showSourceSequence?: boolean;
 };
 
 type ContactCellProps = {
@@ -77,6 +82,7 @@ export function ResultsTable({
   onSelectAll,
   onCopyRow,
   onFeedback,
+  showSourceSequence = false,
 }: ResultsTableProps) {
   const allSelected = leads.length > 0 && leads.every((lead) => selectedIds.includes(lead.id));
   const [expandedLeadId, setExpandedLeadId] = useState<string | null>(null);
@@ -149,6 +155,7 @@ export function ResultsTable({
                 : lead.confidence >= 85;
               const hasOwnerSignal = isLinkedInLead && hasPublicOwnerSignal(lead);
               const qualityTier = isLinkedInLead ? getLinkedInQualityTier(lead) : undefined;
+              const sourcePriority = getPublicSourcePriority(lead);
               const matchLabel =
                 isStrongMatch
                   ? 'Strong match'
@@ -355,15 +362,33 @@ export function ResultsTable({
                       </span>
                     </td>
                     <td className="px-4 py-4">
-                      <span
-                        className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                          isLinkedInLead
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'bg-emerald-50 text-emerald-700'
-                        }`}
-                      >
-                        {lead.source}
-                      </span>
+                      <div className="flex min-w-[170px] flex-col items-start gap-1.5">
+                        {showSourceSequence ? (
+                          <span
+                            className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-[0.08em] ${
+                              sourcePriority === 1
+                                ? 'bg-blue-100 text-blue-800'
+                                : sourcePriority === 2
+                                  ? 'bg-slate-100 text-slate-700'
+                                  : sourcePriority === 3
+                                    ? 'bg-violet-50 text-violet-700'
+                                    : 'bg-emerald-50 text-emerald-700'
+                            }`}
+                            title={publicSourcePriorityLabels[sourcePriority]}
+                          >
+                            {sourcePriority} · {publicSourcePriorityLabels[sourcePriority]}
+                          </span>
+                        ) : null}
+                        <span
+                          className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                            isLinkedInLead
+                              ? 'bg-blue-50 text-blue-700'
+                              : 'bg-emerald-50 text-emerald-700'
+                          }`}
+                        >
+                          {lead.source}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex gap-2">

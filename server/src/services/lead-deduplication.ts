@@ -2,19 +2,24 @@ import type { EmploymentStatus, Lead, PublicSocialLink } from '../types/lead';
 import { collectContactEvidence, getContactEvidence, mergeContactEvidence, normalizeContactPhone } from './contact-evidence';
 import { withLeadQuality } from './lead-quality';
 import { preferWebsiteAssessment } from './website-assessment';
+import { isPublicHttpUrl } from '../utils/public-url';
 
 const companySuffixPattern =
   /\b(private limited|pvt ltd|pvt\. ltd\.|private ltd|ltd|limited|llc|inc|inc\.|incorporated|corp|corp\.|corporation|co|co\.)\b/gi;
 
-const canonicalizeName = (value: string) =>
-  value
+const asString = (value: unknown) => (typeof value === 'string' ? value : '');
+const asFiniteNumber = (value: unknown, fallback = 0) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+
+const canonicalizeName = (value?: unknown) =>
+  asString(value)
     .toLowerCase()
     .replace(companySuffixPattern, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 
-const normalizeText = (value?: string) =>
-  (value ?? '')
+const normalizeText = (value?: unknown) =>
+  asString(value)
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');
@@ -24,13 +29,17 @@ const ownerRolePattern =
 
 const isOwnerRoleTerm = (term: string) => ownerRolePattern.test(term);
 
-const isLinkedInProfileListing = (value?: string) => {
-  if (!value?.trim()) {
+const isLinkedInProfileListing = (value?: unknown) => {
+  const candidate = asString(value);
+  if (!candidate.trim()) {
     return false;
   }
 
   try {
-    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    const url = new URL(/^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`);
+    if (!isPublicHttpUrl(url)) {
+      return false;
+    }
     const hostname = url.hostname.replace(/^www\./i, '').toLowerCase();
 
     return (
@@ -42,16 +51,17 @@ const isLinkedInProfileListing = (value?: string) => {
   }
 };
 
-const pickValue = (...values: Array<string | undefined>) =>
-  values.find((value) => Boolean(value?.trim())) ?? '';
+const pickValue = (...values: Array<unknown>) =>
+  values.map(asString).find((value) => Boolean(value.trim())) ?? '';
 
 const mergePublicSocialLinks = (group: Lead[]): PublicSocialLink[] => {
   const links = new Map<string, PublicSocialLink>();
 
-  group.flatMap((lead) => lead.publicSocialLinks ?? []).forEach((link) => {
+  group.flatMap((lead) => Array.isArray(lead.publicSocialLinks) ? lead.publicSocialLinks : []).forEach((link) => {
+    if (!link || typeof link.url !== 'string' || typeof link.platform !== 'string') return;
     const url = link.url.trim();
 
-    if (url && !links.has(url)) {
+    if (url && isPublicHttpUrl(url) && !links.has(url)) {
       links.set(url, { platform: link.platform, url });
     }
   });
@@ -63,10 +73,15 @@ type PublicEvidence = NonNullable<Lead['publicEvidence']>;
 type PublicEvidenceSource = NonNullable<PublicEvidence['sources']>[number];
 
 const mergePublicEvidence = (group: Lead[]) => {
-  const evidence = group.flatMap((lead) => (lead.publicEvidence ? [lead.publicEvidence] : []));
+  const evidence = group.flatMap((lead) => (
+    lead.publicEvidence && typeof lead.publicEvidence === 'object'
+      ? [lead.publicEvidence]
+      : []
+  ));
   const sources = new Map<string, PublicEvidenceSource>();
 
-  evidence.flatMap((entry) => entry.sources ?? []).forEach((source) => {
+  evidence.flatMap((entry) => Array.isArray(entry.sources) ? entry.sources : []).forEach((source) => {
+    if (!source || typeof source.providerName !== 'string') return;
     const key = normalizeText(source.providerName);
     const previous = sources.get(key);
 
@@ -113,10 +128,20 @@ const mergePublicEvidence = (group: Lead[]) => {
 const mergeResearchEvidence = (group: Lead[]) => {
   const evidence = new Map<string, NonNullable<Lead['evidence']>[number]>();
 
-  group.flatMap((lead) => lead.evidence ?? []).forEach((item) => {
-    const key = `${item.sourceUrl}|${item.claim}`.toLowerCase();
+  group.flatMap((lead) => Array.isArray(lead.evidence) ? lead.evidence : []).forEach((item) => {
+    if (
+      !item ||
+      typeof item.sourceUrl !== 'string' ||
+      typeof item.sourceName !== 'string' ||
+      typeof item.claim !== 'string' ||
+      !isPublicHttpUrl(item.sourceUrl)
+    ) return;
+    const sourceUrl = item.sourceUrl.trim();
+    const claim = item.claim.trim().slice(0, 2_000);
+    if (!sourceUrl || !claim) return;
+    const key = `${sourceUrl}|${claim}`.toLowerCase();
     if (!evidence.has(key)) {
-      evidence.set(key, { ...item });
+      evidence.set(key, { ...item, sourceUrl, claim });
     }
   });
 
@@ -150,7 +175,11 @@ const mergeEmploymentStatus = (group: Lead[]): EmploymentStatus | undefined => {
 };
 
 const mergeMatchSignals = (group: Lead[]) => {
-  const signals = group.flatMap((lead) => (lead.matchSignals ? [lead.matchSignals] : []));
+  const signals = group.flatMap((lead) => (
+    lead.matchSignals && typeof lead.matchSignals === 'object'
+      ? [lead.matchSignals]
+      : []
+  ));
 
   if (signals.length === 0) {
     return undefined;
@@ -159,7 +188,8 @@ const mergeMatchSignals = (group: Lead[]) => {
   const publicProviderNames = [
     ...new Map(
       signals
-        .flatMap((signal) => signal.publicProviderNames ?? [])
+        .flatMap((signal) => Array.isArray(signal.publicProviderNames) ? signal.publicProviderNames : [])
+        .filter((name): name is string => typeof name === 'string')
         .map((name) => [normalizeText(name), name] as const)
         .filter(([key]) => Boolean(key)),
     ).values(),
@@ -168,7 +198,8 @@ const mergeMatchSignals = (group: Lead[]) => {
   const categoryMatchedTerms = [
     ...new Set(
       signals
-        .flatMap((signal) => signal.categoryMatchedTerms ?? [])
+        .flatMap((signal) => Array.isArray(signal.categoryMatchedTerms) ? signal.categoryMatchedTerms : [])
+        .filter((term): term is string => typeof term === 'string')
         .map((term) => term.trim())
         .filter(Boolean),
     ),
@@ -176,7 +207,8 @@ const mergeMatchSignals = (group: Lead[]) => {
   const roleMatchedTerms = [
     ...new Set(
       signals
-        .flatMap((signal) => signal.roleMatchedTerms ?? [])
+        .flatMap((signal) => Array.isArray(signal.roleMatchedTerms) ? signal.roleMatchedTerms : [])
+        .filter((term): term is string => typeof term === 'string')
         .map((term) => term.trim())
         .filter(Boolean),
     ),
@@ -184,19 +216,20 @@ const mergeMatchSignals = (group: Lead[]) => {
   const queryFamilies = [
     ...new Set(
       signals
-        .flatMap((signal) => signal.queryFamilies ?? [])
+        .flatMap((signal) => Array.isArray(signal.queryFamilies) ? signal.queryFamilies : [])
+        .filter((family): family is string => typeof family === 'string')
         .map((family) => family.trim())
         .filter(Boolean),
     ),
   ];
   const locationEvidence = signals
-    .map((signal) => signal.locationEvidence?.trim())
+    .map((signal) => asString(signal.locationEvidence).trim())
     .find(Boolean);
 
   return {
-    queryMatches: Math.max(...signals.map((signal) => signal.queryMatches)),
+    queryMatches: Math.max(...signals.map((signal) => asFiniteNumber(signal.queryMatches))),
     publicSources: Math.max(
-      ...signals.map((signal) => signal.publicSources),
+      ...signals.map((signal) => asFiniteNumber(signal.publicSources)),
       publicProviderNames.length,
     ),
     ...(publicProviderNames.length > 0 ? { publicProviderNames } : {}),
@@ -212,13 +245,14 @@ const mergeMatchSignals = (group: Lead[]) => {
   } satisfies NonNullable<Lead['matchSignals']>;
 };
 
-const toDomain = (value?: string) => {
-  if (!value?.trim()) {
+const toDomain = (value?: unknown) => {
+  const candidate = asString(value);
+  if (!candidate.trim()) {
     return '';
   }
 
   try {
-    return new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`).hostname.replace(
+    return new URL(/^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`).hostname.replace(
       /^www\./,
       '',
     );
@@ -227,8 +261,8 @@ const toDomain = (value?: string) => {
   }
 };
 
-const normalizeListingUrl = (value?: string) => {
-  const trimmed = value?.trim() ?? '';
+const normalizeListingUrl = (value?: unknown) => {
+  const trimmed = asString(value).trim();
 
   if (!trimmed) {
     return '';
@@ -236,6 +270,8 @@ const normalizeListingUrl = (value?: string) => {
 
   try {
     const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+    if (url.username || url.password) return '';
+    if (!isPublicHttpUrl(url)) return '';
     url.hash = '';
     if (/(?:^|\.)linkedin\.com$/i.test(url.hostname)) {
       url.hostname = 'linkedin.com';
@@ -251,12 +287,12 @@ const normalizeListingUrl = (value?: string) => {
 
     return `${url.protocol}//${url.host.replace(/^www\./, '')}${pathname}${url.search}`;
   } catch {
-    return trimmed.toLowerCase();
+    return '';
   }
 };
 
-const toPhoneKey = (value?: string) => {
-  const digits = (value ?? '').replace(/\D/g, '');
+const toPhoneKey = (value?: unknown) => {
+  const digits = asString(value).replace(/\D/g, '');
   if (digits.length === 11 && digits.startsWith('1')) {
     return digits.slice(1);
   }
@@ -266,7 +302,8 @@ const toPhoneKey = (value?: string) => {
 
 const buildIdentityKeys = (lead: Lead) => {
   if (isLinkedInProfileListing(lead.listingUrl)) {
-    return [`profile:${normalizeListingUrl(lead.listingUrl)}`];
+    const profileUrl = normalizeListingUrl(lead.listingUrl);
+    return profileUrl ? [`profile:${profileUrl}`] : [];
   }
   const keys: string[] = [];
   const domain = toDomain(lead.website);
@@ -285,8 +322,9 @@ const buildIdentityKeys = (lead: Lead) => {
     keys.push(`phone:${phone}`);
   }
 
-  if (lead.listingUrl?.trim()) {
-    keys.push(`listing:${normalizeListingUrl(lead.listingUrl)}`);
+  const listingUrl = normalizeListingUrl(lead.listingUrl);
+  if (listingUrl) {
+    keys.push(`listing:${listingUrl}`);
   }
 
   if (nameKey && cityKey) {
@@ -298,19 +336,22 @@ const buildIdentityKeys = (lead: Lead) => {
 
 const compatibleBusinesses = (left: Lead, right: Lead) => {
   if (isLinkedInProfileListing(left.listingUrl) || isLinkedInProfileListing(right.listingUrl)) {
-    return normalizeListingUrl(left.listingUrl) === normalizeListingUrl(right.listingUrl);
+    const leftProfile = normalizeListingUrl(left.listingUrl);
+    const rightProfile = normalizeListingUrl(right.listingUrl);
+    return Boolean(leftProfile && rightProfile && leftProfile === rightProfile);
   }
-  if (left.listingUrl && right.listingUrl &&
-    normalizeListingUrl(left.listingUrl) === normalizeListingUrl(right.listingUrl)) return true;
+  const leftListingUrl = normalizeListingUrl(left.listingUrl);
+  const rightListingUrl = normalizeListingUrl(right.listingUrl);
+  if (leftListingUrl && rightListingUrl && leftListingUrl === rightListingUrl) return true;
   for (const field of ['stateCode', 'city'] as const) {
     if (left[field] && right[field] && normalizeText(left[field]) !== normalizeText(right[field])) return false;
   }
   // Shared domains and switchboards do not identify an individual branch.
-  const street = (lead: Lead) => /^\s*\d+\b/.test(lead.address ?? '')
-    ? normalizeText(lead.address?.split(',')[0]).replace(/[.]/g, '')
+  const street = (lead: Lead) => /^\s*\d+\b/.test(asString(lead.address))
+    ? normalizeText(asString(lead.address).split(',')[0]).replace(/[.]/g, '')
       .replace(/\bstreet\b/g, 'st').replace(/\bavenue\b/g, 'ave').replace(/\broad\b/g, 'rd')
     : '';
-  if (street(left) && street(right) && street(left) !== street(right)) return false;
+    if (street(left) && street(right) && street(left) !== street(right)) return false;
   const sameName = canonicalizeName(left.name) === canonicalizeName(right.name);
   const sameDomain = toDomain(left.website) && toDomain(left.website) === toDomain(right.website);
   const leftName = canonicalizeName(left.name);
@@ -322,12 +363,16 @@ const compatibleBusinesses = (left: Lead, right: Lead) => {
 };
 
 const mergeGroup = (group: Lead[]) => {
-  const sorted = [...group].sort((left, right) => right.confidence - left.confidence);
-  const shortestNamed = [...group].sort((left, right) => left.name.length - right.name.length)[0] ?? sorted[0];
+  const sorted = [...group].sort(
+    (left, right) => asFiniteNumber(right.confidence) - asFiniteNumber(left.confidence),
+  );
+  const shortestNamed = [...group].sort(
+    (left, right) => asString(left.name).length - asString(right.name).length,
+  )[0] ?? sorted[0];
   const sources = [
     ...new Set(
       group.flatMap((lead) =>
-        lead.source
+        asString(lead.source)
           .split(',')
           .map((source) => source.trim())
           .filter(Boolean),
@@ -336,8 +381,9 @@ const mergeGroup = (group: Lead[]) => {
   ];
   const phoneLead = sorted.find((lead) => normalizeContactPhone(lead.mobile) && getContactEvidence(lead, 'phone').length)
     ?? sorted.find((lead) => normalizeContactPhone(lead.mobile));
-  const emailLead = sorted.find((lead) => lead.hasEmail && getContactEvidence(lead, 'email').length)
-    ?? sorted.find((lead) => lead.hasEmail && lead.email);
+  const mergedPhone = normalizeContactPhone(phoneLead?.mobile);
+  const emailLead = sorted.find((lead) => Boolean(lead.hasEmail) && getContactEvidence(lead, 'email').length)
+    ?? sorted.find((lead) => Boolean(lead.hasEmail) && asString(lead.email));
   const websiteAssessment = group
     .map((lead) => lead.websiteAssessment)
     .filter((assessment): assessment is NonNullable<Lead['websiteAssessment']> => Boolean(assessment))
@@ -348,7 +394,7 @@ const mergeGroup = (group: Lead[]) => {
 
   return withLeadQuality({
     ...sorted[0],
-    name: shortestNamed.name,
+    name: asString(shortestNamed.name),
     headline: pickValue(...sorted.map((lead) => lead.headline)),
     organizationName: pickValue(...sorted.map((lead) => lead.organizationName)),
     decisionMakerName: pickValue(...sorted.map((lead) => lead.decisionMakerName)),
@@ -358,8 +404,8 @@ const mergeGroup = (group: Lead[]) => {
     normalizedRole: pickValue(...sorted.map((lead) => lead.normalizedRole)),
     decisionMaker: group.some((lead) => lead.decisionMaker === true),
     employmentStatus: mergeEmploymentStatus(group),
-    mobile: phoneLead?.mobile ?? '',
-    email: emailLead?.email ?? '',
+    mobile: asString(phoneLead?.mobile),
+    email: asString(emailLead?.email),
     website: pickValue(...sorted.map((lead) => lead.website)),
     ...(websiteAssessment ? { websiteAssessment } : {}),
     contactSourceUrl: phoneLead ? getContactEvidence(phoneLead, 'phone')[0]?.sourceUrl : undefined,
@@ -374,34 +420,55 @@ const mergeGroup = (group: Lead[]) => {
     latitude: sorted.find((lead) => lead.latitude !== undefined)?.latitude,
     longitude: sorted.find((lead) => lead.longitude !== undefined)?.longitude,
     source: sources.join(', '),
-    confidence: Math.max(...sorted.map((lead) => lead.confidence)),
+    confidence: Math.max(...sorted.map((lead) => asFiniteNumber(lead.confidence))),
     publicEvidence: mergePublicEvidence(group),
     evidence: mergeResearchEvidence(group),
     opportunitySignals: [
-      ...new Set(group.flatMap((lead) => lead.opportunitySignals ?? []).map((signal) => signal.trim()).filter(Boolean)),
+      ...new Set(
+        group
+          .flatMap((lead) => Array.isArray(lead.opportunitySignals) ? lead.opportunitySignals : [])
+          .filter((signal): signal is string => typeof signal === 'string')
+          .map((signal) => signal.trim())
+          .filter(Boolean),
+      ),
     ],
     scores: sorted[0]?.scores,
     matchSignals: mergeMatchSignals(group),
     hasEmail: Boolean(emailLead?.hasEmail),
-    hasPhone: Boolean(phoneLead?.hasPhone),
+    // Recompute derived phone flags from the selected normalized value. A
+    // stale persisted flag must not discard a valid public phone during a
+    // duplicate merge; the evidence gate still decides whether it is
+    // exportable.
+    hasPhone: Boolean(mergedPhone),
     hasWebsite: sorted.some((lead) => lead.hasWebsite),
     verifiedEmail: Boolean(emailLead?.verifiedEmail),
-    verifiedPhone: Boolean(phoneLead?.verifiedPhone),
+    verifiedPhone: Boolean(mergedPhone),
     rejectionReason:
       sorted.find((lead) => lead.rejectionReason === 'blocked_website')?.rejectionReason ??
       sorted.find((lead) => lead.rejectionReason === 'blocked_google')?.rejectionReason ??
       sorted.find((lead) => lead.rejectionReason)?.rejectionReason,
-    crawlAttempts: Math.max(...group.map((lead) => lead.crawlAttempts ?? 0)),
+    crawlAttempts: Math.max(...group.map((lead) => asFiniteNumber(lead.crawlAttempts))),
   });
 };
 
 export const deduplicateLeads = (leads: Lead[]) => {
-  if (leads.length <= 1) {
-    return [...leads];
+  const safeLeads = (Array.isArray(leads) ? leads : []).filter(
+    (lead): lead is Lead => Boolean(
+      lead &&
+        typeof lead === 'object' &&
+        typeof lead.name === 'string' &&
+        typeof lead.category === 'string' &&
+        typeof lead.city === 'string' &&
+        typeof lead.source === 'string',
+    ),
+  );
+
+  if (safeLeads.length <= 1) {
+    return [...safeLeads];
   }
 
-  const parent = leads.map((_, index) => index);
-  const members = leads.map((lead) => [lead]);
+  const parent = safeLeads.map((_, index) => index);
+  const members = safeLeads.map((lead) => [lead]);
 
   const find = (index: number): number => {
     if (parent[index] !== index) {
@@ -433,7 +500,7 @@ export const deduplicateLeads = (leads: Lead[]) => {
 
   const seenByKey = new Map<string, number[]>();
 
-  leads.forEach((lead, index) => {
+  safeLeads.forEach((lead, index) => {
     for (const key of buildIdentityKeys(lead)) {
       const existingIndices = seenByKey.get(key) ?? [];
       for (const existingIndex of existingIndices) union(index, existingIndex);
@@ -443,7 +510,7 @@ export const deduplicateLeads = (leads: Lead[]) => {
 
   const groups = new Map<number, Lead[]>();
 
-  leads.forEach((lead, index) => {
+  safeLeads.forEach((lead, index) => {
     const root = find(index);
     const group = groups.get(root);
 

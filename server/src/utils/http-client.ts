@@ -16,6 +16,11 @@ export const httpClient = axios.create({
   httpAgent,
   httpsAgent,
   maxRedirects: 5,
+  // Public APIs and Overpass are untrusted inputs. Keep Axios from buffering
+  // an unexpectedly large response or request body before the caller can
+  // apply its own provider-specific limits.
+  maxContentLength: 8_000_000,
+  maxBodyLength: 2_000_000,
   transitional: {
     clarifyTimeoutError: true,
   },

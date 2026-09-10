@@ -401,6 +401,14 @@ describe('createSearchService', () => {
     expect(completed?.leads[0]?.name).toBe('Mark Sweeney');
     expect(completed?.leads[0]?.listingUrl).toContain('/in/');
     expect(completed?.meta.progress.aiAssistance).toBe('enabled');
+    expect(completed?.meta.progress.providerCoverage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerId: 'linkedin-public-search',
+          leadCount: 1,
+        }),
+      ]),
+    );
   });
 
   it('keeps the AI result when public LinkedIn and listing evidence are fused upstream', async () => {
@@ -723,6 +731,46 @@ describe('createSearchService', () => {
     expect(completed?.meta.status).toBe('complete');
     expect(completed?.leads).toHaveLength(1);
     expect(googleCalls).toEqual(expect.arrayContaining(['Austin area', 'greater Austin']));
+  });
+
+  it('bounds broad-location normalization so public geocoding is not bursty', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+    let activeNormalizations = 0;
+    let peakNormalizations = 0;
+
+    const service = createSearchService({
+      idFactory: () => 'search-normalization-bound',
+      normalizeLocation: vi.fn().mockImplementation(async (input: string) => {
+        activeNormalizations += 1;
+        peakNormalizations = Math.max(peakNormalizations, activeNormalizations);
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        activeNormalizations -= 1;
+
+        if (input === 'Eastern Time') return timezoneLocation;
+        return {
+          ...sampleLocation,
+          label: input,
+          city: input.split(',')[0] ?? input,
+        };
+      }),
+      discoverGoogleLeads: vi.fn().mockResolvedValue([]),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'HVAC contractor',
+      city: 'Eastern Time',
+      count: 50,
+    });
+
+    const scheduledTask = backgroundTask as (() => Promise<void>) | null;
+    if (!scheduledTask) throw new Error('Background task was not scheduled');
+    await scheduledTask();
+
+    expect(peakNormalizations).toBeLessThanOrEqual(4);
   });
 
   it('keeps category warnings while keeping the job open until the target is met', async () => {

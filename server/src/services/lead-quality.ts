@@ -30,7 +30,9 @@ export const assessLeadQuality = (lead: Lead, now = Date.now()): LeadQualityAsse
     : now - lastObserved <= freshnessWindowMs ? 'recent' : 'stale';
   const person = isProfessionalProfile(lead.listingUrl);
   const conflict = lead.employmentStatus === 'conflicting' ||
-    (lead.evidence ?? []).some((item) => item.status === 'conflicting');
+    (Array.isArray(lead.evidence) ? lead.evidence : []).some((item) =>
+      Boolean(item && typeof item === 'object' && item.status === 'conflicting'),
+    );
   const former = person && lead.employmentStatus === 'former';
   const reasons: string[] = [];
   const gaps: string[] = [];
@@ -83,7 +85,7 @@ export const assessLeadQuality = (lead: Lead, now = Date.now()): LeadQualityAsse
           : person ? 'Confirm the current role and ask for the person through the business'
             : 'Review the business and phone source before outreach',
     phone: {
-      assessedValue: lead.mobile?.trim() ?? '',
+      assessedValue: typeof lead.mobile === 'string' ? lead.mobile.trim() : '',
       formatValid, publiclyObserved: phoneEvidence.length > 0,
       association: phoneEvidence.some((item) => item.association === 'person') ? 'person'
         : phoneEvidence.some((item) => item.association === 'business') ? 'business' : 'unknown',
@@ -104,6 +106,8 @@ export const rankQualifiedLeads = (leads: Lead[]): Lead[] => {
   return leads.map(withLeadQuality).sort((left, right) =>
     tierOrder[right.quality!.tier] - tierOrder[left.quality!.tier] ||
     right.quality!.score - left.quality!.score || right.confidence - left.confidence ||
+    (right.scores?.priority ?? 0) - (left.scores?.priority ?? 0) ||
+    (right.scores?.opportunity ?? 0) - (left.scores?.opportunity ?? 0) ||
     left.name.localeCompare(right.name),
   );
 };

@@ -1,13 +1,15 @@
 import type { ProviderCoverage, ProviderWarning, SearchRequest } from '../types/search';
 import {
   expandQueryWithGemini,
+  getGeminiApiKeyCount,
+  isGeminiRateLimitError,
   isGeminiQueryAssistanceEnabled,
   normalizeGeminiQueryHints,
 } from '../providers/gemini';
 
 export type GeminiQueryAssistanceResult = {
   queryHints: string[];
-  aiAssistance: 'enabled' | 'disabled' | 'failed';
+  aiAssistance: 'enabled' | 'disabled' | 'failed' | 'rate_limited';
   coverage: ProviderCoverage;
   warning?: ProviderWarning;
 };
@@ -19,7 +21,7 @@ type GeminiQueryAssistanceDeps = {
 const queryAssistanceWindowMs = 5_500;
 
 const withTimeout = async <T>(promise: Promise<T>, deadlineMs: number, message: string) => {
-  const remainingMs = Math.max(1_000, deadlineMs - Date.now());
+  const remainingMs = Math.max(1, deadlineMs - Date.now());
   let timer: NodeJS.Timeout | undefined;
 
   try {
@@ -34,15 +36,23 @@ const withTimeout = async <T>(promise: Promise<T>, deadlineMs: number, message: 
   }
 };
 
-const initialCoverage = (): ProviderCoverage => ({
-  providerId: 'gemini-query-assistance',
-  providerName: 'Gemini search planning',
-  status: isGeminiQueryAssistanceEnabled() ? 'configured' : 'not_configured',
-  leadCount: 0,
-  message: isGeminiQueryAssistanceEnabled()
-    ? 'Gemini expands multiple public search lenses; public sources and deterministic checks decide what becomes a lead.'
-    : 'Gemini is not configured; deterministic local category and role expansion continues.',
-});
+const initialCoverage = (): ProviderCoverage => {
+  const configured = isGeminiQueryAssistanceEnabled();
+  const keyCount = getGeminiApiKeyCount();
+  const keySummary = keyCount > 1
+    ? `${keyCount} Gemini API keys are pooled and rotated across healthy requests.`
+    : 'A Gemini API key is configured for public research.';
+
+  return {
+    providerId: 'gemini-query-assistance',
+    providerName: 'Gemini search planning',
+    status: configured ? 'configured' : 'not_configured',
+    leadCount: 0,
+    message: configured
+      ? `${keySummary} Gemini expands multiple public search lenses; public sources and deterministic checks decide what becomes a lead.`
+      : 'Gemini is not configured; deterministic local category and role expansion continues.',
+  };
+};
 
 const addUniqueHints = (hints: string[]) =>
   [...new Set(hints.map((hint) => hint.trim()).filter(Boolean))].slice(0, 8);
@@ -93,17 +103,20 @@ export const runGeminiQueryAssistance = async ({
       },
     };
   } catch (error) {
-    const message =
-      error instanceof Error
+    const rateLimited = isGeminiRateLimitError(error) ||
+      (error instanceof Error && /429|rate.?limit|too many requests|quota/i.test(error.message));
+    const message = rateLimited
+      ? 'Gemini free-tier quota or rate limit was reached; deterministic public expansion continued.'
+      : error instanceof Error
         ? `${error.message} Deterministic public expansion continued.`
         : 'Gemini search planning failed. Deterministic public expansion continued.';
 
     return {
       queryHints: baseHints,
-      aiAssistance: 'failed',
+      aiAssistance: rateLimited ? 'rate_limited' : 'failed',
       coverage: {
         ...coverage,
-        status: 'failed',
+        status: rateLimited ? 'partial' : 'failed',
         message,
       },
       warning: {

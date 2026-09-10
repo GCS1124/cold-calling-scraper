@@ -2,6 +2,7 @@ import axios from 'axios';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
 import { usStateNames, type UsStateCode } from '../data/us-states';
+import { publicProviderAxiosLimits } from '../utils/provider-http-limits';
 import type { NormalizedUsLocation } from '../services/us-location';
 import { resolveCategoryProfile } from '../services/us-category-mapping';
 import { buildDiscoverySeeds } from '../services/discovery-seeds';
@@ -75,6 +76,7 @@ const newSearchFieldMask =
 const newDetailsFieldMask =
   'id,displayName,formattedAddress,nationalPhoneNumber,internationalPhoneNumber,websiteUri';
 const maxGooglePlaceLeads = 500;
+const maxPlaceDetailConcurrency = 6;
 
 export const isGooglePlacesConfigured = () =>
   Boolean(process.env.GOOGLE_PLACES_API_KEY?.trim());
@@ -302,13 +304,18 @@ const fetchLegacyTextSearchPage = async (
       language: 'en',
       pagetoken: pageToken,
     },
+    ...publicProviderAxiosLimits,
     timeout: 4_000,
   });
 
   return response.data;
 };
 
-const fetchLegacyPlaceDetails = async (apiKey: string, placeId: string) => {
+const fetchLegacyPlaceDetails = async (
+  apiKey: string,
+  placeId: string,
+  timeoutMs = 3_000,
+) => {
   const response = await axios.get<LegacyDetailsResponse>(legacyDetailsUrl, {
     params: {
       key: apiKey,
@@ -323,7 +330,8 @@ const fetchLegacyPlaceDetails = async (apiKey: string, placeId: string) => {
       ].join(','),
       language: 'en',
     },
-    timeout: 3_000,
+    ...publicProviderAxiosLimits,
+    timeout: timeoutMs,
   });
 
   return response.data;
@@ -344,6 +352,7 @@ const fetchNewTextSearchPage = async (
         'X-Goog-Api-Key': apiKey,
         'X-Goog-FieldMask': newSearchFieldMask,
       },
+      ...publicProviderAxiosLimits,
       timeout: 4_000,
     },
   );
@@ -351,7 +360,11 @@ const fetchNewTextSearchPage = async (
   return response.data;
 };
 
-const fetchNewPlaceDetails = async (apiKey: string, placeId: string) => {
+const fetchNewPlaceDetails = async (
+  apiKey: string,
+  placeId: string,
+  timeoutMs = 3_000,
+) => {
   const response = await axios.get<NewPlaceDetailsResponse>(
     `${newDetailsBaseUrl}${encodeURIComponent(placeId)}`,
     {
@@ -359,7 +372,8 @@ const fetchNewPlaceDetails = async (apiKey: string, placeId: string) => {
         'X-Goog-Api-Key': apiKey,
         'X-Goog-FieldMask': newDetailsFieldMask,
       },
-      timeout: 3_000,
+      ...publicProviderAxiosLimits,
+      timeout: timeoutMs,
     },
   );
 
@@ -614,6 +628,7 @@ const hydrateLegacyCandidate = async (
   candidate: PlaceCandidate,
   index: number,
   request: LeadProviderRequest['request'],
+  deadlineMs?: number,
 ) => {
   const baseLead = {
     id: toLeadId(candidate.placeId, index),
@@ -636,8 +651,15 @@ const hydrateLegacyCandidate = async (
     scrapedAt: new Date().toISOString(),
   } satisfies Lead;
 
+  if (deadlineMs !== undefined && Date.now() >= deadlineMs) {
+    return baseLead;
+  }
+
   try {
-    const details = await fetchLegacyPlaceDetails(apiKey, candidate.placeId);
+    const timeoutMs = deadlineMs === undefined
+      ? 3_000
+      : Math.max(1, Math.min(3_000, deadlineMs - Date.now()));
+    const details = await fetchLegacyPlaceDetails(apiKey, candidate.placeId, timeoutMs);
     if (details.status && details.status !== 'OK') {
       return baseLead;
     }
@@ -668,6 +690,7 @@ const hydrateNewCandidate = async (
   candidate: PlaceCandidate,
   index: number,
   request: LeadProviderRequest['request'],
+  deadlineMs?: number,
 ) => {
   const baseLead = {
     id: toLeadId(candidate.placeId, index),
@@ -694,8 +717,15 @@ const hydrateNewCandidate = async (
     return baseLead;
   }
 
+  if (deadlineMs !== undefined && Date.now() >= deadlineMs) {
+    return baseLead;
+  }
+
   try {
-    const details = await fetchNewPlaceDetails(apiKey, candidate.placeId);
+    const timeoutMs = deadlineMs === undefined
+      ? 3_000
+      : Math.max(1, Math.min(3_000, deadlineMs - Date.now()));
+    const details = await fetchNewPlaceDetails(apiKey, candidate.placeId, timeoutMs);
     const phone = normalizePhone(
       details.nationalPhoneNumber ?? details.internationalPhoneNumber ?? candidate.phone,
     );
@@ -717,6 +747,41 @@ const hydrateNewCandidate = async (
   } catch {
     return baseLead;
   }
+};
+
+const hydratePlaceCandidates = async (
+  apiKey: string,
+  candidates: PlaceCandidate[],
+  request: LeadProviderRequest['request'],
+  deadlineMs?: number,
+) => {
+  const hydrated: Array<Lead | undefined> = Array.from(
+    { length: candidates.length },
+    () => undefined,
+  );
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const candidate = candidates[index];
+      if (!candidate) return;
+
+      hydrated[index] = candidate.sourceKind === 'new'
+        ? await hydrateNewCandidate(apiKey, candidate, index, request, deadlineMs)
+        : await hydrateLegacyCandidate(apiKey, candidate, index, request, deadlineMs);
+    }
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(maxPlaceDetailConcurrency, candidates.length) },
+      () => worker(),
+    ),
+  );
+
+  return hydrated.filter((lead): lead is Lead => Boolean(lead));
 };
 
 export const googlePlacesProvider: LeadProvider = {
@@ -803,16 +868,6 @@ export const googlePlacesProvider: LeadProvider = {
 
     const uniqueCandidates = [...candidateMap.values()].slice(0, maxLeadCount);
 
-    const leads = await Promise.all(
-      uniqueCandidates.map(async (candidate, index): Promise<Lead> => {
-        if (candidate.sourceKind === 'new') {
-          return hydrateNewCandidate(apiKey, candidate, index, request);
-        }
-
-        return hydrateLegacyCandidate(apiKey, candidate, index, request);
-      }),
-    );
-
-    return leads.filter((lead): lead is Lead => Boolean(lead));
+    return hydratePlaceCandidates(apiKey, uniqueCandidates, request, deadlineMs);
   },
 };

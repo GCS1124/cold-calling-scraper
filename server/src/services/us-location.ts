@@ -1,4 +1,9 @@
 import type { ProviderWarning } from '../types/search';
+import {
+  getUsStateBoundingBox,
+  usStateNames,
+  type UsStateCode,
+} from '../data/us-states';
 import { httpClient } from '../utils/http-client';
 import {
   normalizeUsTimeZoneQuery,
@@ -768,10 +773,9 @@ const toLocationLabel = (result: NominatimResult) => {
 };
 
 const getStateFallbackBoundingBox = (stateCode: string) => {
-  const stateName = toStateName(stateCode);
-  if (!stateName) return null;
+  if (!toStateName(stateCode)) return null;
 
-  return null;
+  return getUsStateBoundingBox(stateCode as UsStateCode) ?? null;
 };
 
 const buildFallbackLocation = (
