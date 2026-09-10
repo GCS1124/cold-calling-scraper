@@ -286,6 +286,72 @@ describe('free AI lead discovery', () => {
     );
   });
 
+  it.each([
+    'HVAC contractor',
+    'Dental Clinics',
+    'Immigration Attorneys',
+    'Roofing Contractors',
+    'Plumbers',
+    'Mobile Notary Signing Agent',
+  ])('merges public directory coverage for every AI heading: "%s"', async (companyType) => {
+    const discoverPublicDirectories = vi.fn().mockResolvedValue({
+      leads: [makeLead({
+        id: `yelp-${companyType}`,
+        source: 'Yelp',
+        city: 'Austin',
+      })],
+      warnings: [],
+      coverage: [
+        {
+          providerId: 'yelp-public-directory',
+          providerName: 'Yelp, Public Directory',
+          status: 'returned' as const,
+          leadCount: 1,
+          message: 'Directory test result',
+        },
+        {
+          providerId: 'yellow-pages-public-directory',
+          providerName: 'Yellow Pages, Public Directory',
+          status: 'returned' as const,
+          leadCount: 0,
+          message: 'Directory test result',
+        },
+      ],
+    });
+
+    const discovery = createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({ leads: [], warnings: [], blocked: false }) as never,
+      discoverPublicDirectories: discoverPublicDirectories as never,
+      enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
+        leads,
+        warnings: [],
+        enrichedCount: 0,
+      })) as never,
+    });
+
+    const result = await discovery({
+      request: { companyType, city: 'Austin, TX', count: 50 },
+      location,
+    });
+
+    expect(discoverPublicDirectories).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ companyType }),
+        location,
+      }),
+    );
+    expect(result.leads).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'Yelp', id: `yelp-${companyType}` }),
+    ]));
+    expect(result.coverage).toContainEqual(
+      expect.objectContaining({
+        providerId: 'yelp-public-directory',
+        status: 'returned',
+        leadCount: 1,
+      }),
+    );
+  });
+
   it('prioritizes NotaryCafe evidence before LinkedIn and GMB plus LinkedIn fusion', async () => {
     const notaryCafe = makeLead({
       id: 'notarycafe-priority',
@@ -670,6 +736,11 @@ describe('free AI lead discovery', () => {
       }) as never,
       expandQuery: vi.fn().mockResolvedValue([]) as never,
       discoverGemini: discoverGemini as never,
+      enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
+        leads,
+        warnings: [],
+        enrichedCount: 0,
+      })) as never,
     })({
       request: { companyType: 'Dentist', city: 'Austin, TX', count: 50 },
       location,

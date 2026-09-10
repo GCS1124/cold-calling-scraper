@@ -98,7 +98,7 @@ export function SearchForm({
 
         <p className="text-xs font-normal leading-5 text-slate-500">
           {isAiMode
-            ? 'AI mode is the complete public-source workflow: Gemini plans and grounds research, public LinkedIn and indexed NotaryCafe profiles find people, GMB/listing sources corroborate businesses, and public websites verify contacts. No paid databases, private profiles, login sessions, or contact-reveal credits are used.'
+            ? 'AI mode is the complete public-source workflow: Gemini plans and grounds research, public LinkedIn and indexed NotaryCafe profiles find people, GMB/listing sources plus Yelp and Yellow Pages corroborate businesses, and public websites verify contacts. No paid databases, private profiles, login sessions, or contact-reveal credits are used.'
             : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
         </p>
 
@@ -148,7 +148,7 @@ export function SearchForm({
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                 <p className="text-sm font-bold">4 · Other public sources</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Websites, listings, and other bounded context
+                  OSM, Yelp, Yellow Pages, websites, and bounded context
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">

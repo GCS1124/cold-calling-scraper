@@ -45,11 +45,16 @@ import {
 import { normalizeLeadSourceMode } from './search-source-mode';
 import { buildLeadQualitySummary } from './quality-summary';
 import { filterLeadsForLocation } from './location-acceptance';
+import { isTestRuntime } from '../utils/runtime';
 import {
   discoverUsLeadsFromNotaryCafeIndex,
   prioritizeAiLeadSources,
   type NotaryCafeDiscoveryResult,
 } from './notarycafe-search';
+import {
+  discoverUsLeadsFromPublicDirectories,
+  type PublicDirectoryDiscoveryResult,
+} from './public-directory-discovery';
 
 export type AiDiscoveryResult = {
   leads: Lead[];
@@ -69,6 +74,7 @@ type AiDiscoveryDeps = {
   expandQuery?: typeof expandQueryWithGemini;
   discoverGemini?: typeof discoverGeminiResearch;
   discoverNotaryCafe?: typeof discoverUsLeadsFromNotaryCafeIndex;
+  discoverPublicDirectories?: typeof discoverUsLeadsFromPublicDirectories;
 };
 
 const discoveryWindowMs = 24_000;
@@ -129,7 +135,11 @@ const addWarning = (warnings: ProviderWarning[], warning: ProviderWarning) => {
   warnings.push(warning);
 };
 
-const buildCoverage = (gmbConfigured = false, notaryCafeConfigured = false): ProviderCoverage[] => {
+const buildCoverage = (
+  gmbConfigured = false,
+  notaryCafeConfigured = false,
+  publicDirectoriesConfigured = false,
+): ProviderCoverage[] => {
   const geminiKeyCount = getGeminiApiKeyCount();
   const geminiKeySummary = geminiKeyCount > 1
     ? `${geminiKeyCount} Gemini API keys are pooled and rotated across healthy requests.`
@@ -172,6 +182,24 @@ const buildCoverage = (gmbConfigured = false, notaryCafeConfigured = false): Pro
     status: 'configured' as const,
     leadCount: 0,
     message: 'Free OpenStreetMap/Overpass data only; public listing records are merged without paid databases.',
+  },
+  {
+    providerId: 'yelp-public-directory',
+    providerName: 'Yelp, Public Directory',
+    status: publicDirectoriesConfigured ? 'configured' : 'not_configured',
+    leadCount: 0,
+    message: publicDirectoriesConfigured
+      ? 'Bounded public Yelp result pages are checked for visible business phones; access challenges are reported, not bypassed.'
+      : 'Yelp public-directory discovery is unavailable for this execution path.',
+  },
+  {
+    providerId: 'yellow-pages-public-directory',
+    providerName: 'Yellow Pages, Public Directory',
+    status: publicDirectoriesConfigured ? 'configured' : 'not_configured',
+    leadCount: 0,
+    message: publicDirectoriesConfigured
+      ? 'Bounded public Yellow Pages result pages are checked for visible business phones; access challenges are reported, not bypassed.'
+      : 'Yellow Pages public-directory discovery is unavailable for this execution path.',
   },
   {
     providerId: 'google-places-ai',
@@ -421,6 +449,9 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
   const discoverLinkedin = deps.discoverLinkedin ?? discoverUsLeadsFromLinkedinSearch;
   const discoverPublicListings = deps.discoverPublicListings;
   const discoverGmbListings = deps.discoverGmbListings;
+  const discoverPublicDirectories =
+    deps.discoverPublicDirectories ??
+    (isTestRuntime() ? undefined : discoverUsLeadsFromPublicDirectories);
   const enrichPublicContacts =
     deps.enrichPublicContacts ?? enrichLinkedinLeadsWithPublicContacts;
   const expandQuery = deps.expandQuery ?? expandQueryWithGemini;
@@ -445,7 +476,11 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
         message: freeAiModePolicy,
       },
     ];
-    const coverage = buildCoverage(Boolean(discoverGmbListings), Boolean(discoverNotaryCafe));
+    const coverage = buildCoverage(
+      Boolean(discoverGmbListings),
+      Boolean(discoverNotaryCafe),
+      Boolean(discoverPublicDirectories),
+    );
     let aiAssistance: AiDiscoveryResult['aiAssistance'] = 'disabled';
     let researchCandidates: ResearchCandidate[] = [];
     let geminiDiscoveryFailed = false;
@@ -549,6 +584,48 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
           })
       : Promise.resolve([] as Lead[]);
 
+    const publicDirectoryPromise: Promise<Lead[]> = discoverPublicDirectories
+      ? withTimeout(
+          discoverPublicDirectories({
+            request,
+            location,
+            deadlineMs: discoveryDeadlineMs,
+          }),
+          discoveryDeadlineMs,
+          'Public directory discovery timed out; other public sources were preserved.',
+        )
+          .then((result: PublicDirectoryDiscoveryResult) => {
+            for (const warning of result.warnings) addWarning(warnings, warning);
+            for (const entry of result.coverage) {
+              updateCoverage(coverage, entry.providerId, {
+                status: entry.status,
+                leadCount: entry.leadCount,
+                message: entry.message,
+              });
+            }
+            return result.leads;
+          })
+          .catch((error): Lead[] => {
+            const timedOut = isTimeoutFailure(error);
+            const message = error instanceof Error
+              ? `${error.message} Other public sources were preserved.`
+              : 'Public directory discovery failed. Other public sources were preserved.';
+            addWarning(warnings, {
+              providerId: 'public-directories',
+              providerName: 'Public directories',
+              message,
+              severity: timedOut ? 'info' : 'warning',
+            });
+            for (const providerId of ['yelp-public-directory', 'yellow-pages-public-directory']) {
+              updateCoverage(coverage, providerId, {
+                status: timedOut ? 'partial' : 'failed',
+                message,
+              });
+            }
+            return [];
+          })
+      : Promise.resolve([] as Lead[]);
+
     const notaryCafePromise: Promise<Lead[]> = discoverNotaryCafe
       ? withTimeout(
           discoverNotaryCafe({
@@ -595,11 +672,11 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     // grounded pass instead; deterministic sources still run independently.
     const geminiDiscoveryPromise: Promise<GeminiResearchDiscovery> = isGeminiLeadDiscoveryEnabled()
       ? (async () => {
-          const listingLeads = discoverGmbListings
-            ? await gmbListingPromise.then((gmbLeads) =>
-                gmbLeads.length ? gmbLeads : publicListingPromise,
-              )
-            : await publicListingPromise;
+          const listingLeads = (await Promise.all([
+            discoverGmbListings ? gmbListingPromise : Promise.resolve([] as Lead[]),
+            publicListingPromise,
+            publicDirectoryPromise,
+          ])).flat();
           const listingSeeds = selectListingSeeds(listingLeads);
 
           if (listingSeeds.length) {
@@ -792,9 +869,10 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       });
     }
 
-    const [publicListingLeads, gmbListingLeads, geminiResult, notaryCafeLeads] = await Promise.all([
+    const [publicListingLeads, gmbListingLeads, publicDirectoryLeads, geminiResult, notaryCafeLeads] = await Promise.all([
       publicListingPromise,
       gmbListingPromise,
+      publicDirectoryPromise,
       geminiDiscoveryPromise,
       notaryCafePromise,
     ]);
@@ -815,12 +893,14 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     const scopedGeminiLeads = filterLocationSafely(geminiResult.leads);
     const scopedGmbListingLeads = filterLocationSafely(gmbListingLeads);
     const scopedPublicListingLeads = filterLocationSafely(publicListingLeads);
+    const scopedPublicDirectoryLeads = filterLocationSafely(publicDirectoryLeads);
     const scopedNotaryCafeLeads = filterLocationSafely(notaryCafeLeads);
     const excludedForLocation =
       discoveryResult.leads.length - scopedLinkedinLeads.length +
       geminiResult.leads.length - scopedGeminiLeads.length +
       gmbListingLeads.length - scopedGmbListingLeads.length +
       publicListingLeads.length - scopedPublicListingLeads.length +
+      publicDirectoryLeads.length - scopedPublicDirectoryLeads.length +
       notaryCafeLeads.length - scopedNotaryCafeLeads.length;
 
     if (excludedForLocation > 0) {
@@ -843,6 +923,20 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     updateCoverage(coverage, 'public-business-listings', {
       leadCount: scopedPublicListingLeads.length,
     });
+    for (const [providerId, source] of [
+      ['yelp-public-directory', 'Yelp'],
+      ['yellow-pages-public-directory', 'Yellow Pages'],
+    ] as const) {
+      const directoryCoverage = coverage.find((entry) => entry.providerId === providerId);
+      if (!directoryCoverage) continue;
+
+      updateCoverage(coverage, providerId, {
+        leadCount: scopedPublicDirectoryLeads.filter((lead) => lead.source === source).length,
+        message: directoryCoverage.message
+          ? `${directoryCoverage.message} Location-checked results were merged.`
+          : 'Public directory discovery completed; location-checked results were merged.',
+      });
+    }
     updateCoverage(coverage, 'notarycafe-indexed-search', {
       leadCount: scopedNotaryCafeLeads.length,
     });
@@ -868,6 +962,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       ...scopedNotaryCafeLeads,
       ...scopedGmbListingLeads,
       ...scopedPublicListingLeads,
+      ...scopedPublicDirectoryLeads,
     ];
     let leads = deduplicateLeads(
       mergeLinkedInWithPublicListings(
@@ -942,11 +1037,12 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
 };
 
 export const discoverUsLeadsFromAiMode = createAiLeadDiscovery(
-  process.env.NODE_ENV === 'test'
+  isTestRuntime()
     ? {}
     : {
         discoverPublicListings: discoverUsLeadsFromOsm,
         discoverNotaryCafe: discoverUsLeadsFromNotaryCafeIndex,
+        discoverPublicDirectories: discoverUsLeadsFromPublicDirectories,
         ...(isGooglePlacesConfigured()
           ? { discoverGmbListings: discoverGoogleBusinessListingsForAi }
           : {}),

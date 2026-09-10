@@ -12,13 +12,13 @@ const modeCopy = {
   gmb: {
     title: 'GMB source coverage',
     description:
-      'Google Places and free public listings are reported separately. Website recovery stays bounded and only adds public contact evidence.',
+      'Google Places, free public listings, and bounded Yelp/Yellow Pages checks are reported separately. Website recovery stays bounded and only adds public contact evidence.',
     badge: 'Phone-qualified only',
   },
   ai: {
     title: 'AI mode coverage',
     description:
-      'AI mode checks the four public-source tiers in a stable order: indexed NotaryCafe evidence, pure public LinkedIn, LinkedIn + Google Business fusion, then other sources. NotaryCafe is queried as a bounded cross-check on every AI search, but only relevant notary profiles with public phones can qualify. Commercial lead databases are audited but never called.',
+      'AI mode checks the four public-source tiers in a stable order: indexed NotaryCafe evidence, pure public LinkedIn, LinkedIn + Google Business fusion, then other sources including OSM, Yelp, Yellow Pages, websites, and Gemini-grounded research. NotaryCafe is queried as a bounded cross-check on every AI search, but only relevant notary profiles with public phones can qualify. Commercial lead databases are audited but never called.',
     badge: 'Public-source fusion',
   },
 } as const;
@@ -41,6 +41,7 @@ const getStatusLabel = (provider: ProviderCoverage) => {
   }
   if (provider.status === 'failed') return 'Unavailable';
   if (provider.providerId === 'notarycafe-indexed-search') return 'Connected';
+  if (provider.providerId.endsWith('-public-directory')) return 'Connected';
   return 'Ready';
 };
 

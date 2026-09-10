@@ -1084,6 +1084,80 @@ describe('createSearchService', () => {
     expect(completed?.leads.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('runs the public Yelp and Yellow Pages layer alongside GMB and OSM', async () => {
+    let backgroundTask: (() => Promise<void>) | null = null;
+    const discoverPublicDirectories = vi.fn().mockImplementation(async ({ location }) => ({
+      leads: [{
+        ...sampleLead,
+        id: 'yelp-austin-lead',
+        name: 'Austin Directory Dental',
+        source: 'Yelp',
+        city: location.label,
+        listingUrl: 'https://www.yelp.com/biz/austin-directory-dental',
+        contactSourceUrl: 'https://www.yelp.com/biz/austin-directory-dental',
+        contactEvidence: [{
+          field: 'phone' as const,
+          value: '+15125550199',
+          sourceUrl: 'https://www.yelp.com/biz/austin-directory-dental',
+          sourceName: 'Yelp, Public Directory',
+          sourceKind: 'business_listing' as const,
+          association: 'business' as const,
+        }],
+        mobile: '5125550199',
+      }],
+      warnings: [],
+      coverage: [
+        {
+          providerId: 'yelp-public-directory',
+          providerName: 'Yelp, Public Directory',
+          status: 'returned' as const,
+          leadCount: 1,
+        },
+        {
+          providerId: 'yellow-pages-public-directory',
+          providerName: 'Yellow Pages, Public Directory',
+          status: 'returned' as const,
+          leadCount: 0,
+        },
+      ],
+    }));
+
+    const service = createSearchService({
+      idFactory: () => 'search-public-directories',
+      normalizeLocation: vi.fn().mockResolvedValue(sampleLocation),
+      discoverGoogleLeads: vi.fn().mockResolvedValue([]),
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      discoverPublicDirectories: discoverPublicDirectories as never,
+      schedule: (task) => {
+        backgroundTask = task;
+      },
+    });
+
+    await service.startSearch({
+      companyType: 'Dental Clinics',
+      city: 'Austin',
+      count: 50,
+    });
+
+    if (!backgroundTask) {
+      throw new Error('Background task was not scheduled');
+    }
+
+    const task = backgroundTask as () => Promise<void>;
+    await task();
+    const completed = await service.getSearch('search-public-directories');
+    const coverage = completed?.meta.progress.providerCoverage ?? [];
+
+    expect(discoverPublicDirectories).toHaveBeenCalled();
+    expect(coverage).toEqual(expect.arrayContaining([
+      expect.objectContaining({ providerId: 'yelp-public-directory', status: 'returned' }),
+      expect.objectContaining({ providerId: 'yellow-pages-public-directory', status: 'returned' }),
+    ]));
+    expect(completed?.leads).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Austin Directory Dental', source: 'Yelp' }),
+    ]));
+  });
+
   it('stops a no-progress discovery after the 45-second stall window expires', async () => {
     let backgroundTask: (() => Promise<void>) | null = null;
     const googleCalls: string[] = [];

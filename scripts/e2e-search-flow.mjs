@@ -139,6 +139,16 @@ const makeResponse = (mode, failed = false) => ({
             providerName: 'Google Places',
             status: 'returned',
             leadCount: 1,
+          }, {
+            providerId: 'yelp-public-directory',
+            providerName: 'Yelp, Public Directory',
+            status: 'returned',
+            leadCount: 1,
+          }, {
+            providerId: 'yellow-pages-public-directory',
+            providerName: 'Yellow Pages, Public Directory',
+            status: 'partial',
+            leadCount: 0,
           }]
         : [{
             providerId: 'notarycafe-indexed-search',
@@ -160,6 +170,16 @@ const makeResponse = (mode, failed = false) => ({
             providerName: 'Public Business Listings',
             status: 'returned',
             leadCount: 1,
+          }, {
+            providerId: 'yelp-public-directory',
+            providerName: 'Yelp, Public Directory',
+            status: 'returned',
+            leadCount: 1,
+          }, {
+            providerId: 'yellow-pages-public-directory',
+            providerName: 'Yellow Pages, Public Directory',
+            status: 'partial',
+            leadCount: 0,
           }, {
             providerId: 'gemini-public-discovery',
             providerName: 'Gemini public discovery',
@@ -289,6 +309,8 @@ const run = async () => {
     await page.getByText('AI mode coverage', { exact: true }).waitFor();
     assert(await page.getByText('AI interpretation preview').count() === 1, 'AI preview is missing');
     assert(await page.getByText('Public Business Listings').count() === 1, 'AI public listing coverage is missing');
+    assert(await page.getByText('Yelp, Public Directory', { exact: true }).count() === 1, 'AI Yelp coverage is missing');
+    assert(await page.getByText('Yellow Pages, Public Directory', { exact: true }).count() === 1, 'AI Yellow Pages coverage is missing');
     const aiRows = await page.locator('tbody tr').allTextContents();
     const requiredOrder = [
       'NotaryCafe Public Lead',

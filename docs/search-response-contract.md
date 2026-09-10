@@ -76,10 +76,27 @@ promote unrelated profiles. It does not fetch NotaryCafe pages directly or
 bypass Cloudflare, CAPTCHA, login, geo restrictions, or private profile
 controls. Indexed references may be stale and should be reverified before
 outreach.
+
+AI mode also runs the same bounded Yelp and Yellow Pages public-directory layer
+for every heading. Directory results are category/location-scoped and pass
+through the normal dedupe, public-phone evidence, website enrichment, and final
+export gates; directory phones are business contact routes, not personal mobile
+claims. The adapters never bypass an access challenge or promote an
+India-oriented result into a US search.
 The adapter bounds query count, provider timeout, result count, and response-body
 bytes (`NOTARYCAFE_INDEX_MAX_QUERIES`, `NOTARYCAFE_INDEX_TIMEOUT_MS`,
 `NOTARYCAFE_INDEX_MAX_RESULTS`, and `NOTARYCAFE_INDEX_MAX_BODY_BYTES`). The
 LinkedIn and public contact-search paths apply the same response-body guard.
+
+Public directory coverage is wired into both search modes. The Yelp and Yellow
+Pages adapters make bounded requests to public result pages across concrete US
+location seeds, parse only visible or structured business fields, and attach a
+phone only when it is explicitly published on the directory record. Their
+results merge with OSM, Google Business/Maps, public LinkedIn,
+NotaryCafe-index, and public-website evidence. A provider block, CAPTCHA,
+Cloudflare challenge, timeout, or empty response becomes provider coverage and
+does not stop the other sources. India-oriented adapters are not part of the US
+workflow.
 
 ## HTTP errors and tracing
 
@@ -176,8 +193,9 @@ unbounded response payload.
 ### GMB
 
 Google Places is used only when configured. Free public listing discovery remains
-an independent fallback. Website recovery is bounded and only promotes publicly
-observed phone or email evidence.
+an independent fallback. Bounded public Yelp and Yellow Pages checks add an
+independent directory layer. Website recovery is bounded and only promotes
+publicly observed phone or email evidence.
 
 ### LinkedIn
 

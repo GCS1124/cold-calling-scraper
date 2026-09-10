@@ -342,6 +342,67 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(discoverOsmLeads).toHaveBeenCalled();
   });
 
+  it('persists public directory coverage in the durable GMB path', async () => {
+    const discoverPublicDirectories = vi.fn().mockResolvedValue({
+      leads: [makeLead({
+        id: 'durable-yelp-lead',
+        name: 'Durable Yelp Dental',
+        source: 'Yelp',
+        listingUrl: 'https://www.yelp.com/biz/durable-yelp-dental',
+        contactSourceUrl: 'https://www.yelp.com/biz/durable-yelp-dental',
+      })],
+      warnings: [],
+      coverage: [
+        {
+          providerId: 'yelp-public-directory',
+          providerName: 'Yelp, Public Directory',
+          status: 'returned' as const,
+          leadCount: 1,
+        },
+        {
+          providerId: 'yellow-pages-public-directory',
+          providerName: 'Yellow Pages, Public Directory',
+          status: 'returned' as const,
+          leadCount: 0,
+        },
+      ],
+    });
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      googlePlaces: {
+        id: 'google-places',
+        name: 'Google Places',
+        fetchLeads: vi.fn().mockResolvedValue([]),
+      } as never,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      discoverPublicDirectories: discoverPublicDirectories as never,
+      idFactory: () => 'search-durable-public-directories',
+      now: () => 1000,
+    });
+
+    const started = await service.startSearch({
+      companyType: 'Dental Clinics',
+      city: 'Austin, TX',
+      count: 50,
+    });
+    const snapshot = await service.advanceSearch(started.searchId);
+
+    expect(discoverPublicDirectories).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ companyType: 'Dental Clinics' }),
+        location: localLocation,
+      }),
+    );
+    expect(snapshot?.meta.progress.providerCoverage).toEqual(expect.arrayContaining([
+      expect.objectContaining({ providerId: 'yelp-public-directory', leadCount: 1 }),
+      expect.objectContaining({ providerId: 'yellow-pages-public-directory', leadCount: 0 }),
+    ]));
+    expect(snapshot?.leads).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Durable Yelp Dental', source: 'Yelp' }),
+    ]));
+  });
+
   it('recovers a public phone from a business website before GMB finalization', async () => {
     const enrichWebsiteLead = vi.fn().mockImplementation(async (lead: Lead) => ({
       lead: {

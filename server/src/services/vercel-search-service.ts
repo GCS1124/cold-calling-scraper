@@ -19,6 +19,10 @@ import { formatGoogleMapsFailure } from './google-maps-discovery';
 import { enrichLeadFromWebsite } from './website-enrichment';
 import { enrichWebsiteCandidates, type WebsiteLeadEnricher } from './business-website-enrichment';
 import {
+  discoverUsLeadsFromPublicDirectories,
+  type PublicDirectoryDiscoveryResult,
+} from './public-directory-discovery';
+import {
   discoverUsLeadsFromAiMode,
   type AiDiscoveryResult,
 } from './ai-lead-discovery';
@@ -65,6 +69,7 @@ import {
   normalizeLeadSourceMode,
   type LeadSourceMode,
 } from './search-source-mode';
+import { isTestRuntime } from '../utils/runtime';
 
 type VercelSearchService = {
   startSearch: (
@@ -123,6 +128,7 @@ type VercelSearchServiceDeps = {
     profile: ReturnType<typeof resolveCategoryProfile>;
     deadlineMs?: number;
   }) => Promise<Lead[]>;
+  discoverPublicDirectories?: typeof discoverUsLeadsFromPublicDirectories;
   enrichWebsiteLead?: WebsiteLeadEnricher;
   now?: () => number;
   idFactory?: () => string;
@@ -157,12 +163,28 @@ const getAiDiscoveryWindowMs = (requestedCount: number) =>
   requestedCount >= 50 ? 36_000 : 30_000;
 const getMaxTickDurationMs = (requestedCount: number) =>
   requestedCount >= 50 ? 45_000 : 30_000;
+const publicDirectoryDiscoveryTimeoutMs = 10_000;
 const processingLeaseMs = 70_000;
 
 const isVercelRuntime = () =>
   process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV);
 
 const withNow = () => Date.now();
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: string) => {
+  let timer: NodeJS.Timeout | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), Math.max(1, timeoutMs));
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
 
 const createProgress = (requestedCount: number): SearchProgress => ({
   discovered: 0,
@@ -343,6 +365,7 @@ const discoverRegionLeads = async (
   googlePlaces: typeof googlePlacesProvider,
   discoverGoogleMapsLeads: VercelSearchServiceDeps['discoverGoogleMapsLeads'],
   discoverOsmLeads: NonNullable<VercelSearchServiceDeps['discoverOsmLeads']>,
+  discoverPublicDirectories: VercelSearchServiceDeps['discoverPublicDirectories'] | undefined,
   now: () => number,
   profile = resolveCategoryProfile(request.companyType),
   deadlineMs = Date.now() + getMaxTickDurationMs(request.count),
@@ -391,6 +414,24 @@ const discoverRegionLeads = async (
       message: discoverGoogleMapsLeads
         ? 'Bounded fallback discovery is available when primary sources are insufficient.'
         : 'Fallback discovery is not configured for this execution path.',
+    },
+    {
+      providerId: 'yelp-public-directory',
+      providerName: 'Yelp, Public Directory',
+      status: discoverPublicDirectories ? 'configured' : 'not_configured',
+      leadCount: 0,
+      message: discoverPublicDirectories
+        ? 'Bounded public directory discovery runs alongside the primary listing sources.'
+        : 'Yelp public-directory discovery is not configured for this execution path.',
+    },
+    {
+      providerId: 'yellow-pages-public-directory',
+      providerName: 'Yellow Pages, Public Directory',
+      status: discoverPublicDirectories ? 'configured' : 'not_configured',
+      leadCount: 0,
+      message: discoverPublicDirectories
+        ? 'Bounded public directory discovery runs alongside the primary listing sources.'
+        : 'Yellow Pages public-directory discovery is not configured for this execution path.',
     },
   ];
   const updateCoverage = (entry: ProviderCoverage) => {
@@ -468,7 +509,53 @@ const discoverRegionLeads = async (
     }
   })();
 
-  const [googleLeads, osmLeads] = await Promise.all([googleLeadsPromise, osmLeadsPromise]);
+  const publicDirectoryDeadlineMs = Math.min(
+    deadlineMs,
+    now() + publicDirectoryDiscoveryTimeoutMs,
+  );
+  const publicDirectoryPromise: Promise<PublicDirectoryDiscoveryResult | null> =
+    discoverPublicDirectories
+      ? withTimeout(
+          discoverPublicDirectories({
+            request,
+            location: discoveryLocation,
+            deadlineMs: publicDirectoryDeadlineMs,
+          }),
+          Math.max(1, publicDirectoryDeadlineMs - now()),
+          'Public directory discovery timed out before the regional batch completed',
+        ).catch((error) => {
+          const message = error instanceof Error
+            ? error.message
+            : 'Public directory discovery failed.';
+          updateCoverage({
+            providerId: 'yelp-public-directory',
+            providerName: 'Yelp, Public Directory',
+            status: /deadline|timed out|timeout/i.test(message) ? 'partial' : 'failed',
+            leadCount: 0,
+            message,
+          });
+          updateCoverage({
+            providerId: 'yellow-pages-public-directory',
+            providerName: 'Yellow Pages, Public Directory',
+            status: /deadline|timed out|timeout/i.test(message) ? 'partial' : 'failed',
+            leadCount: 0,
+            message,
+          });
+          warnings.push({
+            providerId: 'public-directories',
+            providerName: 'Public directories',
+            message: `${message} Other public sources were preserved; no access challenge was bypassed.`,
+            severity: /deadline|timed out|timeout/i.test(message) ? 'info' : 'warning',
+          });
+          return null;
+        })
+      : Promise.resolve(null);
+
+  const [googleLeads, osmLeads, publicDirectoryResult] = await Promise.all([
+    googleLeadsPromise,
+    osmLeadsPromise,
+    publicDirectoryPromise,
+  ]);
 
   updateCoverage({
     providerId: 'google-places',
@@ -495,7 +582,23 @@ const discoverRegionLeads = async (
     message: `Free public listing provider returned ${osmLeads.length} candidate(s).`,
   });
 
-  if (!googleLeads.length && !osmLeads.length) {
+  let publicDirectoryLeads: Lead[] = [];
+  if (publicDirectoryResult) {
+    for (const warning of publicDirectoryResult.warnings) warnings.push(warning);
+    publicDirectoryLeads = filterLeadsForLocation(publicDirectoryResult.leads, targetLocation);
+    for (const entry of publicDirectoryResult.coverage) {
+      updateCoverage({
+        ...entry,
+        leadCount: entry.providerId === 'yelp-public-directory'
+          ? publicDirectoryLeads.filter((lead) => lead.source === 'Yelp').length
+          : entry.providerId === 'yellow-pages-public-directory'
+            ? publicDirectoryLeads.filter((lead) => lead.source === 'Yellow Pages').length
+            : entry.leadCount,
+      });
+    }
+  }
+
+  if (!googleLeads.length && !osmLeads.length && !publicDirectoryLeads.length) {
     warnings.push({
       providerId: 'discovery',
       providerName: 'Discovery',
@@ -503,7 +606,10 @@ const discoverRegionLeads = async (
     });
   }
 
-  const acceptedDiscoveryLeads = filterLeadsForLocation([...googleLeads, ...osmLeads], targetLocation);
+  const acceptedDiscoveryLeads = filterLeadsForLocation(
+    [...googleLeads, ...osmLeads, ...publicDirectoryLeads],
+    targetLocation,
+  );
   let googleMapsLeads: Lead[] = [];
   let googleMapsUnavailable = false;
 
@@ -569,6 +675,7 @@ const tickJob = async (
     Pick<
       VercelSearchServiceDeps,
       | 'discoverGoogleMapsLeads'
+      | 'discoverPublicDirectories'
       | 'discoverAiLeads'
       | 'enrichWebsiteLead'
     >,
@@ -701,6 +808,7 @@ const tickJob = async (
         deps.googlePlaces,
         discoverGoogleMapsForSearch,
         deps.discoverOsmLeads,
+        deps.discoverPublicDirectories,
         deps.now,
         resolveCategoryProfile(job.request.companyType),
         deps.now() + maxTickDurationMs,
@@ -828,6 +936,9 @@ export const createVercelSearchServiceWithDeps = (
     deps.enrichWebsiteLead ??
     (process.env.NODE_ENV === 'test' ? undefined : enrichLeadFromWebsite);
   const discoverOsm = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
+  const discoverPublicDirectories =
+    deps.discoverPublicDirectories ??
+    (isTestRuntime() ? undefined : discoverUsLeadsFromPublicDirectories);
   const now = deps.now ?? withNow;
   const idFactory = deps.idFactory ?? randomUUID;
   const deliverCallback = deps.deliverCallback ?? deliverSearchCompletionCallback;
@@ -900,6 +1011,7 @@ export const createVercelSearchServiceWithDeps = (
       discoverAiLeads,
       enrichWebsiteLead,
       discoverOsmLeads: discoverOsm,
+      discoverPublicDirectories,
       now,
     });
     inFlightTicks.set(searchId, tick);

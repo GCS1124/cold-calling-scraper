@@ -239,9 +239,12 @@ all owner-scoped feedback require the configured Postgres connection.
 ### GMB
 
 Google Places is used when configured. Free public listing discovery remains an
-independent fallback. Website recovery is bounded and may add a phone only when
-it is publicly observed on an assessed business website. Provider warnings and
-unconfigured Google access remain visible.
+independent fallback, and bounded public Yelp/Yellow Pages result-page checks
+add an independent directory layer. Website recovery is bounded and may add a
+phone only when it is publicly observed on an assessed business website.
+Provider coverage keeps directory blocks, challenges, timeouts, and empty
+responses visible without stopping the other sources. India-oriented directory
+adapters are excluded from US modes.
 
 ### LinkedIn
 
@@ -271,6 +274,13 @@ probes cannot promote unrelated profiles. It never fetches NotaryCafe pages or
 bypasses Cloudflare, CAPTCHA, login, geo restrictions, or private-profile
 controls; indexed records may be stale and should be reverified before
 outreach.
+
+Every AI heading also runs bounded public Yelp and Yellow Pages checks. These
+adapters read public result pages only, keep category/location scope, and attach
+phone evidence only when the directory explicitly publishes a business phone.
+They are fused with OSM, Google Business/Maps, public LinkedIn, NotaryCafe
+index, and public websites; a block or timeout is a partial provider result,
+never a challenge-bypass instruction.
 
 ## Error Handling
 

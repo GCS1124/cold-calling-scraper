@@ -102,16 +102,18 @@ const phonePolicy: PhonePolicyContract = {
 
 const commonLimitations = [
   'Only public, legally accessible sources are used.',
+  'Public directory coverage includes bounded Yelp and Yellow Pages result-page checks; a block, CAPTCHA, Cloudflare challenge, or empty response is reported as partial coverage rather than bypassed.',
+  'India-oriented directory adapters are intentionally excluded from US search modes; no location is silently widened to another country.',
   'A public business phone does not prove mobile line type, personal ownership, or reachability.',
   'Missing contact data means it was not publicly observed; it does not prove the business lacks it.',
 ] as const;
 
 const modeLimitations: Record<SearchModeCode, readonly string[]> = {
   gmb: [
-    'Google Business results depend on configured Google Places access; free public listing coverage is used as an independent fallback.',
+    'Google Business results depend on configured Google Places access; free public listing coverage and bounded public Yelp/Yellow Pages checks are used as independent fallbacks.',
   ],
   ai: [
-    'AI mode fuses public business listings, public professional-profile discovery including LinkedIn result signals, search-indexed public NotaryCafe profile references, Gemini-grounded research, public websites, and published social links into one ranked evidence graph.',
+    'AI mode fuses public business listings, bounded Yelp/Yellow Pages directory checks, public professional-profile discovery including LinkedIn result signals, search-indexed public NotaryCafe profile references, Gemini-grounded research, public websites, and published social links into one ranked evidence graph.',
     'Gemini can expand public search lenses and return grounded public research candidates; public evidence and the required phone gate decide what becomes an exportable lead.',
     'NotaryCafe is checked as a bounded indexed-public cross-source probe on every AI search, but only category-relevant notary profiles with public phone evidence can qualify; references may be stale. Direct page access, login, CAPTCHA, Cloudflare, and geo-block bypasses are not used. Reverify before outreach.',
     'Commercial lead databases, paid contact lookups, private profiles, authenticated sessions, and contact-reveal credits are not called.',

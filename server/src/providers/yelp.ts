@@ -1,8 +1,20 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import type { Cheerio } from 'cheerio';
+import type { AnyNode } from 'domhandler';
 
 import type { Lead } from '../types/lead';
+import { normalizeContactPhone } from '../services/contact-evidence';
 import { publicProviderAxiosLimits } from '../utils/provider-http-limits';
+import {
+  buildDirectoryPhoneEvidence,
+  buildProviderSearchUrl,
+  extractDirectoryPhone,
+  extractStructuredDirectoryEntities,
+  findStructuredDirectoryEntity,
+  toProviderListingUrl,
+  toPublicAbsoluteUrl,
+} from './public-directory-utils';
 import type { LeadProvider } from './provider';
 
 const userAgent =
@@ -11,22 +23,38 @@ const userAgent =
 const isBlockedResponse = (status: number, body: string) =>
   status === 403 || /access denied|forbidden|captcha|blocked|unusual traffic/i.test(body);
 
+const yelpSearchUrl = 'https://www.yelp.com/search';
+const yelpBlockedHosts = ['yelp.com'];
+
+const pickPhone = (scope: Cheerio<AnyNode>, structuredPhone?: string) =>
+  extractDirectoryPhone(
+    scope.find('a[href^="tel:"]').first().attr('href'),
+    scope.find('[data-phone], [data-testid*="phone"], .phone, .phones').first().text(),
+    structuredPhone,
+    scope.text(),
+  );
+
 export const yelpProvider: LeadProvider = {
   id: 'yelp',
   name: 'Yelp',
-  async fetchLeads({ query, request }) {
-    const response = await axios.get<string>('https://www.yelp.com/search', {
+  async fetchLeads({ query, request, deadlineMs }) {
+    const searchUrl = buildProviderSearchUrl(yelpSearchUrl, {
+      find_desc: query,
+      find_loc: `${request.city}, USA`,
+    });
+    const response = await axios.get<string>(yelpSearchUrl, {
       params: {
         find_desc: query,
         find_loc: `${request.city}, USA`,
       },
       headers: { 'User-Agent': userAgent },
       ...publicProviderAxiosLimits,
-      timeout: 10000,
+      timeout: Math.max(1, Math.min(10_000, deadlineMs ? deadlineMs - Date.now() : 10_000)),
       validateStatus: () => true,
     });
 
-    if (isBlockedResponse(response.status, response.data)) {
+    const body = typeof response.data === 'string' ? response.data : String(response.data ?? '');
+    if (isBlockedResponse(response.status, body)) {
       throw new Error('Yelp blocked the request with a captcha or access challenge');
     }
 
@@ -34,8 +62,12 @@ export const yelpProvider: LeadProvider = {
       throw new Error(`Yelp returned HTTP ${response.status}`);
     }
 
-    const $ = cheerio.load(response.data);
+    const $ = cheerio.load(body);
     const cards = $('li[data-testid="serp-ia-card"], .businessName').slice(0, request.count);
+    const structured = extractStructuredDirectoryEntities(
+      $('script[type="application/ld+json"]').map((_, element) => $(element).text()).get(),
+    );
+    const observedAt = new Date().toISOString();
 
     return cards
       .map((index, element) => {
@@ -48,24 +80,47 @@ export const yelpProvider: LeadProvider = {
           return null;
         }
 
-        const website = scope.find('a[href^="http"]').first().attr('href') || '';
+        const structuredEntity = findStructuredDirectoryEntity(structured, name);
+        const website =
+          [...scope.find('a[href]').map((_, link) => $(link).attr('href')).get(), structuredEntity?.url]
+            .map((href) => toPublicAbsoluteUrl(href, yelpSearchUrl, yelpBlockedHosts))
+            .find(Boolean) || '';
         const address = scope.find('address, [data-testid="address"]').first().text().trim();
+        const phone = pickPhone(scope, structuredEntity?.telephone) || normalizeContactPhone(
+          structuredEntity?.telephone,
+        );
+        const listingUrl = toProviderListingUrl(
+          scope.find('a[href*="/biz/"]').first().attr('href'),
+          yelpSearchUrl,
+          /\/biz\//i,
+          searchUrl,
+        );
+        const contactEvidence = buildDirectoryPhoneEvidence({
+          phone,
+          sourceUrl: listingUrl,
+          sourceName: 'Yelp, Public Directory',
+          observedAt,
+        });
 
         const lead: Lead = {
           id: `yelp-${request.city}-${index}`,
           name,
-          mobile: '',
+          mobile: phone,
           email: '',
           website,
           address,
           category: request.companyType,
           city: request.city,
           source: 'Yelp',
-          confidence: 56,
+          confidence: phone ? 64 : 56,
+          sourceScore: 62,
+          listingUrl,
+          contactSourceUrl: phone ? listingUrl : undefined,
+          contactEvidence,
           hasEmail: false,
-          hasPhone: false,
-          hasWebsite: false,
-          verifiedPhone: false,
+          hasPhone: Boolean(phone),
+          hasWebsite: Boolean(website),
+          verifiedPhone: Boolean(phone),
           verifiedEmail: false,
           scrapedAt: new Date().toISOString(),
         };

@@ -45,11 +45,16 @@ import { noUsableResultsWarning } from './search-finalization';
 import { enrichLeadFromWebsite } from './website-enrichment';
 import { enrichWebsiteCandidates, type WebsiteLeadEnricher } from './business-website-enrichment';
 import {
+  discoverUsLeadsFromPublicDirectories,
+  type PublicDirectoryDiscoveryResult,
+} from './public-directory-discovery';
+import {
   buildSearchExecutionContract,
   buildSearchResponseContract,
 } from '../../../shared/search-contract';
 import { recordProviderCoverage } from './provider-coverage';
 import { buildLeadQualitySummary } from './quality-summary';
+import { isTestRuntime } from '../utils/runtime';
 import {
   createSearchRequestFingerprint,
   normalizeIdempotencyKey,
@@ -140,6 +145,7 @@ type SearchDeps = {
     profile: ReturnType<typeof resolveCategoryProfile>;
     deadlineMs?: number;
   }) => Promise<Lead[]>;
+  discoverPublicDirectories?: typeof discoverUsLeadsFromPublicDirectories;
   schedule?: (task: () => Promise<void>) => void;
   now?: () => number;
   idFactory?: () => string;
@@ -154,6 +160,7 @@ const getGoogleDiscoveryTimeoutMs = (requestedCount: number) =>
 const googleMapsDiscoveryTimeoutMs = 8_000;
 const aiDiscoveryTimeoutMs = 40000;
 const osmDiscoveryTimeoutMs = 20000;
+const publicDirectoryDiscoveryTimeoutMs = 10000;
 const maxCandidatePool = 3000;
 const getDiscoveryStallMs = (requestedCount: number) =>
   requestedCount >= 50 ? 45_000 : 20_000;
@@ -514,6 +521,7 @@ const runRegionalDiscovery = async (
   discoverGoogleLeads: NonNullable<SearchDeps['discoverGoogleLeads']>,
   discoverGoogleMapsLeads: SearchDeps['discoverGoogleMapsLeads'] | undefined,
   discoverOsmLeads: NonNullable<SearchDeps['discoverOsmLeads']>,
+  discoverPublicDirectories: SearchDeps['discoverPublicDirectories'] | undefined,
   enrichWebsiteLead: SearchDeps['enrichWebsiteLead'],
   now: () => number,
 ) => {
@@ -531,6 +539,7 @@ const runRegionalDiscovery = async (
   );
   const googlePlacesAvailable =
     discoverGoogleLeads !== googlePlacesProvider || isGooglePlacesConfigured();
+  const publicDirectoryDeadlineMs = now() + publicDirectoryDiscoveryTimeoutMs;
 
   recordProviderCoverage(job.progress, [
     {
@@ -557,6 +566,24 @@ const runRegionalDiscovery = async (
       message: discoverGoogleMapsLeads
         ? 'Bounded fallback discovery is available when the primary sources are insufficient.'
         : 'Fallback discovery is not configured for this execution path.',
+    },
+    {
+      providerId: 'yelp-public-directory',
+      providerName: 'Yelp, Public Directory',
+      status: discoverPublicDirectories ? 'configured' : 'not_configured',
+      leadCount: 0,
+      message: discoverPublicDirectories
+        ? 'Bounded public directory discovery runs alongside the primary listing sources.'
+        : 'Yelp public-directory discovery is not configured for this execution path.',
+    },
+    {
+      providerId: 'yellow-pages-public-directory',
+      providerName: 'Yellow Pages, Public Directory',
+      status: discoverPublicDirectories ? 'configured' : 'not_configured',
+      leadCount: 0,
+      message: discoverPublicDirectories
+        ? 'Bounded public directory discovery runs alongside the primary listing sources.'
+        : 'Yellow Pages public-directory discovery is not configured for this execution path.',
     },
   ]);
 
@@ -676,6 +703,60 @@ const runRegionalDiscovery = async (
         }]);
       }
     })(),
+    (async () => {
+      if (!discoverPublicDirectories) return;
+
+      try {
+        const result = await withTimeout(
+          discoverPublicDirectories({
+            request,
+            location: discoveryLocation,
+            deadlineMs: publicDirectoryDeadlineMs,
+          }),
+          Math.min(publicDirectoryDiscoveryTimeoutMs, Math.max(1, publicDirectoryDeadlineMs - now())),
+          'Public directory discovery timed out before the batch completed',
+        );
+        const acceptedDirectoryLeads = filterLeadsForLocation(result.leads, targetLocation);
+        const coverage = result.coverage.map((entry) => ({
+          ...entry,
+          leadCount: entry.providerId === 'yelp-public-directory'
+            ? acceptedDirectoryLeads.filter((lead) => lead.source === 'Yelp').length
+            : entry.providerId === 'yellow-pages-public-directory'
+              ? acceptedDirectoryLeads.filter((lead) => lead.source === 'Yellow Pages').length
+              : entry.leadCount,
+        }));
+        recordProviderCoverage(job.progress, coverage);
+        appendUniqueWarnings(job, result.warnings);
+        upsertLeads(job, acceptedDirectoryLeads, now);
+        job.progress.batchesCompleted += 1;
+      } catch (error) {
+        const message = error instanceof Error
+          ? error.message
+          : 'Public directory discovery failed.';
+        recordProviderCoverage(job.progress, [
+          {
+            providerId: 'yelp-public-directory',
+            providerName: 'Yelp, Public Directory',
+            status: isTimeoutFailure(error) ? 'partial' : 'failed',
+            leadCount: 0,
+            message,
+          },
+          {
+            providerId: 'yellow-pages-public-directory',
+            providerName: 'Yellow Pages, Public Directory',
+            status: isTimeoutFailure(error) ? 'partial' : 'failed',
+            leadCount: 0,
+            message,
+          },
+        ]);
+        appendUniqueWarnings(job, [{
+          providerId: 'public-directories',
+          providerName: 'Public directories',
+          message: `${message} Other public sources were preserved; no access challenge was bypassed.`,
+          severity: isTimeoutFailure(error) ? 'info' : 'warning',
+        }]);
+      }
+    })(),
   ]);
 
   let googleMapsUnavailable = false;
@@ -782,6 +863,9 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
     deps.enrichWebsiteLead ??
     (process.env.NODE_ENV === 'test' ? undefined : enrichLeadFromWebsite);
   const discoverOsmLeads = deps.discoverOsmLeads ?? discoverUsLeadsFromOsm;
+  const discoverPublicDirectories =
+    deps.discoverPublicDirectories ??
+    (isTestRuntime() ? undefined : discoverUsLeadsFromPublicDirectories);
   const now = deps.now ?? Date.now;
   const idFactory = deps.idFactory ?? randomUUID;
   const canAccessJob = (job: SearchJob, context?: SearchAccessContext) =>
@@ -911,6 +995,7 @@ export const createSearchService = (deps: SearchDeps = {}): SearchService => {
         discoverGoogleLeads,
         guardedDiscoverGoogleMapsLeads,
         discoverOsmLeads,
+        discoverPublicDirectories,
         enrichWebsiteLead,
         now,
       );
