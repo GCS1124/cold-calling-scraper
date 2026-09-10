@@ -18,7 +18,7 @@ const modeCopy = {
   ai: {
     title: 'AI mode coverage',
     description:
-      'AI mode displays the four public-source tiers in a stable order: indexed NotaryCafe evidence, pure public LinkedIn, LinkedIn + Google Business fusion, then other sources. Evidence and the required phone gate decide which records become exportable leads; Gemini, public websites, and social links only add bounded public context. Commercial lead databases are audited but never called.',
+      'AI mode checks the four public-source tiers in a stable order: indexed NotaryCafe evidence, pure public LinkedIn, LinkedIn + Google Business fusion, then other sources. NotaryCafe is queried as a bounded cross-check on every AI search, but only relevant notary profiles with public phones can qualify. Commercial lead databases are audited but never called.',
     badge: 'Public-source fusion',
   },
 } as const;
@@ -40,6 +40,7 @@ const getStatusLabel = (provider: ProviderCoverage) => {
       : 'Partial';
   }
   if (provider.status === 'failed') return 'Unavailable';
+  if (provider.providerId === 'notarycafe-indexed-search') return 'Connected';
   return 'Ready';
 };
 

@@ -66,11 +66,13 @@ and normalized role, employment status, decision-maker signal, and independent
 source-family metadata. These are additive fields; consumers should continue
 to enforce `phonePolicy.required` and inspect each lead's source evidence.
 
-NotaryCafe coverage uses a bounded public-search-index adapter. It queries
-public search engines for `notarycafe.com` profile references, keeps only
-records whose indexed snippet exposes a parseable US phone, and sends those
-records through the same normalization, evidence, deduplication, and export
-gate as every other source. It does not fetch NotaryCafe pages directly or
+NotaryCafe coverage uses a bounded public-search-index adapter on every AI
+search. It queries public search engines for category- and location-aware
+`notarycafe.com` profile references, keeps only relevant notary records whose
+indexed snippet exposes a parseable US phone, and sends those records through
+the same normalization, evidence, deduplication, and export gate as every
+other source. Non-notary probes are retained for provider coverage but cannot
+promote unrelated profiles. It does not fetch NotaryCafe pages directly or
 bypass Cloudflare, CAPTCHA, login, geo restrictions, or private profile
 controls. Indexed references may be stale and should be reverified before
 outreach.

@@ -544,8 +544,11 @@ const locationTermsFor = (location: NormalizedUsLocation) => {
 export const buildNotaryCafeSearchQueries = (
   location: NormalizedUsLocation,
   requestedCount = 50,
+  companyType = 'Notary Public',
 ) => {
   const locationTerms = locationTermsFor(location);
+  const categoryPhrase = normalizeText(companyType).replace(/["\r\n]+/g, ' ').trim() || 'Notary Public';
+  const isNotaryRequest = isNotaryCafeCategory(categoryPhrase);
   const serviceTerms = unique([
     'notary',
     'mobile notary',
@@ -560,28 +563,41 @@ export const buildNotaryCafeSearchQueries = (
   // variants. Search engines differ in how strictly they interpret `site:`
   // and quoted snippets; bounded fallbacks improve recall without increasing
   // direct-origin traffic to NotaryCafe.
-  for (const place of locationTerms) {
-    queries.push(
-      `site:notarycafe.com "notary" "${place}" "Phone" -forum -contact -register`,
-      `site:notarycafe.com notary "${place}" phone -forum -contact -register`,
-      `site:notarycafe.com "Phone Numbers" ${place} notary -forum -contact -register`,
-    );
-  }
-
-  for (const service of serviceTerms) {
+  if (isNotaryRequest) {
     for (const place of locationTerms) {
       queries.push(
-        `site:notarycafe.com "${service}" "${place}" phone -forum -contact -register`,
+        `site:notarycafe.com "notary" "${place}" "Phone" -forum -contact -register`,
+        `site:notarycafe.com notary "${place}" phone -forum -contact -register`,
+        `site:notarycafe.com "Phone Numbers" ${place} notary -forum -contact -register`,
       );
     }
-  }
 
-  if (requestedCount >= 100) {
-    queries.push(
-      ...locationTerms.map(
-        (place) => `site:notarycafe.com/ "Phone Numbers" "${place}" notary -forum -contact`,
-      ),
-    );
+    for (const service of serviceTerms) {
+      for (const place of locationTerms) {
+        queries.push(
+          `site:notarycafe.com "${service}" "${place}" phone -forum -contact -register`,
+        );
+      }
+    }
+
+    if (requestedCount >= 100) {
+      queries.push(
+        ...locationTerms.map(
+          (place) => `site:notarycafe.com/ "Phone Numbers" "${place}" notary -forum -contact`,
+        ),
+      );
+    }
+  } else {
+    // The adapter is connected to every AI search, but NotaryCafe is a
+    // notary directory. Category-aware probes make that connection visible
+    // without ever re-labelling an unrelated notary as an HVAC, dental, or
+    // other-category lead.
+    for (const place of locationTerms.slice(0, 4)) {
+      queries.push(
+        `site:notarycafe.com "${categoryPhrase}" "${place}" "Phone" -forum -contact -register`,
+        `site:notarycafe.com "${place}" "${categoryPhrase}" phone -forum -contact -register`,
+      );
+    }
   }
 
   return unique(queries).slice(0, maxQueries);
@@ -707,6 +723,11 @@ const toLead = (
 ): Lead | undefined => {
   const profileUrl = normalizeNotaryCafeProfileUrl(result.url);
   if (!profileUrl) return undefined;
+
+  // Keep the universal cross-source connection safe: NotaryCafe profiles are
+  // only eligible for notary searches. Non-notary probes may still run for
+  // coverage visibility, but they can never become misclassified leads.
+  if (!isNotaryCafeCategory(request.companyType)) return undefined;
 
   const snippetText = normalizeText(result.snippet);
   const searchable = normalizeText(`${result.title} ${snippetText}`);
@@ -839,24 +860,8 @@ export const discoverUsLeadsFromNotaryCafeIndex = async ({
   location: NormalizedUsLocation;
   deadlineMs?: number;
 }): Promise<NotaryCafeDiscoveryResult> => {
-  if (!isNotaryCafeCategory(request.companyType)) {
-    return {
-      leads: [],
-      warnings: [{
-        providerId,
-        providerName,
-        message: 'Indexed NotaryCafe search was skipped because the requested category is not notary-related.',
-        severity: 'info',
-      }],
-      coverage: {
-        queriesAttempted: 0,
-        providersChecked: 0,
-        acceptedCandidates: 0,
-      },
-    };
-  }
-
-  const queries = buildNotaryCafeSearchQueries(location, request.count);
+  const isNotaryRequest = isNotaryCafeCategory(request.companyType);
+  const queries = buildNotaryCafeSearchQueries(location, request.count, request.companyType);
   const health = createProviderHealth();
   const resultsByUrl = new Map<string, SearchResult & { url: string }>();
   const warnings: ProviderWarning[] = [];
@@ -928,7 +933,14 @@ export const discoverUsLeadsFromNotaryCafeIndex = async ({
     .map((result) => toLead(result, request, location, observedAt))
     .filter((lead): lead is Lead => Boolean(lead));
 
-  if (!leads.length && resultsByUrl.size) {
+  if (!isNotaryRequest) {
+    warnings.push({
+      providerId,
+      providerName,
+      message: `Indexed NotaryCafe cross-check completed for ${request.companyType}, but NotaryCafe profiles are only eligible for notary-category searches; unrelated profiles were not promoted.`,
+      severity: 'info',
+    });
+  } else if (!leads.length && resultsByUrl.size) {
     warnings.push({
       providerId,
       providerName,

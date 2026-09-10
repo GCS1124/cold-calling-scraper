@@ -113,7 +113,7 @@ const modeLimitations: Record<SearchModeCode, readonly string[]> = {
   ai: [
     'AI mode fuses public business listings, public professional-profile discovery including LinkedIn result signals, search-indexed public NotaryCafe profile references, Gemini-grounded research, public websites, and published social links into one ranked evidence graph.',
     'Gemini can expand public search lenses and return grounded public research candidates; public evidence and the required phone gate decide what becomes an exportable lead.',
-    'NotaryCafe coverage uses public search-index references and may be stale; direct page access, login, CAPTCHA, Cloudflare, and geo-block bypasses are not used. Reverify before outreach.',
+    'NotaryCafe is checked as a bounded indexed-public cross-source probe on every AI search, but only category-relevant notary profiles with public phone evidence can qualify; references may be stale. Direct page access, login, CAPTCHA, Cloudflare, and geo-block bypasses are not used. Reverify before outreach.',
     'Commercial lead databases, paid contact lookups, private profiles, authenticated sessions, and contact-reveal credits are not called.',
   ],
 };

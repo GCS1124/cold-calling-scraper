@@ -33,8 +33,15 @@ afterEach(() => {
 });
 
 describe('NotaryCafe indexed public search', () => {
-  it('does not query the index for an unrelated category', async () => {
-    const fetchMock = vi.fn();
+  it('checks every category but never promotes an unrelated profile', async () => {
+    const fetchMock = vi.fn(async () =>
+      response(`Title: public search results
+
+Markdown Content:
+1. [Notary Cafe | Denver Notary](https://notarycafe.com/Denver.Notary)
+Phone: (303) 408-4062 Name: Denver Notary City: Denver State: CO
+`),
+    );
     vi.stubGlobal('fetch', fetchMock as typeof fetch);
 
     const result = await discoverUsLeadsFromNotaryCafeIndex({
@@ -43,13 +50,11 @@ describe('NotaryCafe indexed public search', () => {
       deadlineMs: Date.now() + 8_000,
     });
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalled();
     expect(result.leads).toEqual([]);
-    expect(result.coverage).toEqual({
-      queriesAttempted: 0,
-      providersChecked: 0,
-      acceptedCandidates: 0,
-    });
+    expect(result.coverage.queriesAttempted).toBeGreaterThan(0);
+    expect(result.coverage.providersChecked).toBeGreaterThan(0);
+    expect(result.warnings.some((warning) => /unrelated profiles were not promoted/i.test(warning.message))).toBe(true);
   });
 
   it('builds bounded location-aware search queries without opening NotaryCafe pages', () => {
@@ -60,6 +65,13 @@ describe('NotaryCafe indexed public search', () => {
     expect(queries[0]).toContain('site:notarycafe.com');
     expect(queries[0]).toContain('Denver, CO');
     expect(queries[0]).toContain('"Phone"');
+  });
+
+  it('includes the requested category in non-notary cross-check probes', () => {
+    const queries = buildNotaryCafeSearchQueries(location, 50, 'HVAC contractor');
+
+    expect(queries.length).toBeGreaterThan(0);
+    expect(queries.every((query) => query.includes('HVAC contractor'))).toBe(true);
   });
 
   it('turns indexed profile snippets with public phones into normalized leads', async () => {

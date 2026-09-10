@@ -130,7 +130,7 @@ export function SearchForm({
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                 <p className="text-sm font-bold">1 · NotaryCafe index</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Search-indexed public profile references only
+                  Checked on every AI search; relevant notary profiles only
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">

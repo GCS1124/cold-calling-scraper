@@ -47,7 +47,6 @@ import { buildLeadQualitySummary } from './quality-summary';
 import { filterLeadsForLocation } from './location-acceptance';
 import {
   discoverUsLeadsFromNotaryCafeIndex,
-  isNotaryCafeCategory,
   prioritizeAiLeadSources,
   type NotaryCafeDiscoveryResult,
 } from './notarycafe-search';
@@ -150,7 +149,7 @@ const buildCoverage = (gmbConfigured = false, notaryCafeConfigured = false): Pro
     status: notaryCafeConfigured ? 'configured' : 'not_configured',
     leadCount: 0,
     message: notaryCafeConfigured
-      ? 'Priority source for notary requests: search-indexed public NotaryCafe profile references are merged into the same phone-evidence and deduplication pipeline. Direct page access, login, CAPTCHA, Cloudflare, and geo-block bypasses are disabled.'
+      ? 'Connected to every AI search as a bounded indexed public cross-check. Only category-relevant NotaryCafe profiles with public phone evidence can be promoted; direct page access, login, CAPTCHA, Cloudflare, and geo-block bypasses are disabled.'
       : 'NotaryCafe indexed search is unavailable for this execution path.',
   },
   {
@@ -550,15 +549,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
           })
       : Promise.resolve([] as Lead[]);
 
-    const notaryCafeApplicable = isNotaryCafeCategory(request.companyType);
-    if (discoverNotaryCafe && !notaryCafeApplicable) {
-      updateCoverage(coverage, 'notarycafe-indexed-search', {
-        status: 'configured',
-        leadCount: 0,
-        message: 'Indexed NotaryCafe search was skipped because the requested category is not notary-related; unrelated profiles cannot enter this search.',
-      });
-    }
-    const notaryCafePromise: Promise<Lead[]> = discoverNotaryCafe && notaryCafeApplicable
+    const notaryCafePromise: Promise<Lead[]> = discoverNotaryCafe
       ? withTimeout(
           discoverNotaryCafe({
             request,
@@ -571,11 +562,11 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
           .then((result: NotaryCafeDiscoveryResult) => {
             for (const warning of result.warnings) addWarning(warnings, warning);
             updateCoverage(coverage, 'notarycafe-indexed-search', {
-              status: result.leads.length ? 'returned' : 'configured',
+              status: 'returned',
               leadCount: result.leads.length,
               message: result.leads.length
                 ? `Priority indexed NotaryCafe evidence returned ${result.leads.length} phone-qualified candidate${result.leads.length === 1 ? '' : 's'}; direct page access was not attempted.`
-                : 'No phone-qualified NotaryCafe profile references were returned by the public search index.',
+                : `Indexed NotaryCafe cross-check completed with 0 phone-qualified candidates for ${request.companyType}; unrelated profiles were not promoted.`,
             });
             return result.leads;
           })

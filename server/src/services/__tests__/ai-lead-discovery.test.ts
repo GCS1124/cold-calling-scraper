@@ -214,8 +214,12 @@ describe('free AI lead discovery', () => {
     );
   });
 
-  it('does not mix NotaryCafe profiles into unrelated categories', async () => {
-    const discoverNotaryCafe = vi.fn();
+  it('checks NotaryCafe for unrelated categories without mixing profiles into them', async () => {
+    const discoverNotaryCafe = vi.fn().mockResolvedValue({
+      leads: [],
+      warnings: [],
+      coverage: { queriesAttempted: 2, providersChecked: 2, acceptedCandidates: 0 },
+    });
 
     const result = await createAiLeadDiscovery({
       discoverLinkedin: vi.fn().mockResolvedValue({
@@ -229,13 +233,55 @@ describe('free AI lead discovery', () => {
       location,
     });
 
-    expect(discoverNotaryCafe).not.toHaveBeenCalled();
+    expect(discoverNotaryCafe).toHaveBeenCalledTimes(1);
     expect(result.leads).toEqual([]);
     expect(result.coverage).toContainEqual(
       expect.objectContaining({
         providerId: 'notarycafe-indexed-search',
         leadCount: 0,
-        message: expect.stringContaining('skipped'),
+        status: 'returned',
+        message: expect.stringContaining('cross-check completed'),
+      }),
+    );
+  });
+
+  it.each([
+    'HVAC contractor',
+    'Dental Clinics',
+    'Immigration Attorneys',
+    'Notary Public',
+    'Mobile Notary Signing Agent',
+  ])('connects the indexed NotaryCafe check for the "%s" search heading', async (companyType) => {
+    const discoverNotaryCafe = vi.fn().mockResolvedValue({
+      leads: [],
+      warnings: [],
+      coverage: { queriesAttempted: 2, providersChecked: 2, acceptedCandidates: 0 },
+    });
+
+    const discovery = createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({
+        leads: [],
+        warnings: [],
+        blocked: false,
+      }) as never,
+      discoverNotaryCafe: discoverNotaryCafe as never,
+    });
+
+    const result = await discovery({
+      request: { companyType, city: 'Austin, TX', count: 50 },
+      location,
+    });
+
+    expect(discoverNotaryCafe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ companyType }),
+        location,
+      }),
+    );
+    expect(result.coverage).toContainEqual(
+      expect.objectContaining({
+        providerId: 'notarycafe-indexed-search',
+        status: 'returned',
       }),
     );
   });
