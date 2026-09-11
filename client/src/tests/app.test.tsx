@@ -323,6 +323,13 @@ async function renderApp(
   );
 
   await new Promise((resolve) => setTimeout(resolve, 25));
+  const initialPath = initialEntries[0] ?? '/';
+  const readyPattern = initialPath === '/history'
+    ? /reopen, review, and export past searches/i
+    : initialPath === '/search'
+      ? /build your lead list/i
+      : /your searches, saved exactly where you left them|build your lead list/i;
+  await waitForText(container, readyPattern, 5000);
 
   const unmount = async () => {
     if (cleanedUp) {
@@ -1271,6 +1278,8 @@ describe('App', () => {
     expect(normalizedText(container)).toContain('Austin, TX');
     expect(normalizedText(container)).toContain('Ready');
     expect(normalizedText(container)).toContain('1 lead saved');
+    expect(normalizedText(container)).toContain('Track 1 search and 1 lead saved in one compact log.');
+    expect(container.querySelector('input[aria-label="Search saved searches"]')).not.toBeNull();
     expect(Array.from(container.querySelectorAll('button')).some((button) => /export/i.test(normalizedText(button)))).toBe(true);
 
     await unmount();

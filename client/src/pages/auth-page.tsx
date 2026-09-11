@@ -11,6 +11,20 @@ import { useAuth } from '../hooks/use-auth';
 export function AuthPage() {
   const auth = useAuth();
 
+  if (auth.loading) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-slate-50 p-6 text-slate-600">
+        <p
+          aria-live="polite"
+          className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold shadow-sm"
+          role="status"
+        >
+          Checking your account session…
+        </p>
+      </main>
+    );
+  }
+
   if (auth.user) {
     return <Navigate replace to="/search" />;
   }
@@ -23,7 +37,7 @@ export function AuthPage() {
         <div className="absolute bottom-[-12rem] left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-cyan-100 blur-3xl" />
       </div>
 
-      <section className="relative mx-auto grid h-[620px] w-full max-w-6xl overflow-hidden rounded-[2rem] border border-white/70 bg-white/80 shadow-[0_30px_100px_rgba(15,23,42,0.14)] backdrop-blur-xl lg:grid-cols-[1.05fr_0.95fr]">  
+      <section className="relative mx-auto grid min-h-[620px] w-full max-w-6xl overflow-hidden rounded-[2rem] border border-white/70 bg-white/80 shadow-[0_30px_100px_rgba(15,23,42,0.14)] backdrop-blur-xl lg:h-[620px] lg:grid-cols-[1.05fr_0.95fr]">
         {/* Left Panel */}
         <div className="relative hidden flex-col overflow-hidden bg-slate-950 p-10 text-white lg:flex">
           <div className="pointer-events-none absolute inset-0">
@@ -49,7 +63,6 @@ export function AuthPage() {
             </p>
           </div>
 
-          {/* Reduced spacing here */}
           <div className="relative mt-20 flex items-center justify-between rounded-3xl border border-white/10 bg-white/[0.06] p-4 xl:mt-10">
             <div>
               <p className="text-sm font-semibold text-white">
@@ -62,7 +75,7 @@ export function AuthPage() {
             </div>
 
             <Link
-              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-blue px-4 text-sm font-bold text-white transition hover:bg-blue"
+              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700"
               to="/search"
             >
               Search
@@ -75,6 +88,7 @@ export function AuthPage() {
         <div className="flex min-h-full flex-col bg-white">
           <header className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-8">
             <Link
+              aria-label="Lead Finder Pro home"
               className="inline-flex items-center gap-2 text-sm font-black tracking-tight text-slate-950"
               to="/search"
             >
@@ -82,11 +96,12 @@ export function AuthPage() {
                 <Sparkles className="h-4 w-4" />
               </span>
 
-              Cold Calling Scraper
+              Lead Finder Pro
             </Link>
 
             <div className="flex items-center gap-2">
               <Link
+                aria-label="Open search history"
                 className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                 to="/history"
               >

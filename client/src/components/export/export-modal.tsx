@@ -28,21 +28,31 @@ export function ExportModal({ leads, open, onClose }: ExportModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4 backdrop-blur-sm">
+    <div
+      aria-labelledby="export-dialog-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4 backdrop-blur-sm"
+      role="dialog"
+    >
       <div className="max-h-[90dvh] w-full max-w-xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-[0_30px_120px_rgba(15,23,42,0.18)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
               Export
             </p>
-            <h3 className="mt-2 text-2xl font-semibold text-slate-950">
+            <h3 className="mt-2 text-2xl font-semibold text-slate-950" id="export-dialog-title">
               Download {leads.length} lead{leads.length === 1 ? '' : 's'}
             </h3>
             <p className="mt-2 text-sm text-slate-500">
               Export the current leads with the columns you choose.
             </p>
           </div>
-          <button onClick={onClose} type="button">
+          <button
+            aria-label="Close export dialog"
+            className="rounded-full p-2 transition hover:bg-slate-100"
+            onClick={onClose}
+            type="button"
+          >
             <X className="h-5 w-5 text-slate-500" />
           </button>
         </div>

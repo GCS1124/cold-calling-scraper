@@ -335,7 +335,9 @@ const run = async () => {
 
   try {
     await page.goto(baseUrl);
-    assert(await page.getByRole('link', { name: 'Skip to lead finder workspace', exact: true }).count() === 1, 'Skip link is missing');
+    const skipLink = page.getByRole('link', { name: 'Skip to lead finder workspace', exact: true });
+    await skipLink.waitFor();
+    assert(await skipLink.count() === 1, 'Skip link is missing');
     await page.getByRole('button', { name: /^AI mode/i }).click();
     await page.locator('input[list="company-type-options"]').fill('Notary Public');
     assert(await page.getByText('Notary priority route active', { exact: true }).count() === 1, 'Notary priority route is not surfaced in the form');
@@ -393,7 +395,15 @@ const run = async () => {
     await page.getByRole('button', { name: /download excel/i }).click();
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Download file' }).click();
-    await downloadPromise;
+    const excelDownload = await downloadPromise;
+    assert(excelDownload.suggestedFilename().endsWith('.xlsx'), 'Excel export did not produce an .xlsx file');
+
+    await page.getByRole('button', { name: /download excel/i }).click();
+    await page.getByRole('combobox').last().selectOption('csv');
+    const csvDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download file' }).click();
+    const csvDownload = await csvDownloadPromise;
+    assert(csvDownload.suggestedFilename().endsWith('.csv'), 'CSV export did not produce a .csv file');
 
     aiFailureNext = true;
     await fillSearch(page, 'ai', 'timezone');
@@ -405,6 +415,8 @@ const run = async () => {
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
     await inspectQuality('ai', 7, 'NotaryCafe Public Lead');
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'Mobile page overflows horizontally');
+    assert(await page.getByRole('link', { name: 'Open search history', exact: true }).count() === 1, 'Mobile history navigation lost its accessible name');
+    assert(await page.getByRole('link', { name: 'Sign in', exact: true }).count() === 1, 'Mobile auth navigation lost its accessible name');
     const evidenceBox = await page.getByRole('region', { name: 'Contact evidence for NotaryCafe Public Lead' }).boundingBox();
     assert(evidenceBox && evidenceBox.width < 390, 'Contact evidence panel is clipped on mobile');
     const modeBox = await page.getByRole('button', { name: /^AI mode/i }).boundingBox();

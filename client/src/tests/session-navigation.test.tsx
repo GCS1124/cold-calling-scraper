@@ -103,6 +103,11 @@ async function renderApp(initialEntries: string[], searchApi: SearchApi): Promis
   );
 
   await new Promise((resolve) => setTimeout(resolve, 0));
+  const initialPath = initialEntries[0] ?? '/';
+  const readyPattern = initialPath === '/search'
+    ? /build your lead list/i
+    : /your searches, saved exactly where you left them|build your lead list/i;
+  await waitForText(container, readyPattern, 5000);
 
   const unmount = async () => {
     if (cleanedUp) {

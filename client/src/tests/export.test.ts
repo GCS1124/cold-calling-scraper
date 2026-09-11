@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildExportRows } from '../utils/export';
+import { buildCsv, buildExportRows } from '../utils/export';
 import type { Lead } from '../types/lead';
 
 const lead: Lead = {
@@ -69,5 +69,16 @@ describe('lead export rows', () => {
         source: 'LinkedIn, Public Profile',
       },
     ]);
+  });
+
+  it('creates labeled CSV output with safe quoting for contact data', () => {
+    const rows = buildExportRows(
+      [{ ...lead, name: 'Example, Inc.', address: '100 Main St\nAustin, TX' }],
+      ['name', 'mobile', 'address'],
+    );
+
+    expect(buildCsv(rows, ['name', 'mobile', 'address'])).toBe(
+      'Name,Phone,Address\r\n"Example, Inc.",,"100 Main St\nAustin, TX"\r\n',
+    );
   });
 });

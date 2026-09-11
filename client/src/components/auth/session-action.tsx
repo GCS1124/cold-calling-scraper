@@ -30,6 +30,7 @@ export function SessionAction({ auth }: SessionActionProps) {
   if (auth.user) {
     return (
       <button
+        aria-label="Sign out"
         className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         disabled={busy}
         onClick={handleSignOut}
@@ -43,6 +44,7 @@ export function SessionAction({ auth }: SessionActionProps) {
 
   return (
     <Link
+      aria-label="Sign in"
       className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
       to="/"
     >

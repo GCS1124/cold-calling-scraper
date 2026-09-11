@@ -654,6 +654,7 @@ export function HomePage({ searchApi }: HomePageProps) {
 
         <header className="relative mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-5 md:px-8">
           <Link
+            aria-label="Lead Finder Pro home"
             className="inline-flex items-center gap-3 text-sm font-black tracking-tight text-slate-950"
             to="/search"
           >
@@ -665,6 +666,7 @@ export function HomePage({ searchApi }: HomePageProps) {
 
           <nav className="flex items-center gap-2">
             <Link
+              aria-label="Open search history"
               className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
               to="/history"
             >

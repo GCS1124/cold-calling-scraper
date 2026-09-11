@@ -138,6 +138,51 @@ export const buildExportRows = (leads: Lead[], columns: readonly ExportColumn[])
     }, {});
   });
 
+export const buildCsv = (
+  rows: Array<Record<string, string | number>>,
+  columns: readonly ExportColumn[],
+) => {
+  const escapeValue = (value: string | number) => {
+    const text = String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+
+  const header = columns.map((column) => escapeValue(exportColumnLabels[column])).join(',');
+  const body = rows.map((row) =>
+    columns.map((column) => escapeValue(row[column] ?? '')).join(','),
+  );
+
+  return [header, ...body].join('\r\n') + '\r\n';
+};
+
+const buildDownloadFileName = (fileName: string, format: 'csv' | 'xlsx') => {
+  const trimmedName = fileName.trim().replace(/\.(?:csv|xlsx)$/i, '');
+  const baseName = Array.from(trimmedName, (character) =>
+    character.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(character) ? '-' : character,
+  )
+    .join('')
+    .replace(/\.+$/g, '')
+    .trim();
+
+  return `${baseName || 'lead-finder-export'}.${format}`;
+};
+
+const triggerDownload = (blob: Blob, fileName: string) => {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+
+  anchor.download = fileName;
+  anchor.href = url;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+    anchor.remove();
+  }, 100);
+};
+
 export const canExportLead = (lead: Lead) => Boolean(
   lead.hasPhone && lead.verifiedPhone && lead.mobile?.trim() &&
   lead.quality && lead.quality.tier !== 'excluded' && lead.quality.phone.formatValid &&
@@ -152,11 +197,23 @@ export const downloadLeads = async (
   if (!leads.length || leads.some((lead) => !canExportLead(lead))) {
     throw new Error('Reverify public data before export: some leads lack current public-phone evidence metadata.');
   }
-  const XLSX = await import('xlsx');
   const rows = buildExportRows(leads, options.columns);
-  const workbook = XLSX.utils.book_new();
-  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const fileName = buildDownloadFileName(options.fileName, options.format);
 
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Leads');
-  XLSX.writeFile(workbook, `${options.fileName}.${options.format}`);
+  if (options.format === 'csv') {
+    const blob = new Blob([buildCsv(rows, options.columns)], {
+      type: 'text/csv;charset=utf-8',
+    });
+    triggerDownload(blob, fileName);
+    return;
+  }
+
+  const { default: writeExcelFile } = await import('write-excel-file/browser');
+  const sheetData = [
+    options.columns.map((column) => exportColumnLabels[column]),
+    ...rows.map((row) => options.columns.map((column) => row[column] ?? '')),
+  ];
+
+  const blob = await writeExcelFile(sheetData).toBlob();
+  triggerDownload(blob, fileName);
 };

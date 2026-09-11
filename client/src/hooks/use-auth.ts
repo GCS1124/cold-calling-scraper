@@ -26,12 +26,20 @@ export const useAuth = (): AuthApi => {
 
     let active = true;
 
-    void supabase.auth.getSession().then(({ data }) => {
-      if (active) {
-        setSession(data.session);
-        setLoading(false);
-      }
-    });
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (active) {
+          setSession(data.session);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSession(null);
+          setLoading(false);
+        }
+      });
 
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);

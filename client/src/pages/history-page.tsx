@@ -53,6 +53,7 @@ const buildFileName = (
 };
 
 const formatLeadLabel = (count: number) => `${count} lead${count === 1 ? '' : 's'}`;
+const formatSearchLabel = (count: number) => `${count} search${count === 1 ? '' : 'es'}`;
 
 const isWithinDays = (value: string, days: number) => {
   const timestamp = new Date(value).getTime();
@@ -406,6 +407,7 @@ export function HistoryPage() {
 
       <header className="relative mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-5 md:px-8">
         <Link
+          aria-label="Lead Finder Pro home"
           className="inline-flex items-center gap-3 text-sm font-black tracking-tight text-slate-950"
           to="/search"
         >
@@ -417,6 +419,7 @@ export function HistoryPage() {
 
         <nav className="flex items-center gap-2">
           <Link
+            aria-label="Open search workspace"
             className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
             to="/search"
           >
@@ -442,8 +445,8 @@ export function HistoryPage() {
               </h1>
 
               <p className="mt-5 max-w-2xl text-base leading-7 text-slate-500 md:text-lg">
-                Track {sortedItems.length} searches and {totalLeadCount} saved leads in one compact
-                log.
+                Track {formatSearchLabel(sortedItems.length)} and {formatLeadLabel(totalLeadCount)} saved
+                in one compact log.
               </p>
             </div>
 
@@ -499,6 +502,7 @@ export function HistoryPage() {
           <label className="relative mt-5 block">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
+              aria-label="Search saved searches"
               className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-11 text-sm font-medium text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Search by company or location"
