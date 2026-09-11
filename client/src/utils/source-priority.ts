@@ -1,7 +1,9 @@
 import type { Lead, ProviderCoverage } from '../types/lead';
 import {
+  getPublicLeadSourceOrder,
   getPublicLeadSourcePriority,
   getPublicProviderPriority,
+  type PublicLeadSourceOrder,
   type PublicSourcePriority,
 } from '../../../shared/source-priority';
 
@@ -21,14 +23,28 @@ export const getPublicSourcePriority = (lead: Lead): PublicSourcePriority => {
   return getPublicLeadSourcePriority(lead);
 };
 
+export const getPublicSourceOrder = (lead: Lead): PublicLeadSourceOrder => {
+  return getPublicLeadSourceOrder(lead);
+};
+
 export const comparePublicSourcePriority = (left: Lead, right: Lead) =>
-  getPublicSourcePriority(left) - getPublicSourcePriority(right);
+  getPublicSourceOrder(left) - getPublicSourceOrder(right);
 
 export const publicSourcePriorityLabels: Record<PublicSourcePriority, string> = {
   1: 'NotaryCafe indexed evidence',
   2: 'Pure public LinkedIn evidence',
   3: 'Other public evidence',
   4: 'LinkedIn + Google Business fusion',
+};
+
+export const publicLeadSourceOrderLabels: Record<PublicLeadSourceOrder, string> = {
+  1: 'NotaryCafe indexed evidence',
+  2: 'Pure public LinkedIn evidence',
+  3: 'Yelp public directory',
+  4: 'Yellow Pages public directory',
+  5: 'Gemini lead finding / public fallback',
+  6: 'Google Places',
+  7: 'LinkedIn + Google Business fusion',
 };
 
 export const sortProviderCoverageForDisplay = (coverage: ProviderCoverage[]) =>

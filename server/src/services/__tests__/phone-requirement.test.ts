@@ -128,7 +128,7 @@ describe('phone requirement', () => {
     ]);
   });
 
-  it('keeps all four AI source groups in the required sequence', () => {
+  it('keeps every AI source stage in the required sequence', () => {
     const notaryCafe = makeLead({
       id: 'sequence-notarycafe',
       source: 'NotaryCafe, Indexed Public Search',
@@ -148,20 +148,39 @@ describe('phone requirement', () => {
         association: 'person',
       }],
     });
+    const yelp = makeLead({
+      id: 'sequence-yelp',
+      source: 'Yelp, Public Directory',
+      listingUrl: 'https://www.yelp.com/biz/sequence-yelp',
+      contactSourceUrl: 'https://www.yelp.com/biz/sequence-yelp',
+    });
+    const yellowPages = makeLead({
+      id: 'sequence-yellow',
+      source: 'Yellow Pages, Public Directory',
+      listingUrl: 'https://www.yellowpages.com/austin-tx/sequence-yellow',
+      contactSourceUrl: 'https://www.yellowpages.com/austin-tx/sequence-yellow',
+    });
+    const gemini = makeLead({
+      id: 'sequence-gemini',
+      source: 'Gemini, Grounded Public Search',
+      listingUrl: 'https://gemini-public.example/sequence-gemini',
+      contactSourceUrl: 'https://gemini-public.example/sequence-gemini',
+    });
+    const googlePlaces = makeLead({
+      id: 'sequence-google-places',
+      source: 'Google Places',
+      listingUrl: 'https://www.google.com/maps/place/sequence-google-places',
+      contactSourceUrl: 'https://www.google.com/maps/place/sequence-google-places',
+    });
     const fused = makeLead({
       id: 'sequence-fusion',
       source: 'LinkedIn, Public Profile, Google Business',
       listingUrl: 'https://linkedin.com/in/sequence-fusion',
       contactSourceUrl: 'https://www.google.com/maps/place/sequence-fusion',
     });
-    const other = makeLead({
-      id: 'sequence-other',
-      source: 'OpenStreetMap, Public Website',
-      listingUrl: 'https://www.openstreetmap.org/node/sequence-other',
-    });
 
     const result = enforcePhoneRequirement(
-      [other, fused, pureLinkedIn, notaryCafe],
+      [fused, googlePlaces, gemini, yellowPages, yelp, pureLinkedIn, notaryCafe],
       {
         companyType: 'HVAC contractor',
         sourceMode: 'ai',
@@ -174,7 +193,10 @@ describe('phone requirement', () => {
     expect(result.leads.map((lead) => lead.id)).toEqual([
       'sequence-notarycafe',
       'sequence-linkedin',
-      'sequence-other',
+      'sequence-yelp',
+      'sequence-yellow',
+      'sequence-gemini',
+      'sequence-google-places',
       'sequence-fusion',
     ]);
   });

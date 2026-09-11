@@ -12,8 +12,9 @@ import {
   isHighFitLinkedInLead,
 } from '../../utils/linkedin-quality';
 import {
+  getPublicSourceOrder,
   getPublicSourcePriority,
-  publicSourcePriorityLabels,
+  publicLeadSourceOrderLabels,
 } from '../../utils/source-priority';
 
 type ResultsTableProps = {
@@ -156,6 +157,7 @@ export function ResultsTable({
               const hasOwnerSignal = isLinkedInLead && hasPublicOwnerSignal(lead);
               const qualityTier = isLinkedInLead ? getLinkedInQualityTier(lead) : undefined;
               const sourcePriority = getPublicSourcePriority(lead);
+              const sourceOrder = getPublicSourceOrder(lead);
               const matchLabel =
                 isStrongMatch
                   ? 'Strong match'
@@ -374,9 +376,9 @@ export function ResultsTable({
                                     ? 'bg-violet-50 text-violet-700'
                                     : 'bg-emerald-50 text-emerald-700'
                             }`}
-                            title={publicSourcePriorityLabels[sourcePriority]}
+                            title={publicLeadSourceOrderLabels[sourceOrder]}
                           >
-                            {sourcePriority} · {publicSourcePriorityLabels[sourcePriority]}
+                            {sourceOrder} · {publicLeadSourceOrderLabels[sourceOrder]}
                           </span>
                         ) : null}
                         <span

@@ -18,7 +18,7 @@ const modeCopy = {
   ai: {
     title: 'AI mode coverage',
     description:
-      'AI mode checks the four public-source tiers in a stable order: indexed NotaryCafe evidence, pure public LinkedIn, other sources including OSM, Yelp, Yellow Pages, websites, and Gemini-grounded research, then LinkedIn + Google Business fusion last. NotaryCafe is queried as a bounded cross-check on every AI search, but only relevant notary profiles with public phones can qualify. Commercial lead databases are audited but never called.',
+      'AI mode reports the ordered public workflow: indexed NotaryCafe, pure public LinkedIn, Yelp, Yellow Pages, Gemini lead finding, Google Places, then LinkedIn + Google Business fusion. OSM and public websites remain bounded fallbacks inside the generic research slot. NotaryCafe is queried as a bounded cross-check on every AI search, but only relevant notary profiles with public phones can qualify. Commercial lead databases are audited but never called.',
     badge: 'Public-source fusion',
   },
 } as const;
@@ -97,10 +97,19 @@ export function ProviderCoveragePanel({ coverage, mode }: ProviderCoveragePanelP
               <span className="font-black">2</span> · Pure public LinkedIn evidence
             </div>
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
-              <span className="font-black">3</span> · Other public sources
+              <span className="font-black">3</span> · Yelp public directory
             </div>
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
-              <span className="font-black">4</span> · LinkedIn + Google Business fusion
+              <span className="font-black">4</span> · Yellow Pages public directory
+            </div>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
+              <span className="font-black">5</span> · Gemini lead finding
+            </div>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
+              <span className="font-black">6</span> · Google Places
+            </div>
+            <div className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-900">
+              <span className="font-black">7</span> · LinkedIn + Google Business fusion
             </div>
           </div>
           <p className="mt-2 text-[11px] leading-4 text-slate-500">

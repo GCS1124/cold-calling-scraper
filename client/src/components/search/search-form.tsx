@@ -122,11 +122,11 @@ export function SearchForm({
                 </p>
               </div>
               <span className="shrink-0 rounded-full border border-blue-300/30 bg-blue-300/10 px-3 py-1 text-[11px] font-bold text-blue-100">
-                Five public layers
+                Seven ordered public layers
               </span>
             </div>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                 <p className="text-sm font-bold">1 · NotaryCafe index</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
@@ -134,27 +134,39 @@ export function SearchForm({
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">2 · Pure public profiles</p>
+                <p className="text-sm font-bold">2 · Pure public LinkedIn</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  LinkedIn and professional profile signals
+                  Public professional profile signals only
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">3 · Other public sources</p>
+                <p className="text-sm font-bold">3 · Yelp directory</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  OSM, Yelp, Yellow Pages, websites, and public context
+                  Public business phones when explicitly published
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">4 · Gemini grounding</p>
+                <p className="text-sm font-bold">4 · Yellow Pages</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Multi-lens public research, never guessed details
+                  Second bounded public-directory pass
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">5 · LinkedIn + GMB fusion</p>
+                <p className="text-sm font-bold">5 · Gemini lead finding</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Final corroboration tier for business identity and phone
+                  Grounded public candidates, never guessed contacts
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-sm font-bold">6 · Google Places</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  Configured business-listing corroboration
+                </p>
+              </div>
+              <div className="rounded-xl border border-cyan-200/20 bg-cyan-300/10 p-3">
+                <p className="text-sm font-bold">7 · LinkedIn + GMB fusion</p>
+                <p className="mt-1 text-xs leading-5 text-cyan-100">
+                  Final corroboration tier for identity and phone
                 </p>
               </div>
             </div>
@@ -198,7 +210,7 @@ export function SearchForm({
                   Notary priority route active
                 </p>
                 <p className="mt-1 text-xs leading-5 text-slate-200">
-                  1 NotaryCafe indexed profile evidence → 2 public LinkedIn → 3 generic public sources → 4 LinkedIn + Google Business fusion last. Direct NotaryCafe access stays disabled; only public-index evidence with a phone can qualify.
+                  1 NotaryCafe → 2 pure public LinkedIn → 3 Yelp → 4 Yellow Pages → 5 Gemini lead finding → 6 Google Places → 7 LinkedIn + Google Business fusion. Direct NotaryCafe access stays disabled; only public-index evidence with a phone can qualify.
                 </p>
               </div>
             ) : null}

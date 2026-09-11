@@ -467,6 +467,10 @@ describe('free AI lead discovery', () => {
       'generic-priority',
       'gmb-linkedin-priority',
     ]);
+    expect(result.coverage.find((entry) => entry.providerId === 'linkedin-public-google-business-fusion')).toMatchObject({
+      status: 'returned',
+      leadCount: 1,
+    });
   });
 
   it('location-checks every provider before a result enters the fusion pool', async () => {

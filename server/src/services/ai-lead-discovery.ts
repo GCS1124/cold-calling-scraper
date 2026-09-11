@@ -42,6 +42,10 @@ import {
   buildSearchExecutionContract,
   buildSearchResponseContract,
 } from '../../../shared/search-contract';
+import {
+  getPublicLeadSourceOrder,
+  getPublicProviderPriority,
+} from '../../../shared/source-priority';
 import { normalizeLeadSourceMode } from './search-source-mode';
 import { buildLeadQualitySummary } from './quality-summary';
 import { filterLeadsForLocation } from './location-acceptance';
@@ -145,7 +149,7 @@ const buildCoverage = (
     ? `${geminiKeyCount} Gemini API keys are pooled and rotated across healthy requests.`
     : 'A Gemini API key is configured for public research.';
 
-  return [
+  const coverage: ProviderCoverage[] = [
   ...salesProviderAudits.map((provider) => ({
     providerId: `${provider.id}-audit`,
     providerName: provider.name,
@@ -237,7 +241,23 @@ const buildCoverage = (
       ? `${geminiKeySummary} Gemini enriches public business listing seeds with publicly evidenced company and decision-maker details.`
       : 'Gemini listing enrichment is unavailable until Gemini is configured.',
   },
+  {
+    providerId: 'linkedin-public-google-business-fusion',
+    providerName: 'LinkedIn + Google Business fusion',
+    status: 'configured' as const,
+    leadCount: 0,
+    message: 'Final corroboration stage; only independently evidenced LinkedIn and Google Business signals are fused and retained.',
+  },
   ];
+
+  return coverage
+    .map((provider, index) => ({
+      provider,
+      index,
+      priority: getPublicProviderPriority(provider),
+    }))
+    .sort((left, right) => left.priority - right.priority || left.index - right.index)
+    .map(({ provider }) => provider);
 };
 
 const updateCoverage = (
@@ -1024,6 +1044,15 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
           'Free public search providers were blocked or rate-limited. No unverified or fabricated leads were added.',
       });
     }
+
+    const fusionLeadCount = leads.filter((lead) => getPublicLeadSourceOrder(lead) === 7).length;
+    updateCoverage(coverage, 'linkedin-public-google-business-fusion', {
+      status: fusionLeadCount ? 'returned' : 'configured',
+      leadCount: fusionLeadCount,
+      message: fusionLeadCount
+        ? `Final LinkedIn + Google Business fusion retained ${fusionLeadCount} corroborated lead${fusionLeadCount === 1 ? '' : 's'}.`
+        : 'No corroborated LinkedIn + Google Business fusion lead was retained in this bounded search.',
+    });
 
     return {
       leads: prioritizeAiLeadSources(

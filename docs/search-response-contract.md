@@ -99,10 +99,12 @@ does not stop the other sources. India-oriented adapters are not part of the US
 workflow.
 
 AI lead display order is deterministic across the server and client: indexed
-NotaryCafe evidence first, pure public LinkedIn evidence second, generic public
-evidence third, and LinkedIn plus Google Business fusion last. This ordering is
-only a presentation preference; every visible lead still must pass the public
-US-phone and evidence gates.
+NotaryCafe evidence, pure public LinkedIn, Yelp, Yellow Pages, Gemini lead
+finding, Google Places, and finally LinkedIn plus Google Business fusion. OSM,
+public websites, and other bounded public fallbacks share the Gemini research
+slot and still appear before Google Places and fusion. This ordering is only a
+presentation preference; every visible lead still must pass the public US-phone
+and evidence gates.
 
 ## HTTP errors and tracing
 

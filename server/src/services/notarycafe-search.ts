@@ -8,7 +8,7 @@ import { normalizeContactPhone } from './contact-evidence';
 import { readResponseTextBounded } from '../utils/bounded-fetch';
 import { isNotaryCafeHost, isPublicHttpUrl } from '../utils/public-url';
 import { usStateCodes, usStateNames, type UsStateCode } from '../data/us-states';
-import { getPublicLeadSourcePriority } from '../../../shared/source-priority';
+import { getPublicLeadSourceOrder, getPublicLeadSourcePriority } from '../../../shared/source-priority';
 
 type SearchResult = {
   title: string;
@@ -57,8 +57,11 @@ const sourceFailureThreshold = 2;
  *
  * 1. NotaryCafe indexed evidence
  * 2. Pure public LinkedIn evidence
- * 3. Other public candidates
- * 4. LinkedIn + Google Business fusion
+ * 3. Yelp public directory
+ * 4. Yellow Pages public directory
+ * 5. Gemini lead finding and bounded public fallbacks
+ * 6. Google Places
+ * 7. LinkedIn + Google Business fusion
  *
  * This is an ordering preference, not a relaxation of the public-phone,
  * location, or evidence gates.
@@ -68,7 +71,7 @@ export const isNotaryCafeLead = (lead: Lead) => {
 };
 
 export const getNotaryCafeEvidencePriority = (lead: Lead) => {
-  return getPublicLeadSourcePriority(lead);
+  return getPublicLeadSourceOrder(lead);
 };
 
 export const isNotaryCafeCategory = (value: unknown) =>
@@ -100,9 +103,10 @@ export const prioritizeNotaryCafeLeads = (
 
 /**
  * Apply the complete AI display sequence, regardless of category:
- * NotaryCafe indexed evidence, pure LinkedIn, generic public sources, then
- * LinkedIn plus Google Business fusion. The caller is responsible for
- * eligibility.
+ * NotaryCafe indexed evidence, pure LinkedIn, Yelp, Yellow Pages, Gemini lead
+ * finding, Google Places, then LinkedIn plus Google Business fusion. OSM,
+ * public websites, and other bounded public fallbacks share the Gemini slot.
+ * The caller is responsible for eligibility.
  */
 export const prioritizeAiLeadSources = (leads: Lead[]) => {
   const safeLeads = Array.isArray(leads) ? leads : [];

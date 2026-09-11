@@ -102,19 +102,48 @@ const makeAiSourceSequenceLeads = () => {
     pureLinkedIn,
     {
       ...pureLinkedIn,
+      id: 'e2e-ai-yelp',
+      name: 'Yelp Public Lead',
+      source: 'Yelp, Public Directory',
+      listingUrl: 'https://www.yelp.com/biz/yelp-public-lead',
+      contactSourceUrl: 'https://www.yelp.com/biz/yelp-public-lead',
+      publicSocialLinks: undefined,
+    },
+    {
+      ...pureLinkedIn,
+      id: 'e2e-ai-yellow',
+      name: 'Yellow Pages Public Lead',
+      source: 'Yellow Pages, Public Directory',
+      listingUrl: 'https://www.yellowpages.com/austin-tx/yellow-pages-public-lead',
+      contactSourceUrl: 'https://www.yellowpages.com/austin-tx/yellow-pages-public-lead',
+      publicSocialLinks: undefined,
+    },
+    {
+      ...pureLinkedIn,
+      id: 'e2e-ai-gemini',
+      name: 'Gemini Public Lead',
+      source: 'Gemini, Grounded Public Search',
+      listingUrl: 'https://gemini-public.example/candidate',
+      contactSourceUrl: 'https://gemini-public.example/candidate',
+      publicSocialLinks: undefined,
+    },
+    {
+      ...pureLinkedIn,
+      id: 'e2e-ai-google',
+      name: 'Google Places Public Lead',
+      source: 'Google Places',
+      listingUrl: 'https://www.google.com/maps/place/google-places-public-lead',
+      contactSourceUrl: 'https://www.google.com/maps/place/google-places-public-lead',
+      publicSocialLinks: undefined,
+    },
+    {
+      ...pureLinkedIn,
       id: 'e2e-ai-fusion',
       name: 'AI LinkedIn Google Lead',
       source: 'Public LinkedIn, Google Business',
       listingUrl: 'https://www.linkedin.com/in/public-business-owner',
       contactSourceUrl: 'https://www.google.com/maps/place/public-business',
-    },
-    {
-      ...pureLinkedIn,
-      id: 'e2e-ai-other',
-      name: 'AI Other Public Lead',
-      source: 'OpenStreetMap, Public Website',
-      listingUrl: 'https://www.openstreetmap.org/node/public-business',
-      publicSocialLinks: undefined,
+      publicSocialLinks: [{ platform: 'LinkedIn', url: 'https://www.linkedin.com/in/public-business-owner' }],
     },
   ];
 };
@@ -128,11 +157,11 @@ const makeResponse = (mode, failed = false) => ({
     researchDepth: mode === 'ai' ? 'pro' : 'verified',
     status: failed ? 'failed' : 'complete',
     progress: {
-      discovered: failed ? 0 : mode === 'ai' ? 4 : 1,
-      enriched: failed ? 0 : mode === 'ai' ? 4 : 1,
-      publicContactsFound: failed ? 0 : mode === 'ai' ? 4 : 1,
-      publicQueriesAttempted: mode === 'ai' ? 4 : 1,
-      publicProvidersChecked: mode === 'ai' ? 4 : 1,
+      discovered: failed ? 0 : mode === 'ai' ? 7 : 1,
+      enriched: failed ? 0 : mode === 'ai' ? 7 : 1,
+      publicContactsFound: failed ? 0 : mode === 'ai' ? 7 : 1,
+      publicQueriesAttempted: mode === 'ai' ? 7 : 1,
+      publicProvidersChecked: mode === 'ai' ? 7 : 1,
       providerCoverage: mode === 'gmb'
         ? [{
             providerId: 'google-places',
@@ -161,16 +190,6 @@ const makeResponse = (mode, failed = false) => ({
             status: 'returned',
             leadCount: 1,
           }, {
-            providerId: 'google-places-ai',
-            providerName: 'Google Business (GMB) listings',
-            status: 'returned',
-            leadCount: 1,
-          }, {
-            providerId: 'public-business-listings',
-            providerName: 'Public Business Listings',
-            status: 'returned',
-            leadCount: 1,
-          }, {
             providerId: 'yelp-public-directory',
             providerName: 'Yelp, Public Directory',
             status: 'returned',
@@ -184,22 +203,37 @@ const makeResponse = (mode, failed = false) => ({
             providerId: 'gemini-public-discovery',
             providerName: 'Gemini public discovery',
             status: 'returned',
-            leadCount: 4,
+            leadCount: 1,
+          }, {
+            providerId: 'public-business-listings',
+            providerName: 'Public Business Listings',
+            status: 'returned',
+            leadCount: 1,
+          }, {
+            providerId: 'google-places-ai',
+            providerName: 'Google Business (GMB) listings',
+            status: 'returned',
+            leadCount: 1,
+          }, {
+            providerId: 'linkedin-public-google-business-fusion',
+            providerName: 'LinkedIn + Google Business fusion',
+            status: 'returned',
+            leadCount: 1,
           }],
       aiAssistance: mode === 'ai' ? 'enabled' : undefined,
-      totalCandidates: failed ? 0 : mode === 'ai' ? 4 : 1,
+      totalCandidates: failed ? 0 : mode === 'ai' ? 7 : 1,
       requestedCount: 50,
-      foundCount: failed ? 0 : mode === 'ai' ? 4 : 1,
+      foundCount: failed ? 0 : mode === 'ai' ? 7 : 1,
       duplicatesRemoved: 0,
       currentSource: failed ? 'Failed' : 'Complete',
       batchesCompleted: 1,
-      estimatedRemaining: failed ? 50 : mode === 'ai' ? 46 : 49,
+      estimatedRemaining: failed ? 50 : mode === 'ai' ? 43 : 49,
     },
     totals: {
-      total: failed ? 0 : mode === 'ai' ? 4 : 1,
-      withEmail: failed ? 0 : mode === 'ai' ? 4 : 0,
-      withPhone: failed ? 0 : mode === 'ai' ? 4 : 1,
-      withWebsite: failed ? 0 : mode === 'ai' ? 4 : 1,
+      total: failed ? 0 : mode === 'ai' ? 7 : 1,
+      withEmail: failed ? 0 : mode === 'ai' ? 7 : 0,
+      withPhone: failed ? 0 : mode === 'ai' ? 7 : 1,
+      withWebsite: failed ? 0 : mode === 'ai' ? 7 : 1,
     },
     providerWarnings: failed
       ? [{
@@ -317,15 +351,19 @@ const run = async () => {
     await page.getByText('AI mode coverage', { exact: true }).waitFor();
     assert(await page.getByText('AI interpretation preview').count() === 1, 'AI preview is missing');
     assert(await page.getByText('Public Business Listings').count() === 1, 'AI public listing coverage is missing');
-    assert(await page.getByText('Yelp, Public Directory', { exact: true }).count() === 1, 'AI Yelp coverage is missing');
-    assert(await page.getByText('Yellow Pages, Public Directory', { exact: true }).count() === 1, 'AI Yellow Pages coverage is missing');
+    assert(await page.getByText(/Yelp, Public Directory/i).count() >= 1, 'AI Yelp coverage is missing');
+    assert(await page.getByText(/Yellow Pages, Public Directory/i).count() >= 1, 'AI Yellow Pages coverage is missing');
+    assert(await page.getByText(/LinkedIn \+ Google Business fusion/i).count() >= 2, 'Final fusion coverage is missing');
     assert(await page.getByText('Provider notes', { exact: true }).count() === 1, 'Handled provider notes are not informational');
     assert(await page.getByText(/2 handled Brave Search status updates/i).count() === 1, 'Repeated search-engine notices were not consolidated');
     const aiRows = await page.locator('tbody tr').allTextContents();
     const requiredOrder = [
       'NotaryCafe Public Lead',
       'ai Public Lead',
-      'AI Other Public Lead',
+      'Yelp Public Lead',
+      'Yellow Pages Public Lead',
+      'Gemini Public Lead',
+      'Google Places Public Lead',
       'AI LinkedIn Google Lead',
     ];
     let lastRowIndex = -1;
@@ -337,13 +375,16 @@ const run = async () => {
     for (const priorityLabel of [
       '1 · NotaryCafe indexed evidence',
       '2 · Pure public LinkedIn evidence',
-      '3 · Other public evidence',
-      '4 · LinkedIn + Google Business fusion',
+      '3 · Yelp public directory',
+      '4 · Yellow Pages public directory',
+      '5 · Gemini lead finding / public fallback',
+      '6 · Google Places',
+      '7 · LinkedIn + Google Business fusion',
     ]) {
       const escapedLabel = priorityLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       assert(await page.locator('tbody').getByText(new RegExp(`^${escapedLabel}$`, 'i')).count() === 1, `Missing visible source tier: ${priorityLabel}`);
     }
-    await inspectQuality('ai', 4, 'NotaryCafe Public Lead');
+    await inspectQuality('ai', 7, 'NotaryCafe Public Lead');
     if (process.env.E2E_ARTIFACT_DIR) {
       await mkdir(process.env.E2E_ARTIFACT_DIR, { recursive: true });
       await page.screenshot({ path: path.join(process.env.E2E_ARTIFACT_DIR, 'quality-desktop.png'), fullPage: true });
@@ -362,7 +403,7 @@ const run = async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await fillSearch(page, 'ai', 'cityState');
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
-    await inspectQuality('ai', 4, 'NotaryCafe Public Lead');
+    await inspectQuality('ai', 7, 'NotaryCafe Public Lead');
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'Mobile page overflows horizontally');
     const evidenceBox = await page.getByRole('region', { name: 'Contact evidence for NotaryCafe Public Lead' }).boundingBox();
     assert(evidenceBox && evidenceBox.width < 390, 'Contact evidence panel is clipped on mobile');
