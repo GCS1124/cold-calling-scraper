@@ -54,7 +54,10 @@ Phone: (303) 408-4062 Name: Denver Notary City: Denver State: CO
     expect(result.leads).toEqual([]);
     expect(result.coverage.queriesAttempted).toBeGreaterThan(0);
     expect(result.coverage.providersChecked).toBeGreaterThan(0);
-    expect(result.warnings.some((warning) => /unrelated profiles were not promoted/i.test(warning.message))).toBe(true);
+    expect(result.reviewCandidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reason: 'category_mismatch' }),
+    ]));
+    expect(result.warnings.some((warning) => /screened.*0 matched/i.test(warning.message))).toBe(true);
   });
 
   it('builds bounded location-aware search queries without opening NotaryCafe pages', () => {
@@ -138,13 +141,16 @@ Mobile notary serving Denver, CO.
 
     expect(result.leads).toEqual([]);
     expect(result.warnings.some((warning) => /phone/i.test(warning.message))).toBe(true);
+    expect(result.reviewCandidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reason: 'missing_public_phone' }),
+    ]));
   });
 
   it('does not promote a local profile when the snippet has no local evidence', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
-        response(`Title: public search results\n\nMarkdown Content:\n1. [Notary Cafe | Unknown Profile](https://notarycafe.com/unknown.profile)\nPhone: (303) 408-4062\n`),
+        response(`Title: public search results\n\nMarkdown Content:\n1. [Notary Cafe | Unknown Notary Public](https://notarycafe.com/unknown.profile)\nMobile notary public. Phone: (303) 408-4062\n`),
       ) as typeof fetch,
     );
 
@@ -155,6 +161,9 @@ Mobile notary serving Denver, CO.
     });
 
     expect(result.leads).toEqual([]);
+    expect(result.reviewCandidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reason: 'location_mismatch' }),
+    ]));
   });
 
   it('does not misread the word "in" as the Indiana state code', async () => {

@@ -12,6 +12,7 @@ import {
   discoverLeadsWithGemini,
   expandQueryWithGemini,
   getGeminiApiKeyCount,
+  getGeminiPoolHealth,
   GeminiKeyPoolError,
   GeminiRateLimitError,
   isGeminiLeadDiscoveryEnabled,
@@ -43,6 +44,7 @@ const originalRetryConfig = Object.fromEntries(
     'GEMINI_AUTH_FAILURE_COOLDOWN_MS',
     'GEMINI_TRANSIENT_FAILURE_COOLDOWN_MS',
     'GEMINI_QUERY_CACHE_TTL_MS',
+    'GEMINI_GROUNDED_CACHE_TTL_MS',
     'GEMINI_KEY_ROTATION_ATTEMPTS',
   ].map((name) => [name, process.env[name]]),
 ) as Record<string, string | undefined>;
@@ -88,6 +90,20 @@ describe('Gemini public research layer', () => {
 
     expect(getGeminiApiKeyCount()).toBe(3);
     expect(isGeminiQueryAssistanceEnabled()).toBe(true);
+  });
+
+  it('reports aggregate pool health without exposing configured key values', () => {
+    delete process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEYS = 'private-key-one,private-key-two';
+
+    const health = getGeminiPoolHealth();
+
+    expect(health).toMatchObject({
+      configuredKeyCount: 2,
+      availableKeyCount: 2,
+      coolingDownKeyCount: 0,
+    });
+    expect(JSON.stringify(health)).not.toContain('private-key');
   });
 
   it('reads numbered key variables and rotates through the full pool by default', async () => {
@@ -505,5 +521,28 @@ describe('Gemini public research layer', () => {
       }),
     ).rejects.toBeInstanceOf(GeminiKeyPoolError);
     expect(axiosPost).toHaveBeenCalledTimes(2);
+  });
+
+  it('briefly caches identical grounded research requests during durable retries', async () => {
+    process.env.GEMINI_API_KEY = 'grounded-cache-key';
+    delete process.env.GEMINI_LEAD_DISCOVERY_ENABLED;
+    process.env.GEMINI_GROUNDED_CACHE_TTL_MS = '60_000';
+    process.env.GEMINI_MIN_REQUEST_GAP_MS = '0';
+    axiosPost.mockResolvedValue({
+      data: {
+        candidates: [{
+          content: {
+            parts: [{ text: JSON.stringify({ candidates: [] }) }],
+          },
+          groundingMetadata: { groundingChunks: [] },
+        }],
+      },
+    });
+    const request = { companyType: 'Dentist', city: 'Austin, TX', count: 50 } as const;
+
+    await discoverLeadsWithGemini(request, 'Austin, TX', [], 'Austin, TX', 5_000);
+    await discoverLeadsWithGemini(request, 'Austin, TX', [], 'Austin, TX', 5_000);
+
+    expect(axiosPost).toHaveBeenCalledOnce();
   });
 });

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { httpClient } from '../../utils/http-client';
-import { discoverUsLeadsFromOsm } from '../osm-discovery';
+import { discoverUsLeadsFromOsm, discoverUsLeadsFromOsmBatch } from '../osm-discovery';
 import { resolveCategoryProfile } from '../us-category-mapping';
 import type { NormalizedUsLocation } from '../us-location';
 
@@ -118,5 +118,60 @@ describe('discoverUsLeadsFromOsm', () => {
 
     expect(post.mock.calls.length).toBeGreaterThan(1);
     expect(post.mock.calls.length).toBeLessThanOrEqual(12);
+    expect(
+      new Set(post.mock.calls.slice(0, 3).map(([endpoint]) => endpoint)).size,
+    ).toBeGreaterThan(1);
+  });
+
+  it('persists a deterministic next-box cursor for durable broad-location continuation', async () => {
+    let callIndex = 0;
+    vi.spyOn(httpClient, 'post').mockImplementation(async () => {
+      callIndex += 1;
+      return {
+        status: 200,
+        data: {
+          elements: [{
+            type: 'node',
+            id: callIndex,
+            lat: 30,
+            lon: -80,
+            tags: {
+              name: `Eastern Dental ${callIndex}`,
+              amenity: 'dentist',
+            },
+          }],
+        },
+      } as never;
+    });
+
+    const first = await discoverUsLeadsFromOsmBatch({
+      request: { companyType: 'Dentist', count: 1 },
+      location: easternTimeLocation,
+      profile: resolveCategoryProfile('Dentist'),
+      deadlineMs: Date.now() + 3_000,
+      maxBoxes: 2,
+    });
+
+    expect(first).toMatchObject({
+      startBoxCursor: 0,
+      nextBoxCursor: 2,
+      attemptedBoxCount: 2,
+      completedBoxCount: 2,
+      completed: false,
+    });
+    expect(first.totalBoxCount).toBeGreaterThan(2);
+
+    const second = await discoverUsLeadsFromOsmBatch({
+      request: { companyType: 'Dentist', count: 1 },
+      location: easternTimeLocation,
+      profile: resolveCategoryProfile('Dentist'),
+      deadlineMs: Date.now() + 3_000,
+      boxCursor: first.nextBoxCursor,
+      maxBoxes: 2,
+    });
+
+    expect(second.startBoxCursor).toBe(2);
+    expect(second.nextBoxCursor).toBe(4);
+    expect(second.attemptedBoxCount).toBe(2);
   });
 });

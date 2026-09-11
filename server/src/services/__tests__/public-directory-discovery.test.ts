@@ -121,7 +121,12 @@ describe('public directory discovery', () => {
     expect(yelp.fetchLeads.mock.calls.length).toBeGreaterThan(1);
     expect(new Set(yelp.fetchLeads.mock.calls.map(([input]) => input.request.city)).size).toBeGreaterThan(1);
     expect(result.leads.length).toBeGreaterThan(0);
-    expect(result.coverage.find((entry) => entry.providerId === 'yelp-public-directory')?.leadCount).toBeGreaterThan(1);
+    expect(result.coverage.find((entry) => entry.providerId === 'yelp-public-directory')).toMatchObject({
+      attemptedCount: expect.any(Number),
+      observedCount: 1,
+      acceptedCount: 1,
+      leadCount: 1,
+    });
     expect(result.warnings).toContainEqual(
       expect.objectContaining({
         providerId: 'yellow-pages-public-directory',
@@ -134,5 +139,34 @@ describe('public directory discovery', () => {
         status: 'partial',
       }),
     );
+  });
+
+  it('reports unstarted directory work as deferred instead of an empty provider result', async () => {
+    const yelp = makeProvider('yelp', 'Yelp');
+    const yellowPages = makeProvider('yellow-pages', 'Yellow Pages');
+    const discovery = createPublicDirectoryDiscovery({ providers: [yelp, yellowPages] });
+
+    const result = await discovery({
+      request: { companyType: 'HVAC contractor', city: 'Austin, TX', count: 50 },
+      location: localLocation,
+      deadlineMs: Date.now() - 1,
+    });
+
+    expect(yelp.fetchLeads).not.toHaveBeenCalled();
+    expect(yellowPages.fetchLeads).not.toHaveBeenCalled();
+    expect(result.coverage).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerId: 'yelp-public-directory',
+        phase: 'queued',
+        outcome: 'deferred',
+        deferredCount: 1,
+      }),
+      expect.objectContaining({
+        providerId: 'yellow-pages-public-directory',
+        phase: 'queued',
+        outcome: 'deferred',
+        deferredCount: 1,
+      }),
+    ]));
   });
 });

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Lead, ResearchCandidate } from '../../types/lead';
+import type { Lead, ResearchCandidate, ReviewCandidate } from '../../types/lead';
 
 vi.mock('pg', () => {
   const query = vi.fn().mockResolvedValue({ rows: [] });
@@ -223,13 +223,26 @@ describe('createSearchJobStore', () => {
       status: 'needs_phone_validation',
       discoveredAt: '2026-09-01T00:00:00.000Z',
     };
+    const unsafeReviewCandidate: ReviewCandidate = {
+      id: 'unsafe-review-candidate',
+      providerId: 'public-website-enrichment',
+      providerName: 'Public Website Enrichment',
+      reason: 'website_timeout',
+      website: 'http://127.0.0.1/private',
+      profileUrl: 'https://user:password@public.example/profile',
+      sourceUrls: ['http://localhost/source', 'https://safe.example/source'],
+      relatedLeadIds: ['unsafe-persisted-lead'],
+      discoveredAt: '2026-09-01T00:00:00.000Z',
+    };
     const response = toSearchResponse({
       ...job,
       leads: [lead],
       researchCandidates: [unsafeResearchCandidate],
+      reviewCandidates: [unsafeReviewCandidate],
     });
     const [sanitized] = response.leads;
     const [sanitizedResearch] = response.researchCandidates ?? [];
+    const [sanitizedReview] = response.reviewCandidates ?? [];
 
     expect(sanitized?.mobile).toBe('+1 512 555 0199');
     expect(sanitized?.website).toBe('');
@@ -253,6 +266,56 @@ describe('createSearchJobStore', () => {
     expect(sanitizedResearch?.socialLinks).toEqual([
       { platform: 'Website', url: 'https://safe.example/profile' },
     ]);
+    expect(sanitizedReview?.website).toBeUndefined();
+    expect(sanitizedReview?.profileUrl).toBeUndefined();
+    expect(sanitizedReview?.sourceUrls).toEqual(['https://safe.example/source']);
+    expect(sanitizedReview?.reason).toBe('website_timeout');
+  });
+
+  it('persists and sanitizes the durable OSM continuation cursor', async () => {
+    const { createSearchJobRecord, CURRENT_SCHEMA_VERSION } = await import('../search-job-store');
+    const job = createSearchJobRecord({
+      searchId: 'ai-osm-workflow',
+      request: {
+        companyType: 'Dentist',
+        sourceMode: 'ai',
+        city: 'Austin, TX',
+        count: 50,
+      },
+      query: 'Dentist in Austin, TX',
+      locationLabel: 'Austin, TX',
+      locationMode: 'local',
+      status: 'discovering',
+      progress: {
+        discovered: 0,
+        enriched: 0,
+        totalCandidates: 0,
+        requestedCount: 50,
+        foundCount: 0,
+        duplicatesRemoved: 0,
+        currentSource: 'Public business listings',
+        batchesCompleted: 1,
+        estimatedRemaining: 50,
+      },
+      aiWorkflow: {
+        startedAt: 1_000,
+        logicalDeadlineAt: 91_000,
+        stage: 'public_listing_continuation',
+        osmBoxCursor: -4,
+        osmTotalBoxes: 12.9,
+        osmContinuationPasses: 1.7,
+      },
+    });
+
+    expect(job.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(job.aiWorkflow).toEqual({
+      startedAt: 1_000,
+      logicalDeadlineAt: 91_000,
+      stage: 'public_listing_continuation',
+      osmBoxCursor: 0,
+      osmTotalBoxes: 12,
+      osmContinuationPasses: 1,
+    });
   });
 
   it('reuses a durable memory job for the same idempotency key and rejects changed criteria', async () => {

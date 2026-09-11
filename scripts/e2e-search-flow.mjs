@@ -127,6 +127,22 @@ const makeAiSourceSequenceLeads = () => {
     },
     {
       ...pureLinkedIn,
+      id: 'e2e-ai-generic-listing',
+      name: 'Generic Public Listing Lead',
+      source: 'OpenStreetMap, Public Business Listings',
+      listingUrl: 'https://www.openstreetmap.org/node/1001',
+      contactSourceUrl: 'https://www.openstreetmap.org/node/1001',
+      decisionMakerSourceUrl: undefined,
+      publicSocialLinks: undefined,
+      evidence: [{
+        sourceUrl: 'https://www.openstreetmap.org/node/1001',
+        sourceName: 'OpenStreetMap listing',
+        claim: 'The public listing exposes the business route.',
+        status: 'confirmed',
+      }],
+    },
+    {
+      ...pureLinkedIn,
       id: 'e2e-ai-gemini',
       name: 'Gemini Public Lead',
       source: 'Gemini, Grounded Public Search',
@@ -145,6 +161,16 @@ const makeAiSourceSequenceLeads = () => {
     },
     {
       ...pureLinkedIn,
+      id: 'e2e-ai-website',
+      name: 'Public Website Enrichment Lead',
+      source: 'Public Website Enrichment',
+      listingUrl: 'https://public-business.example/about',
+      contactSourceUrl: 'https://public-business.example/contact',
+      decisionMakerSourceUrl: 'https://public-business.example/about',
+      publicSocialLinks: undefined,
+    },
+    {
+      ...pureLinkedIn,
       id: 'e2e-ai-fusion',
       name: 'AI LinkedIn Google Lead',
       source: 'Public LinkedIn, Google Business',
@@ -155,20 +181,260 @@ const makeAiSourceSequenceLeads = () => {
   ];
 };
 
-const makeResponse = (mode, failed = false) => ({
+const makeAiProviderCoverage = (stage) => {
+  const isDiscovering = stage === 'discovering';
+  const isEnriching = stage === 'enriching';
+  const queued = (providerId, providerName, message) => ({
+    providerId,
+    providerName,
+    status: 'configured',
+    phase: 'queued',
+    outcome: 'not_started',
+    leadCount: 0,
+    attemptedCount: 0,
+    observedCount: 0,
+    acceptedCount: 0,
+    reviewCount: 0,
+    deferredCount: 0,
+    message,
+  });
+
+  return [
+    {
+      providerId: 'notarycafe-indexed-search',
+      providerName: 'NotaryCafe, Indexed Public Search',
+      status: 'returned',
+      phase: 'completed',
+      outcome: 'filtered',
+      leadCount: 0,
+      attemptedCount: 4,
+      observedCount: 4,
+      acceptedCount: 0,
+      reviewCount: 1,
+      deferredCount: 0,
+      message: 'Indexed NotaryCafe completed: 0 matched / 4 screened for HVAC contractor; one candidate remains in review.',
+    },
+    isDiscovering
+      ? {
+          providerId: 'linkedin-public-search',
+          providerName: 'Public LinkedIn Search',
+          status: 'configured',
+          phase: 'running',
+          outcome: 'not_started',
+          leadCount: 0,
+          attemptedCount: 3,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+          message: 'Deterministic public profile searches are running.',
+        }
+      : {
+          providerId: 'linkedin-public-search',
+          providerName: 'Public LinkedIn Search',
+          status: 'returned',
+          phase: 'completed',
+          outcome: 'returned',
+          leadCount: 1,
+          attemptedCount: 8,
+          observedCount: 2,
+          acceptedCount: 1,
+          reviewCount: 1,
+          deferredCount: 0,
+          message: 'Public LinkedIn profile signals were independently phone-qualified where possible.',
+        },
+    isDiscovering
+      ? queued('yelp-public-directory', 'Yelp, Public Directory', 'Yelp is queued in its fair provider window.')
+      : {
+          providerId: 'yelp-public-directory',
+          providerName: 'Yelp, Public Directory',
+          status: 'returned',
+          phase: 'completed',
+          outcome: 'returned',
+          leadCount: 1,
+          attemptedCount: 4,
+          observedCount: 2,
+          acceptedCount: 1,
+          reviewCount: 1,
+          deferredCount: 0,
+          message: 'Yelp location-checked directory results were deduplicated.',
+        },
+    isDiscovering
+      ? queued('yellow-pages-public-directory', 'Yellow Pages, Public Directory', 'Yellow Pages is queued in its fair provider window.')
+      : {
+          providerId: 'yellow-pages-public-directory',
+          providerName: 'Yellow Pages, Public Directory',
+          status: 'returned',
+          phase: 'completed',
+          outcome: 'returned',
+          leadCount: 1,
+          attemptedCount: 4,
+          observedCount: 2,
+          acceptedCount: 1,
+          reviewCount: 1,
+          deferredCount: 0,
+          message: 'Yellow Pages location-checked directory results were deduplicated.',
+        },
+    isDiscovering
+      ? {
+          providerId: 'public-business-listings',
+          providerName: 'Public Business Listings',
+          status: 'configured',
+          phase: 'queued',
+          outcome: 'deferred',
+          leadCount: 0,
+          attemptedCount: 4,
+          observedCount: 1,
+          acceptedCount: 0,
+          reviewCount: 1,
+          deferredCount: 8,
+          message: 'OpenStreetMap advanced a bounded spatial batch; eight boxes remain for durable continuation.',
+        }
+      : {
+          providerId: 'public-business-listings',
+          providerName: 'Public Business Listings',
+          status: 'returned',
+          phase: 'completed',
+          outcome: 'returned',
+          leadCount: 1,
+          attemptedCount: 12,
+          observedCount: 3,
+          acceptedCount: 1,
+          reviewCount: 2,
+          deferredCount: 0,
+          message: 'OpenStreetMap spatial continuation completed with partial public records preserved.',
+        },
+    isDiscovering
+      ? queued('gemini-public-discovery', 'Gemini public discovery', 'One grounded public-research pass is queued after deterministic source preparation.')
+      : {
+          providerId: 'gemini-public-discovery',
+          providerName: 'Gemini public discovery',
+          status: 'partial',
+          phase: 'degraded',
+          outcome: 'rate_limited',
+          leadCount: 0,
+          attemptedCount: 1,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 1,
+          deferredCount: 0,
+          message: 'Gemini capacity was rate limited; deterministic public results and review evidence were preserved.',
+        },
+    isDiscovering
+      ? queued('google-places-ai', 'Google Business (GMB) listings', 'Google Business listing seeds are queued after the grounded pass.')
+      : {
+          providerId: 'google-places-ai',
+          providerName: 'Google Business (GMB) listings',
+          status: 'returned',
+          phase: 'completed',
+          outcome: 'returned',
+          leadCount: 40,
+          attemptedCount: 1,
+          observedCount: 500,
+          acceptedCount: 40,
+          reviewCount: 12,
+          deferredCount: 0,
+          message: 'Google Business observed 500 de-duplicated listing seeds; the best 40 were accepted into the bounded public evidence pool.',
+        },
+    isDiscovering
+      ? queued('public-website-enrichment', 'Public Website Enrichment', 'Public website enrichment is queued after source discovery.')
+      : isEnriching
+        ? {
+            providerId: 'public-website-enrichment',
+            providerName: 'Public Website Enrichment',
+            status: 'configured',
+            phase: 'running',
+            outcome: 'not_started',
+            leadCount: 0,
+            attemptedCount: 3,
+            observedCount: 3,
+            acceptedCount: 0,
+            reviewCount: 0,
+            deferredCount: 2,
+            message: 'Public website enrichment is resuming bounded domains.',
+          }
+        : {
+            providerId: 'public-website-enrichment',
+            providerName: 'Public Website Enrichment',
+            status: 'partial',
+            phase: 'degraded',
+            outcome: 'timed_out',
+            leadCount: 1,
+            attemptedCount: 5,
+            observedCount: 5,
+            acceptedCount: 1,
+            reviewCount: 2,
+            deferredCount: 0,
+            completedCount: 4,
+            enrichedCount: 1,
+            timedOutCount: 1,
+            message: 'One public website timed out; completed profiles and review evidence were preserved.',
+          },
+    isDiscovering || isEnriching
+      ? queued('linkedin-public-google-business-fusion', 'LinkedIn + Google Business fusion', 'Final strict corroboration waits for all source and website stages.')
+      : {
+          providerId: 'linkedin-public-google-business-fusion',
+          providerName: 'LinkedIn + Google Business fusion',
+          status: 'returned',
+          phase: 'completed',
+          outcome: 'returned',
+          leadCount: 1,
+          attemptedCount: 2,
+          observedCount: 2,
+          acceptedCount: 1,
+          reviewCount: 1,
+          deferredCount: 0,
+          message: 'Final strict LinkedIn + Google Business fusion retained one corroborated business route.',
+        },
+  ];
+};
+
+const makeResponse = (mode, failed = false, stage = 'complete') => ({
   searchId: `e2e-${mode}-${failed ? 'failed' : 'complete'}`,
   leads: failed ? [] : mode === 'ai' ? makeAiSourceSequenceLeads() : [makeLead(mode)],
+  reviewCandidates: !failed && mode === 'ai'
+    ? [{
+        id: 'e2e-gemini-review',
+        providerId: 'gemini-public-discovery',
+        providerName: 'Gemini public discovery',
+        reason: 'missing_public_phone',
+        reasonDetail: 'The grounded public reference did not expose independently validated public-phone evidence.',
+        name: 'Gemini Review-Only Owner',
+        organizationName: 'Austin Public Business',
+        location: 'Austin, TX',
+        reportedPhone: '+1 512 555 0199',
+        sourceUrls: ['https://public-business.example/about'],
+        discoveredAt: new Date().toISOString(),
+      }]
+    : [],
   meta: {
     query: `HVAC contractor in Austin, TX`,
     locationLabel: 'Austin, TX',
     researchDepth: mode === 'ai' ? 'pro' : 'verified',
-    status: failed ? 'failed' : 'complete',
+    status: failed ? 'failed' : mode === 'ai' ? stage : 'complete',
+    execution: mode === 'ai' && !failed
+      ? {
+          path: 'durable',
+          pollable: true,
+          resumable: true,
+          startedAt: '2026-09-11T00:00:00.000Z',
+          lastProgressAt: '2026-09-11T00:00:00.000Z',
+          ...(stage === 'complete' ? { completedAt: '2026-09-11T00:00:03.000Z' } : {}),
+        }
+      : {
+          path: 'stateless',
+          pollable: false,
+          resumable: false,
+          startedAt: '2026-09-11T00:00:00.000Z',
+          lastProgressAt: '2026-09-11T00:00:00.000Z',
+          completedAt: '2026-09-11T00:00:00.000Z',
+        },
     progress: {
-      discovered: failed ? 0 : mode === 'ai' ? 7 : 1,
-      enriched: failed ? 0 : mode === 'ai' ? 7 : 1,
-      publicContactsFound: failed ? 0 : mode === 'ai' ? 7 : 1,
-      publicQueriesAttempted: mode === 'ai' ? 7 : 1,
-      publicProvidersChecked: mode === 'ai' ? 7 : 1,
+      discovered: failed ? 0 : mode === 'ai' ? 9 : 1,
+      enriched: failed ? 0 : mode === 'ai' ? 9 : 1,
+      publicContactsFound: failed ? 0 : mode === 'ai' ? 9 : 1,
+      publicQueriesAttempted: mode === 'ai' ? 9 : 1,
+      publicProvidersChecked: mode === 'ai' ? 9 : 1,
       providerCoverage: mode === 'gmb'
         ? [{
             providerId: 'google-places',
@@ -186,61 +452,27 @@ const makeResponse = (mode, failed = false) => ({
             status: 'partial',
             leadCount: 0,
           }]
-        : [{
-            providerId: 'notarycafe-indexed-search',
-            providerName: 'NotaryCafe, Indexed Public Search',
-            status: 'returned',
-            leadCount: 1,
-          }, {
-            providerId: 'linkedin-public-search',
-            providerName: 'Public LinkedIn Search',
-            status: 'returned',
-            leadCount: 1,
-          }, {
-            providerId: 'yelp-public-directory',
-            providerName: 'Yelp, Public Directory',
-            status: 'returned',
-            leadCount: 1,
-          }, {
-            providerId: 'yellow-pages-public-directory',
-            providerName: 'Yellow Pages, Public Directory',
-            status: 'partial',
-            leadCount: 0,
-          }, {
-            providerId: 'gemini-public-discovery',
-            providerName: 'Gemini public discovery',
-            status: 'returned',
-            leadCount: 1,
-          }, {
-            providerId: 'public-business-listings',
-            providerName: 'Public Business Listings',
-            status: 'returned',
-            leadCount: 1,
-          }, {
-            providerId: 'google-places-ai',
-            providerName: 'Google Business (GMB) listings',
-            status: 'returned',
-            leadCount: 1,
-          }, {
-            providerId: 'linkedin-public-google-business-fusion',
-            providerName: 'LinkedIn + Google Business fusion',
-            status: 'returned',
-            leadCount: 1,
-          }],
-      aiAssistance: mode === 'ai' ? 'enabled' : undefined,
-      totalCandidates: failed ? 0 : mode === 'ai' ? 7 : 1,
+        : makeAiProviderCoverage(stage),
+      aiAssistance: mode === 'ai' ? (stage === 'discovering' ? 'enabled' : 'rate_limited') : undefined,
+      totalCandidates: failed ? 0 : mode === 'ai' ? 9 : 1,
       requestedCount: 50,
-      foundCount: failed ? 0 : mode === 'ai' ? 7 : 1,
+      foundCount: failed ? 0 : mode === 'ai' ? 9 : 1,
       duplicatesRemoved: 0,
-      currentSource: failed ? 'Failed' : 'Complete',
+      currentSource: failed
+        ? 'Failed'
+        : mode === 'ai' && stage === 'discovering'
+          ? 'AI public-source discovery'
+          : mode === 'ai' && stage === 'enriching'
+            ? 'Public website enrichment'
+            : 'Complete',
       batchesCompleted: 1,
-      estimatedRemaining: failed ? 50 : mode === 'ai' ? 43 : 49,
+      estimatedRemaining: failed ? 50 : mode === 'ai' ? 41 : 49,
     },
     totals: {
-      total: failed ? 0 : mode === 'ai' ? 7 : 1,
-      withEmail: failed ? 0 : mode === 'ai' ? 7 : 0,
-      withPhone: failed ? 0 : mode === 'ai' ? 7 : 1,
-      withWebsite: failed ? 0 : mode === 'ai' ? 7 : 1,
+      total: failed ? 0 : mode === 'ai' ? 9 : 1,
+      withEmail: failed ? 0 : mode === 'ai' ? 9 : 0,
+      withPhone: failed ? 0 : mode === 'ai' ? 9 : 1,
+      withWebsite: failed ? 0 : mode === 'ai' ? 9 : 1,
     },
     providerWarnings: failed
       ? [{
@@ -322,6 +554,7 @@ const run = async () => {
     await page.getByRole('button', { name: `All public-phone leads ${expectedCount}`, exact: true }).click();
   };
   let aiFailureNext = false;
+  let aiSnapshotIndex = 0;
 
   await page.route('**/api/health', (route) => route.fulfill({
     status: 200, contentType: 'application/json', body: '{"status":"ok"}',
@@ -334,11 +567,27 @@ const run = async () => {
     if (failed) {
       aiFailureNext = false;
     }
+    if (mode === 'ai' && !failed) {
+      aiSnapshotIndex = 0;
+    }
 
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(makeResponse(mode, failed)),
+      body: JSON.stringify(makeResponse(mode, failed, mode === 'ai' && !failed ? 'discovering' : 'complete')),
+    });
+  });
+
+  await page.route('**/api/search/e2e-ai-complete', async (route) => {
+    const stage = aiSnapshotIndex === 0 ? 'enriching' : 'complete';
+    aiSnapshotIndex += 1;
+    // Leave the first durable snapshot on screen long enough to verify its
+    // queued/deferred wording before the next bounded tick arrives.
+    await new Promise((resolve) => setTimeout(resolve, stage === 'enriching' ? 250 : 1_000));
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(makeResponse('ai', false, stage)),
     });
   });
 
@@ -358,13 +607,39 @@ const run = async () => {
     await inspectQuality('gmb');
 
     await fillSearch(page, 'ai', 'cityState');
+    await page.getByText(/Running bounded public-source stages/i).waitFor();
+    await page.getByText('Deferred · 8 remaining', { exact: true }).waitFor();
+    await page.getByText('Collecting contact details', { exact: true }).waitFor();
+    await page.locator('[data-provider-id="public-website-enrichment"]').getByText('Checking', { exact: true }).waitFor();
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
     await page.getByText('AI mode coverage', { exact: true }).waitFor();
     assert(await page.getByText('AI interpretation preview').count() === 1, 'AI preview is missing');
-    assert(await page.getByText('Public Business Listings').count() === 1, 'AI public listing coverage is missing');
+    assert(await page.getByText('Public Business Listings').count() >= 1, 'AI public listing coverage is missing');
     assert(await page.getByText(/Yelp, Public Directory/i).count() >= 1, 'AI Yelp coverage is missing');
     assert(await page.getByText(/Yellow Pages, Public Directory/i).count() >= 1, 'AI Yellow Pages coverage is missing');
     assert(await page.getByText(/LinkedIn \+ Google Business fusion/i).count() >= 2, 'Final fusion coverage is missing');
+    const providerOrder = await page
+      .locator('[aria-label="AI workflow provider status"] [data-provider-id]')
+      .evaluateAll((cards) => cards.map((card) => card.getAttribute('data-provider-id')));
+    assert(
+      JSON.stringify(providerOrder) === JSON.stringify([
+        'notarycafe-indexed-search',
+        'linkedin-public-search',
+        'yelp-public-directory',
+        'yellow-pages-public-directory',
+        'public-business-listings',
+        'gemini-public-discovery',
+        'google-places-ai',
+        'public-website-enrichment',
+        'linkedin-public-google-business-fusion',
+      ]),
+      `Provider display order is incorrect: ${providerOrder.join(', ')}`,
+    );
+    const workflowStatus = page.getByLabel('AI workflow provider status');
+    await workflowStatus.getByText('0 matched / 4 screened · 1 review', { exact: true }).waitFor();
+    await workflowStatus.getByText('Rate limited · 0 accepted · 1 review', { exact: true }).waitFor();
+    await workflowStatus.getByText('500 observed · 40 accepted', { exact: true }).waitFor();
+    await workflowStatus.getByText('Timed out · 1 accepted · 2 review', { exact: true }).waitFor();
     assert(await page.getByText('Provider notes', { exact: true }).count() === 1, 'Handled provider notes are not informational');
     assert(await page.getByText(/2 handled Brave Search status updates/i).count() === 1, 'Repeated search-engine notices were not consolidated');
     const aiRows = await page.locator('tbody tr').allTextContents();
@@ -373,8 +648,10 @@ const run = async () => {
       'ai Public Lead',
       'Yelp Public Lead',
       'Yellow Pages Public Lead',
+      'Generic Public Listing Lead',
       'Gemini Public Lead',
       'Google Places Public Lead',
+      'Public Website Enrichment Lead',
       'AI LinkedIn Google Lead',
     ];
     let lastRowIndex = -1;
@@ -388,20 +665,33 @@ const run = async () => {
       '2 · Pure public LinkedIn evidence',
       '3 · Yelp public directory',
       '4 · Yellow Pages public directory',
-      '5 · Gemini lead finding / public fallback',
-      '6 · Google Places',
-      '7 · LinkedIn + Google Business fusion',
+      '5 · Generic public listings',
+      '6 · Gemini public research',
+      '7 · Google Business listings',
+      '8 · Public website enrichment',
+      '9 · LinkedIn + Google Business fusion',
     ]) {
       const escapedLabel = priorityLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       assert(await page.locator('tbody').getByText(new RegExp(`^${escapedLabel}$`, 'i')).count() === 1, `Missing visible source tier: ${priorityLabel}`);
     }
-    await inspectQuality('ai', 7, 'NotaryCafe Public Lead');
+    const reviewQueue = page.getByRole('region', { name: 'Unified review queue' });
+    await reviewQueue.waitFor();
+    assert(await reviewQueue.getByText('Export gate enforced', { exact: true }).count() === 1, 'Review export gate is missing');
+    await reviewQueue.getByLabel('Filter review queue by provider').selectOption('gemini-public-discovery');
+    await reviewQueue.getByLabel('Filter review queue by reason').selectOption('missing_public_phone');
+    assert(await reviewQueue.getByText('Gemini Review-Only Owner', { exact: true }).count() === 1, 'Review-only public candidate is missing');
+    await inspectQuality('ai', 9, 'NotaryCafe Public Lead');
     if (process.env.E2E_ARTIFACT_DIR) {
       await mkdir(process.env.E2E_ARTIFACT_DIR, { recursive: true });
       await page.screenshot({ path: path.join(process.env.E2E_ARTIFACT_DIR, 'quality-desktop.png'), fullPage: true });
     }
 
     await page.getByRole('button', { name: /download excel/i }).click();
+    await page.getByText('Download 9 leads', { exact: true }).waitFor();
+    assert(
+      await page.getByRole('dialog').getByText('Gemini Review-Only Owner', { exact: true }).count() === 0,
+      'Review-only candidate leaked into the export modal',
+    );
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Download file' }).click();
     const excelDownload = await downloadPromise;
@@ -422,7 +712,7 @@ const run = async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await fillSearch(page, 'ai', 'cityState');
     await page.getByRole('heading', { name: 'Discovery complete' }).waitFor();
-    await inspectQuality('ai', 7, 'NotaryCafe Public Lead');
+    await inspectQuality('ai', 9, 'NotaryCafe Public Lead');
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'Mobile page overflows horizontally');
     assert(await page.getByRole('link', { name: 'Open search history', exact: true }).count() === 1, 'Mobile history navigation lost its accessible name');
     assert(await page.getByRole('link', { name: 'Sign in', exact: true }).count() === 1, 'Mobile auth navigation lost its accessible name');

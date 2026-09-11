@@ -201,7 +201,7 @@ describe('runStatelessAiSearch', () => {
     );
   });
 
-  it('bridges a public listing phone into an unqualified LinkedIn owner lead', async () => {
+  it('bridges a public Google Business phone into an unqualified LinkedIn owner lead', async () => {
     const owner = makeLead({
       name: 'Avery Smith',
       headline: 'Owner at Austin Dental Studio',
@@ -211,10 +211,10 @@ describe('runStatelessAiSearch', () => {
       verifiedPhone: false,
     });
     const listing = makeLead({
-      id: 'osm-owner-business',
+      id: 'gmb-owner-business',
       name: 'Austin Dental Studio',
-      source: 'OpenStreetMap',
-      listingUrl: 'https://www.openstreetmap.org/node/456',
+      source: 'Google Places',
+      listingUrl: 'https://www.google.com/maps/place/austin-dental-studio',
       website: 'https://austindentalstudio.com',
       mobile: '+1 512 555 0199',
       hasPhone: true,
@@ -226,7 +226,7 @@ describe('runStatelessAiSearch', () => {
         warnings: [],
         blocked: false,
       }) as never,
-      discoverPublicListings: vi.fn().mockResolvedValue([listing]) as never,
+      discoverGmbListings: vi.fn().mockResolvedValue([listing]) as never,
       enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
         leads,
         warnings: [],
@@ -242,7 +242,7 @@ describe('runStatelessAiSearch', () => {
     expect(result.leads).toHaveLength(1);
     expect(result.leads[0]?.name).toBe('Avery Smith');
     expect(result.leads[0]?.mobile).toBe('+1 512 555 0199');
-    expect(result.leads[0]?.source).toContain('OpenStreetMap');
+    expect(result.leads[0]?.source).toContain('Google Places');
     expect(result.leads[0]?.contactSourceUrl).toBe(listing.listingUrl);
   });
 });

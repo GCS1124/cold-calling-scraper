@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { Lead, ResearchCandidate } from './lead';
+import type { Lead, ResearchCandidate, ReviewCandidate } from './lead';
 import type { LeadFeedbackEventType } from '../../../shared/lead-feedback';
 import type { LeadQualitySummary } from '../../../shared/lead-quality';
 import type {
@@ -66,11 +66,60 @@ export type ProviderWarning = {
   severity?: 'info' | 'warning' | 'error';
 };
 
+/** Lifecycle state is separate from the legacy coarse status for compatibility. */
+export type ProviderCoveragePhase =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'degraded'
+  | 'skipped';
+
+/** The concrete result of a provider attempt or bounded provider stage. */
+export type ProviderCoverageOutcome =
+  | 'not_started'
+  | 'returned'
+  | 'empty'
+  | 'timed_out'
+  | 'blocked'
+  | 'rate_limited'
+  | 'failed'
+  | 'filtered'
+  | 'deferred'
+  | 'not_configured';
+
 export type ProviderCoverage = {
   providerId: string;
   providerName: string;
+  /** Legacy coarse state retained for existing API consumers. */
   status: 'configured' | 'not_configured' | 'returned' | 'failed' | 'partial';
+  /** Backward-compatible alias for the records accepted by this provider. */
   leadCount: number;
+  phase?: ProviderCoveragePhase;
+  outcome?: ProviderCoverageOutcome;
+  /** Provider requests/search paths started inside this bounded stage. */
+  attemptedCount?: number;
+  /** Raw public candidates parsed before location, category, or phone gating. */
+  observedCount?: number;
+  /** Candidates accepted into the shared lead pool before final export gating. */
+  acceptedCount?: number;
+  /** Useful public candidates held in the review queue. */
+  reviewCount?: number;
+  /** Work intentionally left for a later durable tick. */
+  deferredCount?: number;
+  /** Completed public checks, primarily used by website enrichment. */
+  completedCount?: number;
+  /** Records that gained verified public contact or decision-maker evidence. */
+  enrichedCount?: number;
+  /** Public checks stopped by an explicit access denial without any bypass. */
+  blockedCount?: number;
+  /** Public checks that exceeded their bounded window. */
+  timedOutCount?: number;
+  /** Duplicate or ineligible work intentionally not re-run in this stage. */
+  skippedCount?: number;
+  /** Public decision-maker names recovered from a business website. */
+  decisionMakerRecoveredCount?: number;
+  /** ISO timestamp for the newest observation; omitted on legacy snapshots. */
+  updatedAt?: string;
   message?: string;
 };
 
@@ -119,6 +168,8 @@ export type SearchResponse = {
   leads: Lead[];
   /** Model-discovered public references retained for review even when they do not pass phone validation. */
   researchCandidates?: ResearchCandidate[];
+  /** Provider-neutral public candidates retained for review, never for automatic export. */
+  reviewCandidates?: ReviewCandidate[];
   meta: {
     /** Optional for compatibility with legacy snapshots; runtime responses include it. */
     sourceMode?: SearchModeCode;

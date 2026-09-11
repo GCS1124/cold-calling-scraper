@@ -98,7 +98,7 @@ export function SearchForm({
 
         <p className="text-xs font-normal leading-5 text-slate-500">
           {isAiMode
-            ? 'AI mode is the complete public-source workflow: Gemini plans and grounds research, public LinkedIn and indexed NotaryCafe profiles find people, GMB/listing sources plus Yelp and Yellow Pages corroborate businesses, and public websites verify contacts. No paid databases, private profiles, login sessions, or contact-reveal credits are used.'
+            ? 'AI mode is the complete public-source workflow: one grounded Gemini research pass uses deterministic public lenses, public LinkedIn and indexed NotaryCafe profiles find people, GMB/listing sources plus Yelp and Yellow Pages corroborate businesses, and public websites verify contacts. No paid databases, private profiles, login sessions, or contact-reveal credits are used.'
             : `${sourceModeLabelsByCode.gmb} keeps the search focused on local businesses, map-pack listings, and website-backed storefronts.`}
         </p>
 
@@ -122,11 +122,11 @@ export function SearchForm({
                 </p>
               </div>
               <span className="shrink-0 rounded-full border border-blue-300/30 bg-blue-300/10 px-3 py-1 text-[11px] font-bold text-blue-100">
-                Seven ordered public layers
+                Nine ordered public stages
               </span>
             </div>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                 <p className="text-sm font-bold">1 · NotaryCafe index</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
@@ -152,19 +152,31 @@ export function SearchForm({
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">5 · Gemini lead finding</p>
+                <p className="text-sm font-bold">5 · Generic public listings</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Grounded public candidates, never guessed contacts
+                  Bounded public business records, deduplicated before review
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">6 · Google Places</p>
+                <p className="text-sm font-bold">6 · Gemini public research</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Configured business-listing corroboration
+                  One grounded pass with no guessed contacts
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-sm font-bold">7 · Google Business</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  Public listing seeds and independently published business routes
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-sm font-bold">8 · Public website enrichment</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  One bounded crawl per public business domain
                 </p>
               </div>
               <div className="rounded-xl border border-cyan-200/20 bg-cyan-300/10 p-3">
-                <p className="text-sm font-bold">7 · LinkedIn + GMB fusion</p>
+                <p className="text-sm font-bold">9 · LinkedIn + GMB fusion</p>
                 <p className="mt-1 text-xs leading-5 text-cyan-100">
                   Final corroboration tier for identity and phone
                 </p>
@@ -210,7 +222,7 @@ export function SearchForm({
                   Notary priority route active
                 </p>
                 <p className="mt-1 text-xs leading-5 text-slate-200">
-                  1 NotaryCafe → 2 pure public LinkedIn → 3 Yelp → 4 Yellow Pages → 5 Gemini lead finding → 6 Google Places → 7 LinkedIn + Google Business fusion. Direct NotaryCafe access stays disabled; only public-index evidence with a phone can qualify.
+                  1 NotaryCafe → 2 pure public LinkedIn → 3 Yelp → 4 Yellow Pages → 5 generic public listings → 6 Gemini → 7 Google Business → 8 public website enrichment → 9 LinkedIn + Google Business fusion. Direct NotaryCafe access stays disabled; only public-index evidence with a phone can qualify.
                 </p>
               </div>
             ) : null}

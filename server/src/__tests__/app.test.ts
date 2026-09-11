@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createApp } from '../app';
 
 describe('createApp', () => {
-  it('serves health checks without loading the discovery orchestrator', async () => {
+  it('serves health checks without loading the durable discovery workflow', async () => {
     const response = await request(createApp()).get('/api/health');
 
     expect(response.status).toBe(200);

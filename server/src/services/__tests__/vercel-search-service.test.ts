@@ -333,7 +333,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
     });
 
-    const snapshot = await service.getSearch(response.searchId);
+    const snapshot = await pollJob(service, response.searchId, 3);
 
     expect(snapshot?.leads[0]?.mobile).toBe('+1 512 555 0101');
     expect(snapshot?.leads[0]?.website).toBe('https://northstarlabs.ai');
@@ -540,7 +540,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       sourceMode: 'ai',
     });
 
-    const snapshot = await service.getSearch(response.searchId);
+    const snapshot = await pollJob(service, response.searchId, 3);
 
     expect(snapshot?.meta.status).toBe('complete');
     expect(snapshot?.meta.progress.currentSource).toBe('Complete');
@@ -548,6 +548,109 @@ describe('createVercelSearchServiceWithDeps', () => {
     expect(snapshot?.meta.sourceMode).toBe('ai');
     expect(snapshot?.leads[0]?.listingUrl).toContain('/in/');
     expect(snapshot?.meta.providerWarnings).toHaveLength(0);
+  });
+
+  it('resumes bounded OSM spatial boxes without re-running the earlier AI stages', async () => {
+    const store = createSearchJobStore();
+    const discoverAiLeads = vi.fn().mockResolvedValue({
+      leads: [makeLead({ id: 'initial-linkedin', source: 'LinkedIn, Public Profile' })],
+      warnings: [],
+      coverage: [{
+        providerId: 'public-business-listings',
+        providerName: 'Public Business Listings',
+        status: 'configured' as const,
+        phase: 'queued' as const,
+        outcome: 'deferred' as const,
+        leadCount: 0,
+        attemptedCount: 4,
+        observedCount: 1,
+        acceptedCount: 0,
+        reviewCount: 1,
+        deferredCount: 8,
+        message: 'Initial OSM spatial batch completed; remaining boxes are deferred.',
+      }],
+      aiAssistance: 'disabled' as const,
+      researchCandidates: [],
+      reviewCandidates: [],
+      enrichedCount: 0,
+      publicListingProgress: {
+        totalBoxCount: 12,
+        nextBoxCursor: 4,
+        attemptedBoxCount: 4,
+        completedBoxCount: 4,
+        failedBoxCount: 0,
+        timedOut: false,
+        completed: false,
+        stoppedEarly: false,
+      },
+    });
+    const discoverOsmLeadsBatch = vi.fn()
+      .mockResolvedValueOnce({
+        leads: [makeLead({ id: 'osm-continued-1', source: 'OpenStreetMap' })],
+        totalBoxCount: 12,
+        startBoxCursor: 4,
+        nextBoxCursor: 8,
+        attemptedBoxCount: 4,
+        completedBoxCount: 4,
+        failedBoxCount: 0,
+        timedOut: false,
+        completed: false,
+        stoppedEarly: false,
+      })
+      .mockResolvedValueOnce({
+        leads: [makeLead({ id: 'osm-continued-2', source: 'OpenStreetMap' })],
+        totalBoxCount: 12,
+        startBoxCursor: 8,
+        nextBoxCursor: 12,
+        attemptedBoxCount: 4,
+        completedBoxCount: 4,
+        failedBoxCount: 0,
+        timedOut: false,
+        completed: true,
+        stoppedEarly: false,
+      });
+    const service = createVercelSearchServiceWithDeps({
+      store,
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      discoverAiLeads,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      discoverOsmLeadsBatch: discoverOsmLeadsBatch as never,
+      idFactory: () => 'search-ai-osm-cursor',
+      now: () => 1_000,
+    });
+
+    const started = await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin, TX',
+      count: 50,
+      sourceMode: 'ai',
+    });
+    await service.getSearch(started.searchId);
+    await service.getSearch(started.searchId);
+    const afterOsm = await service.getSearch(started.searchId);
+    const job = await store.get(started.searchId);
+
+    expect(discoverAiLeads).toHaveBeenCalledOnce();
+    expect(discoverOsmLeadsBatch).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ boxCursor: 4, maxBoxes: 4 }),
+    );
+    expect(discoverOsmLeadsBatch).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ boxCursor: 8, maxBoxes: 4 }),
+    );
+    expect(job?.aiWorkflow).toMatchObject({
+      stage: 'website_enrichment',
+      osmBoxCursor: 12,
+      osmTotalBoxes: 12,
+      osmContinuationPasses: 2,
+    });
+    expect(afterOsm?.meta.progress.providerCoverage).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerId: 'public-business-listings',
+        deferredCount: 0,
+      }),
+    ]));
   });
 
   it('persists AI query assistance and public LinkedIn coverage together', async () => {
@@ -644,7 +747,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       sourceMode: 'ai',
       phoneRequired: true,
     });
-    const completed = await service.getSearch(response.searchId);
+    const completed = await pollJob(service, response.searchId, 3);
 
     expect(discoverAiLeads).toHaveBeenCalledTimes(1);
     expect(discoverAiLeads).toHaveBeenCalledWith(
@@ -708,8 +811,10 @@ describe('createVercelSearchServiceWithDeps', () => {
       researchCandidates: [],
       enrichedCount: 0,
     });
-    const completedSnapshot = await firstPoll;
+    const sourceSnapshot = await firstPoll;
+    const completedSnapshot = await pollJob(service, response.searchId, 2);
 
+    expect(sourceSnapshot?.meta.status).toBe('enriching');
     expect(completedSnapshot?.meta.status).toBe('failed');
     expect(completedSnapshot?.leads).toHaveLength(0);
   });
@@ -762,8 +867,10 @@ describe('createVercelSearchServiceWithDeps', () => {
       researchCandidates: [],
       enrichedCount: 0,
     });
-    const completedSnapshot = await firstAdvance;
+    const sourceSnapshot = await firstAdvance;
+    const completedSnapshot = await pollJob(first, response.searchId, 2);
 
+    expect(sourceSnapshot?.meta.status).toBe('enriching');
     expect(completedSnapshot?.meta.status).toBe('failed');
   });
 
@@ -811,7 +918,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
       sourceMode: 'ai',
     });
-    const snapshot = await service.getSearch(response.searchId);
+    const snapshot = await pollJob(service, response.searchId, 3);
 
     expect(discoverAiLeads).toHaveBeenCalledTimes(1);
     expect(snapshot?.meta.status).toBe('complete');
@@ -859,7 +966,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       sourceMode: 'ai',
     });
 
-    const snapshot = await service.getSearch(response.searchId);
+    const snapshot = await pollJob(service, response.searchId, 3);
 
     expect(snapshot?.meta.status).toBe('failed');
     expect(snapshot?.meta.progress.currentSource).toBe('Failed');
@@ -1396,7 +1503,7 @@ describe('createVercelSearchServiceWithDeps', () => {
       count: 50,
       sourceMode: 'ai',
     });
-    const snapshot = await service.getSearch(started.searchId);
+    const snapshot = await pollJob(service, started.searchId, 3);
 
     expect(discoverAiLeads).toHaveBeenCalledTimes(1);
     expect(googleFetchLeads).not.toHaveBeenCalled();

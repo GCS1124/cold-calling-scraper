@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { Lead, ResearchCandidate } from '../types/lead';
+import type { Lead, ResearchCandidate, ReviewCandidate } from '../types/lead';
 import type {
   ProviderWarning,
   SearchProgress,
@@ -80,6 +80,7 @@ type SearchJob = {
   progress: SearchProgress;
   providerWarnings: ProviderWarning[];
   researchCandidates?: ResearchCandidate[];
+  reviewCandidates?: ReviewCandidate[];
   expiresAt: number;
   createdAt: number;
   lastProgressAt: number;
@@ -138,6 +139,7 @@ type SearchDeps = {
     request: SearchRequest;
     location: NormalizedUsLocation;
     deadlineMs?: number;
+    deferFinalization?: boolean;
   }) => Promise<AiDiscoveryResult>;
   discoverOsmLeads?: (args: {
     request: { companyType: string; count: number };
@@ -318,6 +320,7 @@ const toResponse = (
     searchId: job.searchId,
     leads,
     ...(job.researchCandidates?.length ? { researchCandidates: job.researchCandidates } : {}),
+    ...(job.reviewCandidates?.length ? { reviewCandidates: job.reviewCandidates } : {}),
     meta: {
       ...contract.meta,
       query: job.query,
@@ -495,6 +498,12 @@ const runAiDiscovery = async (
         ...(job.researchCandidates ?? []),
         ...result.researchCandidates,
       ];
+    }
+    if (result.reviewCandidates?.length) {
+      job.reviewCandidates = [...new Map([
+        ...(job.reviewCandidates ?? []),
+        ...result.reviewCandidates,
+      ].map((candidate) => [candidate.id, candidate] as const)).values()];
     }
   } catch (error) {
     appendUniqueWarnings(job, [

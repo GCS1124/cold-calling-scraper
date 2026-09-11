@@ -114,9 +114,9 @@ const modeLimitations: Record<SearchModeCode, readonly string[]> = {
   ],
   ai: [
     'AI mode fuses public business listings, bounded Yelp/Yellow Pages directory checks, public professional-profile discovery including LinkedIn result signals, search-indexed public NotaryCafe profile references, Gemini-grounded research, public websites, and published social links into one ranked evidence graph.',
-    'AI lead display order is deterministic: indexed NotaryCafe, pure public LinkedIn, Yelp, Yellow Pages, Gemini lead finding, Google Places, then LinkedIn plus Google Business fusion; other bounded public fallbacks share the Gemini research slot.',
-    'Gemini can expand public search lenses and return grounded public research candidates; public evidence and the required phone gate decide what becomes an exportable lead.',
-    'NotaryCafe is checked as a bounded indexed-public cross-source probe on every AI search, but only category-relevant notary profiles with public phone evidence can qualify; references may be stale. Direct page access, login, CAPTCHA, Cloudflare, and geo-block bypasses are not used. Reverify before outreach.',
+    'AI lead display order is deterministic: indexed NotaryCafe, pure public LinkedIn, Yelp, Yellow Pages, generic public listings, Gemini public research, Google Business, public website enrichment, then LinkedIn plus Google Business fusion.',
+    'Gemini receives one grounded public-research pass per search with at most 40 high-quality public listing seeds; public evidence and the required phone gate decide what becomes an exportable lead.',
+    'NotaryCafe is checked as a bounded indexed-public cross-source probe on every AI search. A profile can qualify only when its indexed snippet explicitly supports the requested category and US location and exposes a public phone; references may be stale. Direct page access, login, CAPTCHA, Cloudflare, and geo-block bypasses are not used. Reverify before outreach.',
     'Commercial lead databases, paid contact lookups, private profiles, authenticated sessions, and contact-reveal credits are not called.',
   ],
 };

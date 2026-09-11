@@ -20,6 +20,7 @@ const MAX_RESEARCH_CANDIDATES = 120;
 const MAX_LISTING_SEEDS = 40;
 const MAX_GEMINI_KEY_POOL_SIZE = 20;
 const MAX_GEMINI_QUERY_CACHE_ENTRIES = 100;
+const MAX_GEMINI_GROUNDED_CACHE_ENTRIES = 100;
 
 const parsedGeminiTimeoutMs = Number(process.env.GEMINI_QUERY_TIMEOUT_MS ?? 5_500);
 const geminiTimeoutMs = Number.isFinite(parsedGeminiTimeoutMs)
@@ -94,6 +95,12 @@ const getGeminiRequestPolicy = (keyCount = readGeminiApiKeys().length) => ({
     30_000,
   ),
   queryCacheTtlMs: readBoundedNumber('GEMINI_QUERY_CACHE_TTL_MS', 300_000, 0, 900_000),
+  groundedCacheTtlMs: readBoundedNumber(
+    'GEMINI_GROUNDED_CACHE_TTL_MS',
+    120_000,
+    0,
+    900_000,
+  ),
   keyRotationAttempts: readBoundedNumber(
     'GEMINI_KEY_ROTATION_ATTEMPTS',
     Math.max(1, Math.min(MAX_GEMINI_KEY_POOL_SIZE, keyCount)),
@@ -338,6 +345,7 @@ export const resetGeminiRequestStateForTests = () => {
   geminiKeyCursor = 0;
   geminiKeyStates = new Map();
   geminiQueryCache.clear();
+  geminiGroundedResearchCache.clear();
 };
 
 export const isGeminiRateLimited = () => {
@@ -345,10 +353,41 @@ export const isGeminiRateLimited = () => {
   return keys.length > 0 && !hasAvailableGeminiKey(keys);
 };
 
+/**
+ * Safe operational telemetry for status/reporting surfaces. It intentionally
+ * exposes only aggregate pool state, never a key value, fingerprint, or URL.
+ */
+export type GeminiPoolHealth = {
+  configuredKeyCount: number;
+  availableKeyCount: number;
+  coolingDownKeyCount: number;
+  nextAvailableAt?: number;
+};
+
+export const getGeminiPoolHealth = (): GeminiPoolHealth => {
+  const keys = readGeminiApiKeys();
+  const now = Date.now();
+  const states = syncGeminiKeyStates(keys);
+  const availableKeyCount = states.filter((state) => state.cooldownUntil <= now).length;
+  const nextAvailableAt = states.length
+    ? Math.min(...states.map((state) => state.cooldownUntil))
+    : undefined;
+
+  return {
+    configuredKeyCount: states.length,
+    availableKeyCount,
+    coolingDownKeyCount: Math.max(0, states.length - availableKeyCount),
+    ...(nextAvailableAt && nextAvailableAt > now ? { nextAvailableAt } : {}),
+  };
+};
+
 const isExplicitlyDisabled = (name: string) =>
   process.env[name]?.trim().toLowerCase() === 'false';
 
-/** A configured key enables the free/public Gemini layer unless explicitly disabled. */
+/**
+ * Legacy configuration name retained for deployments. It enables the one
+ * grounded public-research pass, not a separate query-planning request.
+ */
 export const isGeminiQueryAssistanceEnabled = () =>
   getGeminiApiKeyCount() > 0 &&
   !isExplicitlyDisabled('GEMINI_QUERY_ASSISTANCE_ENABLED');
@@ -590,6 +629,73 @@ const getCandidateRecords = (value: unknown) => {
 export type GeminiLeadDiscoveryResult = {
   candidates: ResearchCandidate[];
   groundingSources: GroundingSource[];
+};
+
+type GeminiGroundedCacheEntry = {
+  expiresAt: number;
+  result: GeminiLeadDiscoveryResult;
+};
+
+const geminiGroundedResearchCache = new Map<string, GeminiGroundedCacheEntry>();
+
+const cloneGroundedResearchResult = (result: GeminiLeadDiscoveryResult): GeminiLeadDiscoveryResult => ({
+  candidates: result.candidates.map((candidate) => ({
+    ...candidate,
+    sourceUrls: [...candidate.sourceUrls],
+    ...(candidate.sourceTitles ? { sourceTitles: [...candidate.sourceTitles] } : {}),
+    ...(candidate.socialLinks
+      ? { socialLinks: candidate.socialLinks.map((link) => ({ ...link })) }
+      : {}),
+  })),
+  groundingSources: result.groundingSources.map((source) => ({ ...source })),
+});
+
+const groundedResearchCacheKey = (
+  request: SearchRequest,
+  locationLabel: string,
+  searchLocationContext: string,
+  listingSeedContext: string,
+) => JSON.stringify([
+  request.companyType.trim().toLowerCase(),
+  request.city.trim().toLowerCase(),
+  request.researchBrief?.trim() ?? '',
+  locationLabel.trim().toLowerCase(),
+  searchLocationContext.trim().toLowerCase(),
+  listingSeedContext,
+]);
+
+const getCachedGroundedResearch = (key: string, ttlMs: number) => {
+  if (ttlMs <= 0) return undefined;
+  const entry = geminiGroundedResearchCache.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    geminiGroundedResearchCache.delete(key);
+    return undefined;
+  }
+
+  // Keep this tiny cache LRU-like without retaining a growing retry history.
+  geminiGroundedResearchCache.delete(key);
+  geminiGroundedResearchCache.set(key, entry);
+  return cloneGroundedResearchResult(entry.result);
+};
+
+const cacheGroundedResearch = (
+  key: string,
+  result: GeminiLeadDiscoveryResult,
+  ttlMs: number,
+) => {
+  if (ttlMs <= 0) return;
+  geminiGroundedResearchCache.delete(key);
+  geminiGroundedResearchCache.set(key, {
+    expiresAt: Date.now() + ttlMs,
+    result: cloneGroundedResearchResult(result),
+  });
+
+  while (geminiGroundedResearchCache.size > MAX_GEMINI_GROUNDED_CACHE_ENTRIES) {
+    const oldestKey = geminiGroundedResearchCache.keys().next().value;
+    if (typeof oldestKey !== 'string') break;
+    geminiGroundedResearchCache.delete(oldestKey);
+  }
 };
 
 export type GeminiListingSeed = Pick<
@@ -886,6 +992,15 @@ export const discoverLeadsWithGemini = async (
   if (!isGeminiLeadDiscoveryEnabled()) return { candidates: [], groundingSources: [] };
 
   const listingSeedContext = serializeListingSeeds(listingSeeds);
+  const policy = getGeminiRequestPolicy(getGeminiApiKeyCount());
+  const cacheKey = groundedResearchCacheKey(
+    request,
+    locationLabel,
+    searchLocationContext,
+    listingSeedContext,
+  );
+  const cached = getCachedGroundedResearch(cacheKey, policy.groundedCacheTtlMs);
+  if (cached) return cached;
 
   const boundedTimeoutMs = Number.isFinite(timeoutMs)
     ? Math.min(20_000, Math.max(1_000, Math.round(timeoutMs)))
@@ -911,5 +1026,7 @@ export const discoverLeadsWithGemini = async (
     boundedTimeoutMs,
   );
 
-  return parseGroundedGeminiCandidates(response.data);
+  const result = parseGroundedGeminiCandidates(response.data);
+  cacheGroundedResearch(cacheKey, result, policy.groundedCacheTtlMs);
+  return result;
 };

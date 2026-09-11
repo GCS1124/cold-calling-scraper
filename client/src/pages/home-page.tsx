@@ -344,8 +344,8 @@ export function HomePage({ searchApi }: HomePageProps) {
     ? result.meta.status === 'queued'
       ? `Your ${activeSourceLabel} search is waiting to begin.`
       : result.meta.status === 'discovering'
-        ? activeSourceMode === 'ai'
-          ? 'Running Gemini grounding, public profile and indexed NotaryCafe discovery, GMB corroboration, and website checks in parallel while retaining every research candidate.'
+      ? activeSourceMode === 'ai'
+          ? 'Running bounded public-source stages with durable snapshots: indexed NotaryCafe, public profiles, directories, listings, Gemini, Google Business, websites, then final corroboration. Useful non-exportable evidence stays in review.'
           : 'Scanning matching businesses and removing duplicates.'
       : result.meta.status === 'enriching'
               ? 'Adding emails, phone numbers, websites, and source details.'
@@ -940,8 +940,12 @@ export function HomePage({ searchApi }: HomePageProps) {
                   <ProviderCoveragePanel coverage={providerCoverage} mode={activeSourceMode} />
                 ) : null}
 
-                {activeSourceMode === 'ai' && result.researchCandidates?.length ? (
-                  <ResearchCandidatesPanel candidates={result.researchCandidates} />
+                {activeSourceMode === 'ai' &&
+                (result.researchCandidates?.length || result.reviewCandidates?.length) ? (
+                  <ResearchCandidatesPanel
+                    candidates={result.researchCandidates}
+                    reviewCandidates={result.reviewCandidates}
+                  />
                 ) : null}
 
                 {activeSourceMode === 'ai' ? (
@@ -958,7 +962,7 @@ export function HomePage({ searchApi }: HomePageProps) {
 
                     <p className="mt-3 text-xs leading-5 text-slate-500">
                       {result.meta.progress.aiAssistance === 'enabled'
-                        ? 'Gemini expanded public search lenses and returned grounded research candidates. Public evidence and phone validation decide which records become exportable leads.'
+                        ? 'Gemini ran one grounded public-research pass using deterministic search lenses and bounded public listing seeds. Public evidence and phone validation decide which records become exportable leads.'
                         : result.meta.progress.aiAssistance === 'rate_limited'
                           ? 'Gemini is configured but its free-tier quota is cooling down. Deterministic public expansion continued and no unverified details were promoted.'
                         : result.meta.progress.aiAssistance === 'failed'

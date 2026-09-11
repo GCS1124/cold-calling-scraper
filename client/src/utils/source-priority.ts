@@ -15,8 +15,9 @@ export const isNotaryRelatedCategory = (value: unknown) =>
 
 /**
  * The AI workflow makes provenance stable and visible:
- * indexed NotaryCafe evidence, pure public LinkedIn evidence, then generic
- * public evidence, with LinkedIn plus Google Business fusion last.
+ * indexed NotaryCafe evidence, pure public LinkedIn evidence, Yelp, Yellow
+ * Pages, generic public listings, Gemini, Google Business, website enrichment,
+ * then LinkedIn plus Google Business fusion.
  * Eligibility still comes from the server's public-phone and evidence gates.
  */
 export const getPublicSourcePriority = (lead: Lead): PublicSourcePriority => {
@@ -33,8 +34,13 @@ export const comparePublicSourcePriority = (left: Lead, right: Lead) =>
 export const publicSourcePriorityLabels: Record<PublicSourcePriority, string> = {
   1: 'NotaryCafe indexed evidence',
   2: 'Pure public LinkedIn evidence',
-  3: 'Other public evidence',
-  4: 'LinkedIn + Google Business fusion',
+  3: 'Yelp public directory',
+  4: 'Yellow Pages public directory',
+  5: 'Generic public listings',
+  6: 'Gemini public research',
+  7: 'Google Business listings',
+  8: 'Public website enrichment',
+  9: 'LinkedIn + Google Business fusion',
 };
 
 export const publicLeadSourceOrderLabels: Record<PublicLeadSourceOrder, string> = {
@@ -42,9 +48,11 @@ export const publicLeadSourceOrderLabels: Record<PublicLeadSourceOrder, string> 
   2: 'Pure public LinkedIn evidence',
   3: 'Yelp public directory',
   4: 'Yellow Pages public directory',
-  5: 'Gemini lead finding / public fallback',
-  6: 'Google Places',
-  7: 'LinkedIn + Google Business fusion',
+  5: 'Generic public listings',
+  6: 'Gemini public research',
+  7: 'Google Business listings',
+  8: 'Public website enrichment',
+  9: 'LinkedIn + Google Business fusion',
 };
 
 export const sortProviderCoverageForDisplay = (coverage: ProviderCoverage[]) =>

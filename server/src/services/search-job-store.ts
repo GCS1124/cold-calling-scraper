@@ -1,6 +1,6 @@
 import { Pool, type PoolConfig } from 'pg';
 
-import type { Lead, ResearchCandidate } from '../types/lead';
+import type { Lead, ResearchCandidate, ReviewCandidate, ReviewCandidateReason } from '../types/lead';
 import type {
   ProviderWarning,
   SearchProgress,
@@ -38,6 +38,28 @@ export type SearchLocationMode =
   | 'region'
   | 'state';
 
+export type AiWorkflowStage =
+  | 'source_discovery'
+  | 'public_listing_continuation'
+  | 'website_enrichment'
+  | 'final_fusion'
+  | 'completed';
+
+/** Durable AI-mode cursor. Each stage is persisted between sub-60-second ticks. */
+export type AiWorkflowState = {
+  startedAt: number;
+  logicalDeadlineAt: number;
+  stage: AiWorkflowStage;
+  /** Number of bounded website batches completed in the durable search. */
+  websitePasses?: number;
+  /** Next deterministic OSM spatial-box cursor for the generic listing stage. */
+  osmBoxCursor?: number;
+  /** Total deterministic OSM spatial boxes for the current normalized location. */
+  osmTotalBoxes?: number;
+  /** Number of bounded OSM continuation ticks already completed. */
+  osmContinuationPasses?: number;
+};
+
 export type SearchJobRecord = {
   schemaVersion: number;
   searchId: string;
@@ -54,6 +76,8 @@ export type SearchJobRecord = {
   progress: SearchProgress;
   leads: Lead[];
   researchCandidates?: ResearchCandidate[];
+  reviewCandidates?: ReviewCandidate[];
+  aiWorkflow?: AiWorkflowState;
   providerWarnings: ProviderWarning[];
   searchSeeds: string[];
   nextSeedIndex: number;
@@ -117,7 +141,7 @@ export const isSearchPersistenceError = (
   (error instanceof Error &&
     (error as Error & { code?: unknown }).code === 'SEARCH_PERSISTENCE_UNAVAILABLE');
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 const DEFAULT_JOB_TTL_MS = 1000 * 60 * 60 * 6;
 const MEMORY_MAX_JOBS = Number(process.env.SEARCH_JOB_MEMORY_MAX_JOBS ?? 500);
@@ -275,6 +299,52 @@ const normalizeLocationMode = (mode: unknown): SearchLocationMode => {
   return 'local';
 };
 
+const normalizeAiWorkflow = (value: unknown): AiWorkflowState | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const workflow = value as Partial<AiWorkflowState>;
+  const stage: AiWorkflowStage | undefined =
+    workflow.stage === 'source_discovery' ||
+    workflow.stage === 'public_listing_continuation' ||
+    workflow.stage === 'website_enrichment' ||
+    workflow.stage === 'final_fusion' ||
+    workflow.stage === 'completed'
+      ? workflow.stage
+      : undefined;
+  const startedAt = Number(workflow.startedAt);
+  const logicalDeadlineAt = Number(workflow.logicalDeadlineAt);
+  if (!stage || !Number.isFinite(startedAt) || !Number.isFinite(logicalDeadlineAt)) return undefined;
+  const osmTotalBoxes = Number.isFinite(workflow.osmTotalBoxes)
+    ? Math.max(0, Math.floor(workflow.osmTotalBoxes as number))
+    : undefined;
+  const rawOsmBoxCursor = Number.isFinite(workflow.osmBoxCursor)
+    ? Math.max(0, Math.floor(workflow.osmBoxCursor as number))
+    : undefined;
+  const osmBoxCursor = rawOsmBoxCursor === undefined
+    ? undefined
+    : osmTotalBoxes === undefined
+      ? rawOsmBoxCursor
+      : Math.min(osmTotalBoxes, rawOsmBoxCursor);
+
+  return {
+    startedAt: Math.max(0, Math.floor(startedAt)),
+    logicalDeadlineAt: Math.max(Math.floor(startedAt), Math.floor(logicalDeadlineAt)),
+    stage,
+    ...(Number.isFinite(workflow.websitePasses)
+      ? { websitePasses: Math.max(0, Math.floor(workflow.websitePasses as number)) }
+      : {}),
+    ...(osmBoxCursor === undefined ? {} : { osmBoxCursor }),
+    ...(osmTotalBoxes === undefined ? {} : { osmTotalBoxes }),
+    ...(Number.isFinite(workflow.osmContinuationPasses)
+      ? {
+          osmContinuationPasses: Math.max(
+            0,
+            Math.floor(workflow.osmContinuationPasses as number),
+          ),
+        }
+      : {}),
+  };
+};
+
 const normalizeStoredLeads = (value: unknown): Lead[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -371,6 +441,74 @@ const normalizeStoredResearchCandidates = (value: unknown): ResearchCandidate[] 
   }).slice(0, 100);
 };
 
+const reviewCandidateReasons = new Set<ReviewCandidateReason>([
+  'missing_public_phone',
+  'invalid_public_phone',
+  'missing_source_evidence',
+  'category_mismatch',
+  'location_mismatch',
+  'organization_unmatched',
+  'organization_ambiguous',
+  'former_or_conflicting',
+  'website_timeout',
+  'website_blocked',
+  'provider_timeout',
+  'provider_blocked',
+  'provider_rate_limited',
+  'deferred_by_budget',
+]);
+
+const normalizeStoredReviewCandidates = (value: unknown): ReviewCandidate[] => {
+  if (!Array.isArray(value)) return [];
+
+  const normalized = value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object') return [];
+    const record = candidate as Record<string, unknown>;
+    const id = readStoredString(record.id, 180);
+    const providerId = readStoredString(record.providerId, 120);
+    const providerName = readStoredString(record.providerName, 160);
+    const reason = readStoredString(record.reason, 80) as ReviewCandidateReason;
+    if (!id || !providerId || !providerName || !reviewCandidateReasons.has(reason)) return [];
+
+    const sourceUrls = Array.isArray(record.sourceUrls)
+      ? [...new Set(record.sourceUrls.map(normalizeStoredPublicUrl).filter(Boolean))].slice(0, 12)
+      : [];
+    const sourceTitles = Array.isArray(record.sourceTitles)
+      ? [...new Set(record.sourceTitles.map((title) => readStoredString(title, 240)).filter(Boolean))].slice(0, 12)
+      : undefined;
+    const relatedLeadIds = Array.isArray(record.relatedLeadIds)
+      ? [...new Set(record.relatedLeadIds.map((leadId) => readStoredString(leadId, 180)).filter(Boolean))].slice(0, 12)
+      : undefined;
+    const discoveredAt = readStoredString(record.discoveredAt, 80) || new Date().toISOString();
+
+    return [{
+      id,
+      providerId,
+      providerName,
+      reason,
+      ...(readStoredString(record.reasonDetail, 1_000)
+        ? { reasonDetail: readStoredString(record.reasonDetail, 1_000) }
+        : {}),
+      ...(readStoredString(record.name, 180) ? { name: readStoredString(record.name, 180) } : {}),
+      ...(readStoredString(record.personName, 180) ? { personName: readStoredString(record.personName, 180) } : {}),
+      ...(readStoredString(record.organizationName, 220) ? { organizationName: readStoredString(record.organizationName, 220) } : {}),
+      ...(readStoredString(record.originalRole, 180) ? { originalRole: readStoredString(record.originalRole, 180) } : {}),
+      ...(readStoredString(record.location, 240) ? { location: readStoredString(record.location, 240) } : {}),
+      ...(normalizeStoredPublicUrl(record.website) ? { website: normalizeStoredPublicUrl(record.website) } : {}),
+      ...(normalizeStoredPublicUrl(record.profileUrl) ? { profileUrl: normalizeStoredPublicUrl(record.profileUrl) } : {}),
+      ...(readStoredString(record.reportedPhone, 80) ? { reportedPhone: readStoredString(record.reportedPhone, 80) } : {}),
+      ...(readStoredString(record.reportedEmail, 240) ? { reportedEmail: readStoredString(record.reportedEmail, 240) } : {}),
+      sourceUrls,
+      ...(sourceTitles?.length ? { sourceTitles } : {}),
+      ...(readStoredString(record.evidence, 2_000) ? { evidence: readStoredString(record.evidence, 2_000) } : {}),
+      ...(relatedLeadIds?.length ? { relatedLeadIds } : {}),
+      discoveredAt,
+    } satisfies ReviewCandidate];
+  });
+
+  return [...new Map(normalized.map((candidate) => [candidate.id, candidate])).values()].slice(0, 200);
+};
+
 const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
   const currentTime = nowMs();
 
@@ -408,6 +546,8 @@ const sanitizeJob = (job: SearchJobRecord): SearchJobRecord => {
     progress: clampProgress(job.progress),
     leads: deduplicateLeads(normalizeStoredLeads(job.leads)),
     researchCandidates: normalizeStoredResearchCandidates(job.researchCandidates),
+    reviewCandidates: normalizeStoredReviewCandidates(job.reviewCandidates),
+    aiWorkflow: normalizeAiWorkflow(job.aiWorkflow),
     providerWarnings: dedupeWarnings(
       Array.isArray(job.providerWarnings) ? job.providerWarnings : [],
     ),
@@ -473,6 +613,8 @@ const migrateJobPayload = (payload: unknown): SearchJobRecord | null => {
     progress: raw.progress,
     leads: Array.isArray(raw.leads) ? raw.leads : [],
     researchCandidates: Array.isArray(raw.researchCandidates) ? raw.researchCandidates : [],
+    reviewCandidates: Array.isArray(raw.reviewCandidates) ? raw.reviewCandidates : [],
+    aiWorkflow: normalizeAiWorkflow(raw.aiWorkflow),
     providerWarnings: Array.isArray(raw.providerWarnings)
       ? raw.providerWarnings
       : [],
@@ -1342,6 +1484,9 @@ export const toSearchResponse = (
     ...(normalizeStoredResearchCandidates(job.researchCandidates).length
       ? { researchCandidates: normalizeStoredResearchCandidates(job.researchCandidates) }
       : {}),
+    ...(normalizeStoredReviewCandidates(job.reviewCandidates).length
+      ? { reviewCandidates: normalizeStoredReviewCandidates(job.reviewCandidates) }
+      : {}),
     meta: {
       ...contract.meta,
       query: job.query,
@@ -1379,6 +1524,8 @@ export const createSearchJobRecord = (
         | 'status'
         | 'leads'
         | 'researchCandidates'
+        | 'reviewCandidates'
+        | 'aiWorkflow'
         | 'providerWarnings'
         | 'searchSeeds'
         | 'nextSeedIndex'
@@ -1404,6 +1551,8 @@ export const createSearchJobRecord = (
     progress: params.progress,
     leads: params.leads ?? [],
     researchCandidates: params.researchCandidates ?? [],
+    reviewCandidates: params.reviewCandidates ?? [],
+    aiWorkflow: params.aiWorkflow,
     providerWarnings: params.providerWarnings ?? [],
     searchSeeds: params.searchSeeds ?? [],
     nextSeedIndex: params.nextSeedIndex ?? 0,

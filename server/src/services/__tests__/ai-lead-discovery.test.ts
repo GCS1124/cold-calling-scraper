@@ -240,7 +240,7 @@ describe('free AI lead discovery', () => {
         providerId: 'notarycafe-indexed-search',
         leadCount: 0,
         status: 'returned',
-        message: expect.stringContaining('cross-check completed'),
+        message: expect.stringContaining('0 matched /'),
       }),
     );
   });
@@ -294,11 +294,25 @@ describe('free AI lead discovery', () => {
     'Plumbers',
     'Mobile Notary Signing Agent',
   ])('merges public directory coverage for every AI heading: "%s"', async (companyType) => {
+    const directoryPhone = '+1 512 555 0197';
     const discoverPublicDirectories = vi.fn().mockResolvedValue({
       leads: [makeLead({
         id: `yelp-${companyType}`,
         source: 'Yelp',
         city: 'Austin',
+        listingUrl: `https://www.yelp.com/biz/${encodeURIComponent(companyType)}`,
+        contactSourceUrl: `https://www.yelp.com/biz/${encodeURIComponent(companyType)}`,
+        mobile: directoryPhone,
+        hasPhone: true,
+        verifiedPhone: true,
+        contactEvidence: [{
+          field: 'phone',
+          value: directoryPhone,
+          sourceUrl: `https://www.yelp.com/biz/${encodeURIComponent(companyType)}`,
+          sourceName: 'Yelp, Public Directory',
+          sourceKind: 'business_listing',
+          association: 'business',
+        }],
       })],
       warnings: [],
       coverage: [
@@ -469,7 +483,8 @@ describe('free AI lead discovery', () => {
     ]);
     expect(result.coverage.find((entry) => entry.providerId === 'linkedin-public-google-business-fusion')).toMatchObject({
       status: 'returned',
-      leadCount: 1,
+      leadCount: 0,
+      outcome: 'empty',
     });
   });
 
@@ -528,15 +543,16 @@ describe('free AI lead discovery', () => {
 
     expect(result.leads).toHaveLength(1);
     expect(result.leads[0]?.listingUrl).toBe(publicLead.listingUrl);
-    expect(result.coverage.find((entry) => entry.providerId === 'public-website-enrichment')?.status).toBe(
-      'failed',
-    );
+    expect(result.coverage.find((entry) => entry.providerId === 'public-website-enrichment')).toMatchObject({
+      status: 'partial',
+      outcome: 'timed_out',
+    });
     expect(result.warnings.some((warning) => warning.message.includes('public site timeout'))).toBe(
       true,
     );
   });
 
-  it('uses Gemini only as explicit query assistance and keeps public providers as the lead source', async () => {
+  it('folds deterministic hints into one grounded Gemini pass and keeps public providers as the lead source', async () => {
     process.env.GEMINI_API_KEY = 'user-supplied-test-key';
     process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = 'true';
 
@@ -569,13 +585,10 @@ describe('free AI lead discovery', () => {
       deadlineMs: Date.now() + 20_000,
     });
 
-    expect(expandQuery).toHaveBeenCalledWith(
-      'HVAC contractor in Austin, TX',
-      expect.objectContaining({ companyType: 'HVAC contractor' }),
-    );
+    expect(expandQuery).not.toHaveBeenCalled();
     expect(discoverLinkedin).toHaveBeenCalledWith(
       expect.objectContaining({
-        queryHints: ['HVAC service business owner Austin'],
+        queryHints: expect.arrayContaining(['hvac contractor owner Austin, TX']),
       }),
     );
     expect(result.aiAssistance).toBe('enabled');
@@ -585,21 +598,15 @@ describe('free AI lead discovery', () => {
     });
   });
 
-  it('runs the deterministic LinkedIn baseline before Gemini and uses one bounded assisted fallback', async () => {
+  it('runs exactly one deterministic public LinkedIn pass with category and role lenses', async () => {
     process.env.GEMINI_API_KEY = 'user-supplied-test-key';
     process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = 'true';
     process.env.GEMINI_LEAD_DISCOVERY_ENABLED = 'false';
 
-    let baselineStarted = false;
     const discoverLinkedin = vi.fn().mockImplementation(async ({ queryHints }: { queryHints: string[] }) => {
-      if (!queryHints.length) {
-        baselineStarted = true;
-        return { leads: [], warnings: [], blocked: false };
-      }
-
       return {
         leads: [makeLead({
-          id: 'assisted-linkedin-lead',
+          id: 'deterministic-linkedin-lead',
           mobile: '+1 512 555 0188',
           hasPhone: true,
           verifiedPhone: true,
@@ -608,10 +615,7 @@ describe('free AI lead discovery', () => {
         blocked: false,
       };
     });
-    const expandQuery = vi.fn().mockImplementation(async () => {
-      expect(baselineStarted).toBe(true);
-      return 'HVAC service business owner Austin';
-    });
+    const expandQuery = vi.fn();
 
     const result = await createAiLeadDiscovery({
       discoverLinkedin: discoverLinkedin as never,
@@ -627,31 +631,28 @@ describe('free AI lead discovery', () => {
       deadlineMs: Date.now() + 20_000,
     });
 
-    expect(discoverLinkedin).toHaveBeenCalledTimes(2);
-    expect(discoverLinkedin).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ queryHints: [] }),
-    );
-    expect(discoverLinkedin).toHaveBeenNthCalledWith(
-      2,
+    expect(discoverLinkedin).toHaveBeenCalledTimes(1);
+    expect(discoverLinkedin).toHaveBeenCalledWith(
       expect.objectContaining({
-        queryHints: ['HVAC service business owner Austin'],
-        request: expect.objectContaining({ researchDepth: 'quick' }),
+        queryHints: expect.arrayContaining(['hvac contractor owner Austin, TX']),
       }),
     );
+    expect(expandQuery).not.toHaveBeenCalled();
     expect(result.leads).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'assisted-linkedin-lead', mobile: '+1 512 555 0188' }),
+      expect.objectContaining({ id: 'deterministic-linkedin-lead', mobile: '+1 512 555 0188' }),
     ]));
     expect(result.coverage).toContainEqual(
       expect.objectContaining({
         providerId: 'linkedin-public-search',
-        leadCount: 1,
-        message: expect.stringContaining('bounded Gemini-assisted'),
+        observedCount: 1,
+        acceptedCount: 0,
+        leadCount: 0,
+        message: expect.stringContaining('Deterministic public LinkedIn discovery'),
       }),
     );
   });
 
-  it('labels Gemini quota pressure without interrupting deterministic public expansion', async () => {
+  it('does not invent a Gemini quota state for removed query-planning work', async () => {
     process.env.GEMINI_API_KEY = 'user-supplied-test-key';
     process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = 'true';
     process.env.GEMINI_LEAD_DISCOVERY_ENABLED = 'false';
@@ -669,9 +670,7 @@ describe('free AI lead discovery', () => {
         queryFamilyCounts: { 'role-led': 8 },
       },
     });
-    const expandQuery = vi.fn().mockRejectedValue(
-      new Error('Request failed with status code 429'),
-    );
+    const expandQuery = vi.fn().mockRejectedValue(new Error('Request failed with status code 429'));
 
     const result = await createAiLeadDiscovery({
       discoverLinkedin: discoverLinkedin as never,
@@ -687,24 +686,17 @@ describe('free AI lead discovery', () => {
       deadlineMs: Date.now() + 20_000,
     });
 
-    expect(result.aiAssistance).toBe('rate_limited');
+    expect(result.aiAssistance).toBe('disabled');
     expect(discoverLinkedin).toHaveBeenCalledWith(
       expect.objectContaining({
-        queryHints: ['owner-led service businesses'],
+        queryHints: expect.arrayContaining(['owner-led service businesses']),
       }),
     );
+    expect(expandQuery).not.toHaveBeenCalled();
     expect(result.coverage.find((entry) => entry.providerId === 'gemini-query-assistance')).toMatchObject({
-      status: 'partial',
-      message: expect.stringContaining('free-tier quota'),
+      status: 'returned',
+      outcome: 'returned',
     });
-    expect(result.warnings).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          providerId: 'gemini-query-assistance',
-          message: expect.stringContaining('deterministic public expansion continued'),
-        }),
-      ]),
-    );
   });
 
   it('reports grounded Gemini rate limits even when query planning itself succeeded', async () => {
@@ -744,9 +736,10 @@ describe('free AI lead discovery', () => {
     expect(result.warnings.some((warning) => /unverified|fabricated/i.test(warning.message))).toBe(
       true,
     );
-    expect(result.coverage.find((entry) => entry.providerId === 'linkedin-public-search')?.status).toBe(
-      'failed',
-    );
+    expect(result.coverage.find((entry) => entry.providerId === 'linkedin-public-search')).toMatchObject({
+      status: 'partial',
+      outcome: 'blocked',
+    });
   });
 
   it('retains every Gemini research candidate while keeping contact validation separate', async () => {
@@ -801,10 +794,54 @@ describe('free AI lead discovery', () => {
     expect(result.researchCandidates).toEqual([candidate]);
     expect(result.coverage.find((entry) => entry.providerId === 'gemini-public-discovery')).toMatchObject({
       status: 'returned',
-      leadCount: 1,
+      leadCount: 0,
+      observedCount: 1,
+      reviewCount: 1,
     });
+    expect(result.reviewCandidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerId: 'gemini-public-discovery',
+        reason: 'missing_source_evidence',
+        reportedPhone: '+1 512 555 0100',
+        sourceUrls: ['https://austindental.example/about'],
+      }),
+    ]));
     expect(result.leads[0]?.mobile).toBe('');
     expect(result.leads[0]?.hasPhone).toBe(false);
+  });
+
+  it('keeps public LinkedIn profiles without a validated business phone in the unified review queue', async () => {
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({
+        leads: [makeLead({
+          id: 'linkedin-review-only',
+          mobile: '',
+          hasPhone: false,
+          verifiedPhone: false,
+        })],
+        warnings: [],
+        blocked: false,
+      }) as never,
+      enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
+        leads,
+        warnings: [],
+        enrichedCount: 0,
+      })) as never,
+    })({
+      request: { companyType: 'Dentist', city: 'Austin, TX', count: 50 },
+      location,
+    });
+
+    expect(result.reviewCandidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerId: 'linkedin-public-search',
+        reason: 'missing_public_phone',
+        relatedLeadIds: ['linkedin-review-only'],
+      }),
+    ]));
+    expect(result.coverage.find((entry) => entry.providerId === 'linkedin-public-search')).toMatchObject({
+      reviewCount: 1,
+    });
   });
 
   it('passes Google Business listing companies to Gemini for public detail enrichment', async () => {
@@ -893,7 +930,9 @@ describe('free AI lead discovery', () => {
       expect.objectContaining({
         providerId: 'gemini-listing-enrichment',
         status: 'returned',
-        leadCount: 1,
+        leadCount: 0,
+        observedCount: 1,
+        reviewCount: 1,
       }),
     );
     expect(result.leads.some((lead) => lead.mobile === gmbLead.mobile)).toBe(true);

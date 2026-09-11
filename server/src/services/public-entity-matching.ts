@@ -1,4 +1,4 @@
-import type { Lead, PublicSocialLink } from '../types/lead';
+import type { Lead, PublicSocialLink, ReviewCandidate, ReviewCandidateReason } from '../types/lead';
 import { enrichLead } from './lead-validation';
 import { collectContactEvidence, getContactEvidence, mergeContactEvidence } from './contact-evidence';
 import { isPublicHttpUrl } from '../utils/public-url';
@@ -122,21 +122,47 @@ type OrganizationMatch = {
   exactDomain: boolean;
 };
 
-const scoreOrganizationMatch = (person: Lead, listing: Lead): OrganizationMatch | undefined => {
-  if (['former', 'conflicting'].includes(person.employmentStatus ?? '')) return undefined;
+type OrganizationMatchAssessment = {
+  match?: OrganizationMatch;
+  reason?: ReviewCandidateReason;
+  detail?: string;
+};
+
+const assessOrganizationMatch = (person: Lead, listing: Lead): OrganizationMatchAssessment => {
+  if (['former', 'conflicting'].includes(person.employmentStatus ?? '')) {
+    return {
+      reason: 'former_or_conflicting',
+      detail: 'The public professional profile is marked former or conflicting, so it cannot be bridged to a current business listing.',
+    };
+  }
   if (
     person.stateCode &&
     listing.stateCode &&
     person.stateCode.trim().toUpperCase() !== listing.stateCode.trim().toUpperCase()
-  ) return undefined;
+  ) {
+    return {
+      reason: 'location_mismatch',
+      detail: 'The public professional profile and business listing identify conflicting states.',
+    };
+  }
 
   const personDomain = toDomain(person.website);
   const listingDomain = toDomain(listing.website);
   const exactDomain = Boolean(personDomain && listingDomain && personDomain === listingDomain);
-  if (personDomain && listingDomain && !exactDomain) return undefined;
+  if (personDomain && listingDomain && !exactDomain) {
+    return {
+      reason: 'organization_unmatched',
+      detail: 'The public professional profile and business listing use conflicting canonical domains.',
+    };
+  }
 
   const locationMatched = sameLocation(person, listing);
-  if (!exactDomain && !locationMatched) return undefined;
+  if (!exactDomain && !locationMatched) {
+    return {
+      reason: 'location_mismatch',
+      detail: 'The public professional profile and business listing did not share deterministic location evidence.',
+    };
+  }
 
   const organization = person.organizationName || extractOrganizationHint(person.headline);
   const organizationTokens = new Set(toTokens(organization));
@@ -149,7 +175,10 @@ const scoreOrganizationMatch = (person: Lead, listing: Lead): OrganizationMatch 
     : 0;
 
   if (!exactDomain && (!organizationTokens.size || !listingTokens.size || coverage < 0.75)) {
-    return undefined;
+    return {
+      reason: 'organization_unmatched',
+      detail: 'The public organization names did not meet the strict organization-token match threshold.',
+    };
   }
 
   let score = exactDomain ? 100 : 65 + Math.round(coverage * 30);
@@ -160,8 +189,11 @@ const scoreOrganizationMatch = (person: Lead, listing: Lead): OrganizationMatch 
   }
   score += listingSourceBoost(listing);
 
-  return { listing, score, exactDomain };
+  return { match: { listing, score, exactDomain } };
 };
+
+const scoreOrganizationMatch = (person: Lead, listing: Lead) =>
+  assessOrganizationMatch(person, listing).match;
 
 const hasPublicLinkedInEvidence = (lead: Lead) => {
   const providerText = [
@@ -350,6 +382,168 @@ const matchLinkedInPeopleToPublicListings = (
   });
 
   return { mergedPeople, usedListingIds, safePublicListingLeads };
+};
+
+const isLeadRecord = (value: unknown): value is Lead => Boolean(
+  value &&
+    typeof value === 'object' &&
+    typeof (value as Lead).name === 'string' &&
+    typeof (value as Lead).id === 'string' &&
+    typeof (value as Lead).category === 'string' &&
+    typeof (value as Lead).city === 'string' &&
+    typeof (value as Lead).source === 'string',
+);
+
+const hasPublishedBusinessPhone = (listing: Lead) =>
+  getContactEvidence(listing, 'phone').some((evidence) =>
+    evidence.association === 'business' || evidence.association === 'unknown',
+  );
+
+const fusionReviewCandidate = (
+  person: Lead,
+  reason: ReviewCandidateReason,
+  detail: string,
+  listings: Lead[] = [],
+): ReviewCandidate => {
+  const sourceUrls = [
+    person.listingUrl,
+    person.decisionMakerSourceUrl,
+    person.website,
+    ...listings.flatMap((listing) => [listing.listingUrl, listing.contactSourceUrl, listing.website]),
+  ].map(toPublicUrl).filter(Boolean);
+
+  return {
+    id: `linkedin-gmb-fusion-review-${person.id}-${reason}`,
+    providerId: 'linkedin-public-google-business-fusion',
+    providerName: 'LinkedIn + Google Business fusion',
+    reason,
+    reasonDetail: detail,
+    name: person.name,
+    personName: person.decisionMakerName || person.name,
+    organizationName: person.organizationName || extractOrganizationHint(person.headline),
+    originalRole: person.originalRole || person.decisionMakerRole || person.headline,
+    location: person.address || person.city,
+    website: person.website,
+    profileUrl: person.listingUrl,
+    reportedPhone: person.mobile || undefined,
+    reportedEmail: person.email || undefined,
+    sourceUrls: [...new Set(sourceUrls)].slice(0, 12),
+    evidence: person.publicEvidence?.profileSnippet || person.evidence?.[0]?.claim,
+    relatedLeadIds: [person.id, ...listings.map((listing) => listing.id)].slice(0, 12),
+    discoveredAt: person.scrapedAt || new Date().toISOString(),
+  };
+};
+
+/**
+ * Strict final fusion with explainable rejections. This deliberately does not
+ * merge an ambiguous, former, geographically conflicting, unrelated, or
+ * phone-less pairing. The original public records stay independent and a
+ * review item preserves the evidence trail.
+ */
+export const mergeLinkedInWithPublicListingsWithDiagnostics = (
+  linkedinLeads: Lead[],
+  publicListingLeads: Lead[],
+) => {
+  const people = (Array.isArray(linkedinLeads) ? linkedinLeads : []).filter(isLeadRecord);
+  const listings = (Array.isArray(publicListingLeads) ? publicListingLeads : []).filter(isLeadRecord);
+  const usedListingIds = new Set<string>();
+  const fusedLeadIds: string[] = [];
+  const mergedPeople: Lead[] = [];
+  const reviewCandidates: ReviewCandidate[] = [];
+
+  for (const person of people) {
+    if (!hasPublicLinkedInEvidence(person)) {
+      mergedPeople.push(person);
+      continue;
+    }
+
+    const assessments = listings.map((listing) => ({
+      listing,
+      assessment: assessOrganizationMatch(person, listing),
+    }));
+    const matches = assessments
+      .flatMap(({ assessment }) => assessment.match ? [assessment.match] : [])
+      .sort((left, right) => right.score - left.score);
+    const best = matches[0];
+    const second = matches[1];
+
+    if (!best) {
+      const rejected = assessments
+        .map(({ listing, assessment }) => ({ listing, ...assessment }))
+        .filter((assessment): assessment is OrganizationMatchAssessment & { listing: Lead; reason: ReviewCandidateReason } =>
+          Boolean(assessment.reason),
+        )
+        .sort((left, right) => {
+          const priority: Record<ReviewCandidateReason, number> = {
+            former_or_conflicting: 4,
+            location_mismatch: 3,
+            organization_unmatched: 2,
+            missing_public_phone: 1,
+            invalid_public_phone: 0,
+            missing_source_evidence: 0,
+            category_mismatch: 0,
+            organization_ambiguous: 0,
+            website_timeout: 0,
+            website_blocked: 0,
+            provider_timeout: 0,
+            provider_blocked: 0,
+            provider_rate_limited: 0,
+            deferred_by_budget: 0,
+          };
+          return priority[right.reason] - priority[left.reason];
+        })[0];
+      if (rejected) {
+        reviewCandidates.push(fusionReviewCandidate(
+          person,
+          rejected.reason,
+          rejected.detail ?? 'No strict public organization and location match was found.',
+          [rejected.listing],
+        ));
+      }
+      mergedPeople.push(person);
+      continue;
+    }
+
+    const duplicateListing = Boolean(
+      second && listingIdentityKey(best.listing) &&
+        listingIdentityKey(best.listing) === listingIdentityKey(second.listing),
+    );
+    if (second && !duplicateListing && best.score - second.score < 10) {
+      reviewCandidates.push(fusionReviewCandidate(
+        person,
+        'organization_ambiguous',
+        'More than one public business listing met the strict match threshold without a clear winner, so no fusion was created.',
+        [best.listing, second.listing],
+      ));
+      mergedPeople.push(person);
+      continue;
+    }
+
+    if (!hasPublishedBusinessPhone(best.listing)) {
+      reviewCandidates.push(fusionReviewCandidate(
+        person,
+        'missing_public_phone',
+        'The organization and location match was corroborated, but the public business listing did not provide a validated business phone route.',
+        [best.listing],
+      ));
+      mergedPeople.push(person);
+      continue;
+    }
+
+    usedListingIds.add(best.listing.id);
+    const merged = mergePersonWithListing(person, best.listing);
+    fusedLeadIds.push(merged.id);
+    mergedPeople.push(merged);
+  }
+
+  return {
+    leads: [
+      ...mergedPeople,
+      ...listings.filter((listing) => !usedListingIds.has(listing.id)),
+    ],
+    fusedLeadIds: [...new Set(fusedLeadIds)],
+    reviewCandidates: [...new Map(reviewCandidates.map((candidate) => [candidate.id, candidate])).values()],
+  };
 };
 
 /**

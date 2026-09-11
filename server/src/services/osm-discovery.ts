@@ -33,6 +33,25 @@ export type OsmDiscoveryResult = {
   }[];
 };
 
+/**
+ * A bounded spatial slice of an OpenStreetMap search. `nextBoxCursor` is
+ * deliberately numeric and relative to the deterministic split-box list so a
+ * durable search job can resume without re-running earlier Overpass boxes.
+ */
+export type OsmDiscoveryBatchResult = {
+  leads: Lead[];
+  totalBoxCount: number;
+  startBoxCursor: number;
+  nextBoxCursor: number;
+  attemptedBoxCount: number;
+  completedBoxCount: number;
+  failedBoxCount: number;
+  timedOut: boolean;
+  completed: boolean;
+  stoppedEarly: boolean;
+  errorMessage?: string;
+};
+
 type BoundingBox = NormalizedUsLocation['boundingBox'];
 
 const overpassEndpoints = [
@@ -493,11 +512,23 @@ const createDeadlineError = () =>
 const fetchOverpass = async (
   query: string,
   deadlineMs?: number,
+  /**
+   * Concurrent spatial boxes start on different public replicas. This keeps a
+   * single slow replica from serialising a bounded batch while still limiting
+   * each box to the existing safe retry policy.
+   */
+  preferredEndpointIndex = 0,
 ): Promise<OverpassResponse> => {
   let lastError: Error | null = null;
+  const normalizedStartIndex =
+    ((Math.floor(preferredEndpointIndex) % overpassEndpoints.length) +
+      overpassEndpoints.length) %
+    overpassEndpoints.length;
 
   for (let endpointIndex = 0; endpointIndex < overpassEndpoints.length; endpointIndex += 1) {
-    const endpoint = overpassEndpoints[endpointIndex];
+    const endpoint = overpassEndpoints[
+      (normalizedStartIndex + endpointIndex) % overpassEndpoints.length
+    ];
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const remainingMs = getRemainingDeadlineMs(deadlineMs);
@@ -641,17 +672,35 @@ const toLead = ({
   return lead;
 };
 
-export const discoverUsLeadsFromOsm = async ({
+const sortOsmLeads = (leads: Lead[]) => {
+  const strongCandidates = leads.filter(
+    (lead) => lead.website || lead.mobile || lead.email,
+  );
+
+  const fallbackCandidates = leads.filter(
+    (lead) => !lead.website && !lead.mobile && !lead.email,
+  );
+
+  return [...strongCandidates, ...fallbackCandidates];
+};
+
+export const discoverUsLeadsFromOsmBatch = async ({
   request,
   location,
   profile,
   deadlineMs,
+  boxCursor = 0,
+  maxBoxes,
 }: {
   request: { companyType: string; count: number };
   location: NormalizedUsLocation;
   profile: CategoryProfile;
   deadlineMs?: number;
-}): Promise<Lead[]> => {
+  /** Cursor returned by a prior durable OSM tick. */
+  boxCursor?: number;
+  /** Maximum independent spatial boxes to start in this invocation. */
+  maxBoxes?: number;
+}): Promise<OsmDiscoveryBatchResult> => {
   const requestedCount = Math.max(1, request.count || 25);
   const targetCount = Math.min(
     Math.max(requestedCount * 5, 150),
@@ -662,54 +711,75 @@ export const discoverUsLeadsFromOsm = async ({
     location.mode === 'local'
       ? [location.boundingBox]
       : splitBoundingBox(location.boundingBox);
-
-  const elementsById = new Map<string, OverpassElement>();
-  let lastError: Error | null = null;
-
   // Broad timezone and nationwide searches produce many boxes. A small worker
   // pool reaches more independent Overpass replicas before the shared deadline
   // without flooding a public endpoint or serially losing the whole window.
   const searchBoxes =
     location.mode === 'local' ? boxes : boxes.slice(0, maxBroadLocationBoxes);
+
+  const startBoxCursor = Math.min(
+    searchBoxes.length,
+    Math.max(0, Math.floor(Number.isFinite(boxCursor) ? boxCursor : 0)),
+  );
+  const remainingBoxes = searchBoxes.slice(startBoxCursor);
+  const requestedBoxCount = Number.isFinite(maxBoxes)
+    ? Math.max(1, Math.floor(maxBoxes as number))
+    : remainingBoxes.length;
+  const batchBoxes = remainingBoxes.slice(0, requestedBoxCount);
+  const elementsById = new Map<string, OverpassElement>();
+  let lastErrorMessage = '';
+  let timedOut = false;
+  let attemptedBoxCount = 0;
+  let completedBoxCount = 0;
+  let failedBoxCount = 0;
+  let stoppedEarly = false;
+
   let nextBoxIndex = 0;
   const fetchNextBox = async () => {
     while (true) {
       const boxIndex = nextBoxIndex;
       nextBoxIndex += 1;
 
-      const box = searchBoxes[boxIndex];
+      const box = batchBoxes[boxIndex];
       if (!box) return;
       if (deadlineMs !== undefined && Date.now() >= deadlineMs) return;
-      if (elementsById.size >= targetCount * 2) return;
+      if (elementsById.size >= targetCount * 2) {
+        stoppedEarly = true;
+        return;
+      }
+
+      attemptedBoxCount += 1;
 
       const query = buildOverpassQuery(profile, box, targetCount);
 
       try {
-        const response = await fetchOverpass(query, deadlineMs);
+        const response = await fetchOverpass(
+          query,
+          deadlineMs,
+          startBoxCursor + boxIndex,
+        );
+        completedBoxCount += 1;
 
         for (const element of response.elements ?? []) {
           const id = getElementStableId(element);
           elementsById.set(id, element);
         }
       } catch (error) {
-        lastError =
-          error instanceof Error
-            ? error
-            : new Error('Overpass discovery failed');
+        failedBoxCount += 1;
+        lastErrorMessage = error instanceof Error
+          ? error.message
+          : 'Overpass discovery failed';
+        timedOut ||= /deadline|timed out|timeout|aborted/i.test(lastErrorMessage);
       }
     }
   };
 
   await Promise.all(
     Array.from(
-      { length: Math.min(maxConcurrentBoxRequests, searchBoxes.length) },
+      { length: Math.min(maxConcurrentBoxRequests, batchBoxes.length) },
       () => fetchNextBox(),
     ),
   );
-
-  if (!elementsById.size && lastError) {
-    throw lastError;
-  }
 
   const leads = dedupeLeads(
     [...elementsById.values()]
@@ -730,13 +800,42 @@ export const discoverUsLeadsFromOsm = async ({
       left.name.localeCompare(right.name),
   );
 
-  const strongCandidates = leads.filter(
-    (lead) => lead.website || lead.mobile || lead.email,
-  );
+  // Advancing across a failed box is intentional: it prevents one unstable
+  // public endpoint from pinning a durable job forever. The provider coverage
+  // retains the failure/timed-out outcome, while later boxes remain reachable.
+  const nextBoxCursor = stoppedEarly
+    ? searchBoxes.length
+    : Math.min(searchBoxes.length, startBoxCursor + attemptedBoxCount);
+  return {
+    leads: sortOsmLeads(leads).slice(0, targetCount),
+    totalBoxCount: searchBoxes.length,
+    startBoxCursor,
+    nextBoxCursor,
+    attemptedBoxCount,
+    completedBoxCount,
+    failedBoxCount,
+    timedOut,
+    completed: stoppedEarly || nextBoxCursor >= searchBoxes.length,
+    stoppedEarly,
+    ...(lastErrorMessage ? { errorMessage: lastErrorMessage } : {}),
+  };
+};
 
-  const fallbackCandidates = leads.filter(
-    (lead) => !lead.website && !lead.mobile && !lead.email,
-  );
+/**
+ * Compatibility wrapper for existing callers. New durable flows should use
+ * `discoverUsLeadsFromOsmBatch` and persist its cursor between ticks.
+ */
+export const discoverUsLeadsFromOsm = async (args: {
+  request: { companyType: string; count: number };
+  location: NormalizedUsLocation;
+  profile: CategoryProfile;
+  deadlineMs?: number;
+}): Promise<Lead[]> => {
+  const result = await discoverUsLeadsFromOsmBatch(args);
 
-  return [...strongCandidates, ...fallbackCandidates].slice(0, targetCount);
+  if (!result.leads.length && result.failedBoxCount && !result.completedBoxCount) {
+    throw new Error(result.errorMessage ?? 'OpenStreetMap discovery failed.');
+  }
+
+  return result.leads;
 };

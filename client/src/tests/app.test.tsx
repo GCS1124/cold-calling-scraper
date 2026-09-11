@@ -275,10 +275,17 @@ const aiModeResponse: SearchResponse = {
         },
         {
           providerId: 'gemini-query-assistance',
-          providerName: 'Gemini search planning',
-          status: 'not_configured',
+          providerName: 'Deterministic search planning',
+          status: 'returned',
           leadCount: 0,
-          message: 'Gemini is not configured; deterministic local category and role expansion continues.',
+          phase: 'completed',
+          outcome: 'returned',
+          attemptedCount: 0,
+          observedCount: 3,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+          message: 'Prepared 3 deterministic category, role, and location search lenses without a second Gemini request.',
         },
       ],
       aiAssistance: 'disabled',
@@ -292,6 +299,170 @@ const aiModeResponse: SearchResponse = {
         message: 'Free AI mode does not use paid databases.',
       },
     ],
+  },
+};
+
+const structuredAiWorkflowResponse: SearchResponse = {
+  ...aiModeResponse,
+  searchId: 'search-ai-structured-workflow',
+  researchCandidates: [],
+  reviewCandidates: [
+    {
+      id: 'fusion-review-1',
+      providerId: 'linkedin-public-google-business-fusion',
+      providerName: 'LinkedIn + Google Business fusion',
+      reason: 'organization_ambiguous',
+      reasonDetail: 'Two public businesses matched the organization name, so no fusion was promoted.',
+      name: 'Review-only decision maker',
+      organizationName: 'Northstar Labs',
+      location: 'Austin, TX',
+      sourceUrls: ['https://linkedin.com/in/review-only', 'https://www.google.com/maps/search/?api=1'],
+      sourceTitles: ['Public LinkedIn profile', 'Google Business listing'],
+      relatedLeadIds: ['lead-1', 'lead-2'],
+      discoveredAt: '2026-09-11T00:00:00.000Z',
+    },
+  ],
+  meta: {
+    ...aiModeResponse.meta,
+    progress: {
+      ...aiModeResponse.meta.progress,
+      providerCoverage: [
+        {
+          providerId: 'linkedin-public-google-business-fusion',
+          providerName: 'LinkedIn + Google Business fusion',
+          status: 'returned',
+          phase: 'completed',
+          outcome: 'filtered',
+          leadCount: 0,
+          attemptedCount: 2,
+          observedCount: 2,
+          acceptedCount: 0,
+          reviewCount: 1,
+          deferredCount: 0,
+        },
+        {
+          providerId: 'google-places-ai',
+          providerName: 'Google Business (GMB) listings',
+          status: 'returned',
+          phase: 'completed',
+          outcome: 'returned',
+          leadCount: 40,
+          attemptedCount: 8,
+          observedCount: 500,
+          acceptedCount: 40,
+          reviewCount: 12,
+          deferredCount: 0,
+        },
+        {
+          providerId: 'gemini-public-discovery',
+          providerName: 'Gemini public discovery',
+          status: 'partial',
+          phase: 'degraded',
+          outcome: 'rate_limited',
+          leadCount: 0,
+          attemptedCount: 1,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+        },
+        {
+          providerId: 'public-business-listings',
+          providerName: 'Public Business Listings',
+          status: 'configured',
+          phase: 'queued',
+          outcome: 'deferred',
+          leadCount: 0,
+          attemptedCount: 4,
+          observedCount: 25,
+          acceptedCount: 0,
+          reviewCount: 25,
+          deferredCount: 4,
+        },
+        {
+          providerId: 'yellow-pages-public-directory',
+          providerName: 'Yellow Pages, Public Directory',
+          status: 'returned',
+          phase: 'completed',
+          outcome: 'empty',
+          leadCount: 0,
+          attemptedCount: 5,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+        },
+        {
+          providerId: 'yelp-public-directory',
+          providerName: 'Yelp, Public Directory',
+          status: 'partial',
+          phase: 'degraded',
+          outcome: 'blocked',
+          leadCount: 0,
+          attemptedCount: 5,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+        },
+        {
+          providerId: 'linkedin-public-search',
+          providerName: 'Public LinkedIn Search',
+          status: 'returned',
+          phase: 'completed',
+          outcome: 'returned',
+          leadCount: 1,
+          attemptedCount: 12,
+          observedCount: 2,
+          acceptedCount: 1,
+          reviewCount: 1,
+          deferredCount: 0,
+        },
+        {
+          providerId: 'notarycafe-indexed-search',
+          providerName: 'NotaryCafe, Indexed Public Search',
+          status: 'returned',
+          phase: 'completed',
+          outcome: 'empty',
+          leadCount: 0,
+          attemptedCount: 5,
+          observedCount: 5,
+          acceptedCount: 0,
+          reviewCount: 5,
+          deferredCount: 0,
+        },
+        {
+          providerId: 'public-website-enrichment',
+          providerName: 'Public Website Enrichment',
+          status: 'partial',
+          phase: 'degraded',
+          outcome: 'timed_out',
+          leadCount: 0,
+          attemptedCount: 2,
+          observedCount: 2,
+          acceptedCount: 0,
+          reviewCount: 2,
+          deferredCount: 0,
+          completedCount: 1,
+          enrichedCount: 0,
+          timedOutCount: 1,
+          decisionMakerRecoveredCount: 0,
+        },
+        {
+          providerId: 'apollo-audit',
+          providerName: 'Apollo',
+          status: 'not_configured',
+          phase: 'skipped',
+          outcome: 'not_configured',
+          leadCount: 0,
+          attemptedCount: 0,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+        },
+      ],
+    },
   },
 };
 
@@ -755,14 +926,16 @@ describe('App', () => {
     await clickElement(getButton(container, /ai mode/i));
     expect(normalizedText(container)).toContain('All public sources');
     expect(normalizedText(container)).toContain('AI public-source fusion');
-    expect(normalizedText(container)).toContain('Seven ordered public layers');
+    expect(normalizedText(container)).toContain('Nine ordered public stages');
     expect(normalizedText(container)).toContain('1 · NotaryCafe index');
     expect(normalizedText(container)).toContain('2 · Pure public LinkedIn');
     expect(normalizedText(container)).toContain('3 · Yelp directory');
     expect(normalizedText(container)).toContain('4 · Yellow Pages');
-    expect(normalizedText(container)).toContain('5 · Gemini lead finding');
-    expect(normalizedText(container)).toContain('6 · Google Places');
-    expect(normalizedText(container)).toContain('7 · LinkedIn + GMB fusion');
+    expect(normalizedText(container)).toContain('5 · Generic public listings');
+    expect(normalizedText(container)).toContain('6 · Gemini public research');
+    expect(normalizedText(container)).toContain('7 · Google Business');
+    expect(normalizedText(container)).toContain('8 · Public website enrichment');
+    expect(normalizedText(container)).toContain('9 · LinkedIn + GMB fusion');
     expect(normalizedText(container)).toContain('Live search blueprint');
     expect(normalizedText(container)).toContain('Category');
     expect(normalizedText(container)).toContain('Your business type');
@@ -820,13 +993,72 @@ describe('App', () => {
 
     await waitForText(container, /ai mode coverage/i, 6000);
     const content = normalizedText(container);
-    expect(content).toContain('Commercial lead databases are audited but never called');
+    expect(content).toContain('Paid databases, private profiles, login sessions, paywalls, contact-reveal credits');
     expect(content).toContain('Public LinkedIn Search');
     expect(content).toContain('Apollo');
     expect(content).toContain('Not configured');
-    expect(content).toContain('Gemini was not configured; deterministic local category and role expansion continued.');
-    expect(content).toContain('Nothing silently discarded');
-    expect(content).toContain('AI-reported phone');
+    expect(content).toContain('Prepared 3 deterministic category, role, and location search lenses without a second Gemini request.');
+    expect(content).toContain('Unified public review queue');
+    expect(content).toContain('Publicly reported phone');
+
+    await unmount();
+  });
+
+  it('renders the exact staged provider order, precise outcomes, and review-only export gate', async () => {
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(structuredAiWorkflowResponse),
+      getSearch: vi.fn().mockResolvedValue(structuredAiWorkflowResponse),
+    };
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await clickElement(getButton(container, /ai mode/i));
+    await typeValue(getCompanyTypeInput(container), 'Dentist');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+    await waitForText(container, /ai mode coverage/i, 6000);
+
+    const workflowGrid = container.querySelector('[aria-label="AI workflow provider status"]');
+    const providerIds = Array.from(
+      workflowGrid?.querySelectorAll<HTMLElement>('[data-provider-id]') ?? [],
+      (element) => element.dataset.providerId,
+    );
+    expect(providerIds).toEqual([
+      'notarycafe-indexed-search',
+      'linkedin-public-search',
+      'yelp-public-directory',
+      'yellow-pages-public-directory',
+      'public-business-listings',
+      'gemini-public-discovery',
+      'google-places-ai',
+      'public-website-enrichment',
+      'linkedin-public-google-business-fusion',
+    ]);
+    const content = normalizedText(workflowGrid);
+    expect(content).toContain('Checked · 0 matched');
+    expect(content).toContain('0 matched / 5 screened · 5 review');
+    expect(content).toContain('Blocked');
+    expect(content).toContain('Deferred · 4 remaining');
+    expect(content).toContain('Rate limited');
+    expect(content).toContain('500 observed · 40 accepted');
+    expect(content).toContain('Timed out');
+    expect(content).toContain('0 retained · 1 review candidate');
+
+    await waitForText(container, /unified public review queue/i, 1000);
+    const providerFilter = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Filter review queue by provider"]',
+    );
+    expect(providerFilter).not.toBeNull();
+    await selectValue(providerFilter!, 'linkedin-public-google-business-fusion');
+    expect(normalizedText(container)).toContain('Review-only decision maker');
+    expect(
+      container.querySelector('a[href="https://linkedin.com/in/review-only"]'),
+    ).not.toBeNull();
+
+    await clickElement(getButton(container, /download excel/i));
+    await waitForText(container, /download 2 leads/i, 1000);
+    const exportDialog = container.querySelector('[role="dialog"]');
+    expect(normalizedText(exportDialog)).toContain('Download 2 leads');
+    expect(normalizedText(exportDialog)).not.toContain('Review-only decision maker');
 
     await unmount();
   });

@@ -18,12 +18,20 @@ type AppDeps = {
   search?: SearchService;
 };
 
+/**
+ * The Express development API deliberately uses the same durable service as
+ * the Vercel handlers. Keeping a separate in-memory orchestrator here used to
+ * make local/API behavior diverge from the resumable production workflow.
+ *
+ * The import stays lazy so health and capability requests do not initialize
+ * provider clients, storage, or background work.
+ */
 const createLazySearchService = (): SearchService => {
   let servicePromise: Promise<SearchService> | undefined;
 
   const getService = () => {
-    servicePromise ??= import('./services/search-orchestrator').then(
-      ({ searchService }) => searchService,
+    servicePromise ??= import('./services/vercel-search-service').then(
+      ({ vercelSearchService }) => vercelSearchService,
     );
 
     return servicePromise;

@@ -210,6 +210,14 @@ is lost; the same owner and normalized request return the existing job instead
 of creating a duplicate. Reusing the key with different criteria returns
 `409 IDEMPOTENCY_KEY_REUSED`.
 
+AI-mode durable jobs use an approximately 90-second logical search window,
+split into resumable invocations below the serverless execution cap. Inspect
+each `meta.progress.providerCoverage` entry's structured `phase`, `outcome`,
+and counts on every snapshot: `deferred` means the next bounded spatial or
+website slice is stored for continuation, whereas `timed_out`, `blocked`, and
+`empty` have distinct meanings. `leadCount` remains the accepted-record count
+for backward-compatible consumers.
+
 Stateless LinkedIn and AI fallbacks advertise `pollable: false` and
 `resumable: false`; their response is final for that attempt. They cannot
 promise cross-instance replay without durable storage. GMB durable search and
@@ -227,9 +235,11 @@ all owner-scoped feedback require the configured Postgres connection.
   every error includes `requestId`, `code`, `retryable`, and `contractVersion`.
 - Evidence retains source URL, source family, authority tier, claim, status,
   and observation date where available.
-- AI-mode `researchCandidates` are retained in the search response and evidence
-  dossier separately from exportable `leads`, including candidates that still
-  need source or public-phone review.
+- AI-mode `researchCandidates` and provider-neutral `reviewCandidates` are
+  retained in the search response and evidence dossier separately from
+  exportable `leads`. Review records include exact exclusion reasons and public
+  evidence links; neither queue is exportable until the normal public-phone and
+  evidence gates pass.
 - `feedback` accepts only a lead id, bounded event type, and optional bounded
   reason. The server derives phone, profile, organization, and branch keys from
   the stored lead; the client cannot rewrite contact identity.
@@ -257,23 +267,24 @@ silently treated as current.
 
 ### AI
 
-Gemini can expand public search wording and return grounded public research
-candidates. Every returned candidate and cited source is retained for review,
-even when it does not pass the required public-phone gate. Public discovery and
-deterministic validation supply the exportable lead facts and contact evidence.
+Deterministic category, role, and location hints are folded into one grounded
+Gemini public-research pass that can use at most 40 high-quality listing seeds.
+Every returned candidate and cited source is retained for review, even when it
+does not pass the required public-phone gate. Public discovery and deterministic
+validation supply the exportable lead facts and contact evidence.
 If Gemini is rate-limited or unavailable, `meta.progress.aiAssistance` reports
 `rate_limited` or `failed` and deterministic public expansion continues. AI never
 manufactures a person, owner claim, phone, email, employment relationship, or
 verification result.
 
 AI mode also includes a bounded, indexed-only NotaryCafe cross-check on every
-search. It uses category- and location-aware public search-engine snippets,
-promotes only relevant notary profiles whose snippet exposes a US phone, and
-sends accepted records through the normal evidence and phone gate. Non-notary
-probes cannot promote unrelated profiles. It never fetches NotaryCafe pages or
-bypasses Cloudflare, CAPTCHA, login, geo restrictions, or private-profile
-controls; indexed records may be stale and should be reverified before
-outreach.
+search. It uses category- and location-aware public search-engine snippets for
+every requested heading, and promotes a profile only when the indexed snippet
+explicitly supports the requested category, deterministic US location, valid
+public profile URL, and public US phone. Other profiles remain reviewable. It
+never fetches NotaryCafe pages or bypasses Cloudflare, CAPTCHA, login, geo
+restrictions, or private-profile controls; indexed records may be stale and
+should be reverified before outreach.
 
 Every AI heading also runs bounded public Yelp and Yellow Pages checks. These
 adapters read public result pages only, keep category/location scope, and attach

@@ -90,6 +90,56 @@ export type ResearchCandidate = {
   discoveredAt: string;
 };
 
+/**
+ * Why a publicly observed candidate remains reviewable rather than becoming an
+ * exportable lead. These are evidence gaps, not claims about a business or
+ * person.
+ */
+export type ReviewCandidateReason =
+  | 'missing_public_phone'
+  | 'invalid_public_phone'
+  | 'missing_source_evidence'
+  | 'category_mismatch'
+  | 'location_mismatch'
+  | 'organization_unmatched'
+  | 'organization_ambiguous'
+  | 'former_or_conflicting'
+  | 'website_timeout'
+  | 'website_blocked'
+  | 'provider_timeout'
+  | 'provider_blocked'
+  | 'provider_rate_limited'
+  | 'deferred_by_budget';
+
+/**
+ * Provider-neutral public evidence retained for manual review. Unlike Lead,
+ * this type never represents an exportable contact route until it passes the
+ * normal independent public-phone and evidence gates.
+ */
+export type ReviewCandidate = {
+  id: string;
+  providerId: string;
+  providerName: string;
+  reason: ReviewCandidateReason;
+  reasonDetail?: string;
+  name?: string;
+  personName?: string;
+  organizationName?: string;
+  originalRole?: string;
+  location?: string;
+  website?: string;
+  profileUrl?: string;
+  /** Publicly reported only; it is deliberately not treated as verified. */
+  reportedPhone?: string;
+  reportedEmail?: string;
+  sourceUrls: string[];
+  sourceTitles?: string[];
+  evidence?: string;
+  /** Records that informed a possible bridge but were never merged. */
+  relatedLeadIds?: string[];
+  discoveredAt: string;
+};
+
 export type Lead = {
   id: string;
   name: string;

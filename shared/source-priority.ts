@@ -8,8 +8,9 @@
  * deduplication without treating model prose as proof.
  */
 
-export type PublicSourcePriority = 1 | 2 | 3 | 4;
-export type PublicLeadSourceOrder = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+/** Exact display and export sorting order for every public lead stage. */
+export type PublicSourcePriority = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+export type PublicLeadSourceOrder = PublicSourcePriority;
 
 type SourcePriorityEntry = {
   providerName?: unknown;
@@ -62,6 +63,7 @@ const notaryCafeSourcePattern = /\bnotary\s*cafe\b/i;
 const yelpSourcePattern = /\byelp\b/i;
 const yellowPagesSourcePattern = /\b(?:yellow\s*pages|yellowpages|yp\.com)\b/i;
 const geminiSourcePattern = /\bgemini\b/i;
+const websiteEnrichmentSourcePattern = /\b(?:public\s+website|website\s+crawl|website\s+enrichment)\b/i;
 const linkedInProfileUrlPattern = /(?:^|\/\/)(?:www\.)?linkedin\.com\/(?:in|pub)\//i;
 const googleMapsUrlPattern = /(?:google\.[^/]+\/maps\b|maps\.google\.)/i;
 const notaryCafeUrlPattern = /(?:^|\/\/)(?:www\.)?notarycafe\.com(?:\/|$)/i;
@@ -126,7 +128,7 @@ export const getPublicLeadSourceOrder = (lead: SourcePriorityLead): PublicLeadSo
 
   // Fusion is intentionally the final lead stage. A corroborated LinkedIn +
   // Google Business record must not outrank any earlier public-source path.
-  if (hasLinkedIn && hasGoogleBusiness) return 7;
+  if (hasLinkedIn && hasGoogleBusiness) return 9;
 
   // "Pure LinkedIn" means no named downstream source was merged into the
   // record. LinkedIn + Yelp/Yellow/Gemini remains in the corroborating source
@@ -137,21 +139,18 @@ export const getPublicLeadSourceOrder = (lead: SourcePriorityLead): PublicLeadSo
 
   if (hasYelp) return 3;
   if (hasYellowPages) return 4;
-  if (hasGemini) return 5;
-  if (hasGoogleBusiness) return 6;
+  if (hasGemini) return 6;
+  if (hasGoogleBusiness) return 7;
+  if (hasSourceLabel(labels, websiteEnrichmentSourcePattern)) return 8;
 
   // OSM, public websites, and other bounded public fallbacks share the
-  // generic research slot. They remain before Google Places and fusion.
+  // generic research slot. They remain before Gemini, Google Places, and
+  // fusion. A website-only result is handled explicitly above.
   return 5;
 };
 
 export const getPublicLeadSourcePriority = (lead: SourcePriorityLead): PublicSourcePriority => {
-  const order = getPublicLeadSourceOrder(lead);
-
-  if (order === 1) return 1;
-  if (order === 2) return 2;
-  if (order === 7) return 4;
-  return 3;
+  return getPublicLeadSourceOrder(lead);
 };
 
 export const getPublicProviderPriority = (
@@ -169,28 +168,26 @@ export const getPublicProviderPriority = (
   if (providerId.includes('notarycafe') || providerName.includes('notarycafe')) return 1;
   // A dedicated fusion card must remain final, even when its id happens to
   // begin with `linkedin-public`.
-  if (hasLinkedIn && hasGoogleBusiness) return 7;
+  if (hasLinkedIn && hasGoogleBusiness) return 9;
   if (providerId.includes('linkedin-public') || providerName.includes('public linkedin')) return 2;
   if (hasYelp) return 3;
   if (hasYellowPages) return 4;
-  if (hasGemini) return 5;
-  if (providerId.includes('google-places') || providerId.includes('google-maps') || hasGoogleBusiness) {
-    return 6;
+  if (providerId.includes('public-website') || providerName.includes('public website')) {
+    return 8;
   }
   if (
     providerId.includes('public-business-listings') ||
-    providerId.includes('public-website') ||
     providerId.endsWith('-public-directory') ||
     providerName.includes('public business listings') ||
-    providerName.includes('public website') ||
     providerName.includes('public directory') ||
     providerName.includes('openstreetmap') ||
     providerName.includes('osm')
   ) {
-    // Keep unlisted generic fallbacks after the dedicated Gemini stage while
-    // still before Google Places. This is a provider-sort key, not a user
-    // visible stage number.
-    return 5.5;
+    return 5;
   }
-  return 8;
+  if (hasGemini) return 6;
+  if (providerId.includes('google-places') || providerId.includes('google-maps') || hasGoogleBusiness) {
+    return 7;
+  }
+  return 10;
 };

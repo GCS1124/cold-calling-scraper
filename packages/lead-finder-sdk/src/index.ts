@@ -94,9 +94,38 @@ export type ProviderCoverage = {
   providerId: string;
   providerName: string;
   status: 'configured' | 'not_configured' | 'returned' | 'failed' | 'partial';
+  /** Backward-compatible alias for acceptedCount. */
   leadCount: number;
+  phase?: ProviderCoveragePhase;
+  outcome?: ProviderCoverageOutcome;
+  attemptedCount?: number;
+  observedCount?: number;
+  acceptedCount?: number;
+  reviewCount?: number;
+  deferredCount?: number;
+  completedCount?: number;
+  enrichedCount?: number;
+  blockedCount?: number;
+  timedOutCount?: number;
+  skippedCount?: number;
+  decisionMakerRecoveredCount?: number;
+  updatedAt?: string;
   message?: string;
 };
+
+export type ProviderCoveragePhase = 'queued' | 'running' | 'completed' | 'degraded' | 'skipped';
+
+export type ProviderCoverageOutcome =
+  | 'not_started'
+  | 'returned'
+  | 'empty'
+  | 'timed_out'
+  | 'blocked'
+  | 'rate_limited'
+  | 'failed'
+  | 'filtered'
+  | 'deferred'
+  | 'not_configured';
 
 export type ProviderWarning = {
   providerId: string;
@@ -151,6 +180,7 @@ export type IntegrationLead = {
 export type ResearchCandidate = {
   id: string;
   name?: string;
+  personName?: string;
   organizationName?: string;
   originalRole?: string;
   location?: string;
@@ -164,6 +194,45 @@ export type ResearchCandidate = {
   evidence?: string;
   grounded: boolean;
   status: 'needs_phone_validation' | 'needs_source_review';
+  discoveredAt: string;
+};
+
+export type ReviewCandidateReason =
+  | 'missing_public_phone'
+  | 'invalid_public_phone'
+  | 'missing_source_evidence'
+  | 'category_mismatch'
+  | 'location_mismatch'
+  | 'organization_unmatched'
+  | 'organization_ambiguous'
+  | 'former_or_conflicting'
+  | 'website_timeout'
+  | 'website_blocked'
+  | 'provider_timeout'
+  | 'provider_blocked'
+  | 'provider_rate_limited'
+  | 'deferred_by_budget';
+
+/** Public evidence retained for review and deliberately excluded from export. */
+export type ReviewCandidate = {
+  id: string;
+  providerId: string;
+  providerName: string;
+  reason: ReviewCandidateReason;
+  reasonDetail?: string;
+  name?: string;
+  personName?: string;
+  organizationName?: string;
+  originalRole?: string;
+  location?: string;
+  website?: string;
+  profileUrl?: string;
+  reportedPhone?: string;
+  reportedEmail?: string;
+  sourceUrls: string[];
+  sourceTitles?: string[];
+  evidence?: string;
+  relatedLeadIds?: string[];
   discoveredAt: string;
 };
 
@@ -203,6 +272,7 @@ export type SearchResponse = {
   searchId: string;
   leads: IntegrationLead[];
   researchCandidates?: ResearchCandidate[];
+  reviewCandidates?: ReviewCandidate[];
   meta: {
     sourceMode?: LeadFinderMode;
     execution?: SearchExecution;
@@ -247,6 +317,7 @@ export type ResearchDossier = {
   qualitySummary: Record<string, unknown>;
   leads: IntegrationLead[];
   researchCandidates?: ResearchCandidate[];
+  reviewCandidates?: ReviewCandidate[];
 };
 
 export type IntegrationCapabilities = {

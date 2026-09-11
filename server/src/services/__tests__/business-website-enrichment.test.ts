@@ -72,6 +72,27 @@ describe('enrichWebsiteCandidates', () => {
     now += 1;
     expect(enrichLead).not.toHaveBeenCalled();
     expect(result.candidateCount).toBe(1);
+    expect(result.deferredCount).toBe(1);
+    expect(result.reviewCandidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reason: 'deferred_by_budget' }),
+    ]));
+  });
+
+  it('keeps a bounded website timeout in the review queue instead of reporting it as unavailable', async () => {
+    const enrichLead = vi.fn(async () => new Promise<never>(() => {}));
+
+    const result = await enrichWebsiteCandidates({
+      leads: [makeLead()],
+      enrichLead,
+      deadlineMs: Date.now() + 20,
+      concurrency: 1,
+    });
+
+    expect(result.attemptedCount).toBe(1);
+    expect(result.timedOutCount).toBe(1);
+    expect(result.reviewCandidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reason: 'website_timeout', name: 'Northstar Dental' }),
+    ]));
   });
 
   it('can enrich a phone-qualified business for a missing public person name', async () => {

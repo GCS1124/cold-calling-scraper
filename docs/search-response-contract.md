@@ -26,13 +26,20 @@ Every runtime response includes:
   evidence dossier, including eligible leads, review count, fresh phone
   observations, quality tiers, and independent source-family counts. This is a
   summary of returned leads, not a probability or deliverability guarantee.
-- `meta.progress.providerCoverage`: provider observations with `configured`,
-  `not_configured`, `returned`, `failed`, or `partial` status.
+- `meta.progress.providerCoverage`: provider observations retain the legacy
+  `configured`, `not_configured`, `returned`, `failed`, or `partial` status and
+  add structured `phase`, `outcome`, attempted/observed/accepted/review/deferred
+  counts, and `updatedAt`. Clients must use those structured fields rather than
+  infer execution state from a human message.
 - `researchCandidates` (AI mode when populated): every grounded or source-review
   candidate returned by Gemini, including public source URLs, evidence, social
   links, and model-reported phone/email fields labeled as unverified. These
   records are retained for research and are never included in the exportable
   `leads` array until independent public phone validation succeeds.
+- `reviewCandidates` (when populated): a unified provider-neutral queue for
+  useful public records excluded by a category, location, phone, website,
+  provider, or strict-fusion gate. Every item carries its exact reason and
+  public evidence links and is never exported automatically.
 
 ## Lead quality and identity fields
 
@@ -73,14 +80,14 @@ to enforce `phonePolicy.required` and inspect each lead's source evidence.
 
 NotaryCafe coverage uses a bounded public-search-index adapter on every AI
 search. It queries public search engines for category- and location-aware
-`notarycafe.com` profile references, keeps only relevant notary records whose
-indexed snippet exposes a parseable US phone, and sends those records through
-the same normalization, evidence, deduplication, and export gate as every
-other source. Non-notary probes are retained for provider coverage but cannot
-promote unrelated profiles. It does not fetch NotaryCafe pages directly or
-bypass Cloudflare, CAPTCHA, login, geo restrictions, or private profile
-controls. Indexed references may be stale and should be reverified before
-outreach.
+`notarycafe.com` profile references for every requested heading. A result can
+become a lead only when its indexed snippet explicitly supports the requested
+category, deterministic US location, a parseable public US phone, and a valid
+public profile URL. Ambiguous, phone-missing, or category-mismatched profiles
+remain in `reviewCandidates`; they are never relabeled as another category.
+The adapter does not fetch NotaryCafe pages directly or bypass Cloudflare,
+CAPTCHA, login, geo restrictions, or private-profile controls. Indexed
+references may be stale and should be reverified before outreach.
 
 AI mode also runs the same bounded Yelp and Yellow Pages public-directory layer
 for every heading. Directory results are category/location-scoped and pass
@@ -104,12 +111,20 @@ does not stop the other sources. India-oriented adapters are not part of the US
 workflow.
 
 AI lead display order is deterministic across the server and client: indexed
-NotaryCafe evidence, pure public LinkedIn, Yelp, Yellow Pages, Gemini lead
-finding, Google Places, and finally LinkedIn plus Google Business fusion. OSM,
-public websites, and other bounded public fallbacks share the Gemini research
-slot and still appear before Google Places and fusion. This ordering is only a
+NotaryCafe evidence, pure public LinkedIn, Yelp, Yellow Pages, generic public
+listings, Gemini public research, Google Business, public website enrichment,
+and finally LinkedIn plus Google Business fusion. This ordering is only a
 presentation preference; every visible lead still must pass the public US-phone
 and evidence gates.
+
+Durable AI searches use an approximately 90-second logical window, divided into
+resumable sub-60-second invocations. The first tick performs bounded source
+discovery, later ticks continue the persisted OpenStreetMap spatial-box cursor,
+then public website enrichment resumes deferred domains before strict final
+fusion. A `deferred` provider outcome therefore means safe remaining work is
+stored for the next durable snapshot; it is neither an empty provider response
+nor a hidden timeout. Stateless fallback responses stay hard-capped below the
+runtime limit and identify deferred work explicitly instead of implying it ran.
 
 ## HTTP errors and tracing
 
@@ -219,8 +234,8 @@ the final phone gate still applies.
 
 ### AI
 
-Gemini can expand public search lenses and return grounded public research
-candidates. Candidates and cited source details remain available for review even
+Deterministic public search lenses are folded into one grounded Gemini pass that
+can return public research candidates. Candidates and cited source details remain available for review even
 when the required public-phone gate excludes them from export. Public discovery
 providers supply independently validated lead and contact facts, including
 search-indexed NotaryCafe public profile references. Apollo, Lusha,
@@ -237,13 +252,14 @@ and deterministic public discovery continues unchanged. Tune the optional
 `GEMINI_MIN_REQUEST_GAP_MS`, `GEMINI_MAX_RETRIES`, `GEMINI_MAX_RETRY_WAIT_MS`,
 `GEMINI_RATE_LIMIT_COOLDOWN_MS`, and `GEMINI_FALLBACK_RETRY_MS` environment
 variables, plus `GEMINI_KEY_ROTATION_ATTEMPTS`,
-`GEMINI_AUTH_FAILURE_COOLDOWN_MS`, `GEMINI_TRANSIENT_FAILURE_COOLDOWN_MS`, and
-`GEMINI_QUERY_CACHE_TTL_MS`, when the configured account has different quota
-characteristics.
+`GEMINI_AUTH_FAILURE_COOLDOWN_MS`, `GEMINI_TRANSIENT_FAILURE_COOLDOWN_MS`,
+`GEMINI_QUERY_CACHE_TTL_MS`, and `GEMINI_GROUNDED_CACHE_TTL_MS`, when the
+configured account has different quota characteristics.
 
-The evidence/dossier response also carries `researchCandidates` separately from
-`leads`, so requesting evidence does not discard AI-mode references that still
-need source or phone review.
+The evidence/dossier response carries both `researchCandidates` and
+`reviewCandidates` separately from `leads`, so requesting evidence does not
+discard AI-mode references that still need source, location, phone, website, or
+fusion review.
 
 For quota resilience, configure either `GEMINI_API_KEYS` as a comma/newline/
 semicolon-separated pool or individual `GEMINI_API_KEY_1` through
@@ -252,6 +268,7 @@ supported and is added to the pool. Requests rotate round-robin across healthy
 keys; a `429` quarantines only the active key, then retries each configured key
 once per request before returning `rate_limited`. Raw keys are never included in
 coverage, logs, or response payloads. `GEMINI_KEY_ROTATION_ATTEMPTS` can lower
-the per-request rotation cap when needed. A bounded in-process LRU cache reuses
-successful query plans for the configured TTL, and invalid or transiently failed
-keys are isolated without interrupting deterministic public discovery.
+the per-request rotation cap when needed. Bounded in-process LRU caches reuse
+successful deterministic query plans and identical grounded requests for their
+configured TTLs; invalid or transiently failed keys are isolated without
+interrupting deterministic public discovery.

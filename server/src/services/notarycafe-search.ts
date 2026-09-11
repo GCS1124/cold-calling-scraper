@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 
-import type { Lead } from '../types/lead';
+import type { Lead, ReviewCandidate, ReviewCandidateReason } from '../types/lead';
 import type { ProviderWarning, SearchRequest } from '../types/search';
 import type { NormalizedUsLocation } from './us-location';
 import { buildDiscoverySeeds } from './discovery-seeds';
 import { normalizeContactPhone } from './contact-evidence';
+import { resolveCategoryProfile } from './us-category-mapping';
 import { readResponseTextBounded } from '../utils/bounded-fetch';
 import { isNotaryCafeHost, isPublicHttpUrl } from '../utils/public-url';
 import { usStateCodes, usStateNames, type UsStateCode } from '../data/us-states';
@@ -33,17 +34,23 @@ type ProviderSearchResult = {
 type ProviderHealth = {
   attempts: number;
   failures: number;
+  blocked: number;
   disabled: boolean;
   lastMessage: string;
 };
 
 export type NotaryCafeDiscoveryResult = {
   leads: Lead[];
+  reviewCandidates: ReviewCandidate[];
   warnings: ProviderWarning[];
   coverage: {
     queriesAttempted: number;
     providersChecked: number;
+    observedCandidates: number;
     acceptedCandidates: number;
+    reviewCandidates: number;
+    deferredQueries: number;
+    blockedProviders: number;
   };
 };
 
@@ -59,9 +66,11 @@ const sourceFailureThreshold = 2;
  * 2. Pure public LinkedIn evidence
  * 3. Yelp public directory
  * 4. Yellow Pages public directory
- * 5. Gemini lead finding and bounded public fallbacks
- * 6. Google Places
- * 7. LinkedIn + Google Business fusion
+ * 5. Generic public listings
+ * 6. Gemini public research
+ * 7. Google Business
+ * 8. Public website enrichment
+ * 9. LinkedIn + Google Business fusion
  *
  * This is an ordering preference, not a relaxation of the public-phone,
  * location, or evidence gates.
@@ -103,9 +112,9 @@ export const prioritizeNotaryCafeLeads = (
 
 /**
  * Apply the complete AI display sequence, regardless of category:
- * NotaryCafe indexed evidence, pure LinkedIn, Yelp, Yellow Pages, Gemini lead
- * finding, Google Places, then LinkedIn plus Google Business fusion. OSM,
- * public websites, and other bounded public fallbacks share the Gemini slot.
+ * NotaryCafe indexed evidence, pure LinkedIn, Yelp, Yellow Pages, generic
+ * public listings, Gemini public research, Google Business, public website
+ * enrichment, then LinkedIn plus Google Business fusion.
  * The caller is responsible for eligibility.
  */
 export const prioritizeAiLeadSources = (leads: Lead[]) => {
@@ -643,7 +652,15 @@ const extractCity = (value: string, stateCode?: UsStateCode) => {
       .map(escapeRegExp)
       .join('|');
     const cityBeforeState = value.match(new RegExp(`\\b([A-Za-z][A-Za-z.'-]*(?:\\s+[A-Za-z][A-Za-z.'-]*){0,4})\\s*,\\s*(?:${stateNames})\\b`, 'i'));
-    if (cityBeforeState?.[1]) return normalizeText(cityBeforeState[1]);
+    if (cityBeforeState?.[1]) {
+      const rawCity = normalizeText(cityBeforeState[1]);
+      // Search snippets often include a service phrase before a real
+      // "City, ST" pair (for example, "Mobile notary serving Denver, CO").
+      // Preserve only the place tail instead of incorrectly treating the
+      // whole marketing phrase as a conflicting city.
+      const placeTail = rawCity.match(/\b(?:serving|in|near|at|from|located\s+in)\s+([A-Za-z][A-Za-z .'-]{0,60})$/i)?.[1];
+      return normalizeText(placeTail ?? rawCity);
+    }
   }
 
   return '';
@@ -695,49 +712,112 @@ const extractExternalWebsite = (value: string) => {
 const createLeadId = (profileUrl: string) =>
   `notarycafe-${createHash('sha1').update(profileUrl).digest('hex').slice(0, 20)}`;
 
-const toLead = (
-  result: SearchResult & { url: string },
-  request: SearchRequest,
+const extractReportedPhone = (value: string) =>
+  [...value.matchAll(phonePattern)].map((match) => normalizeText(match[0])).find(Boolean) ?? '';
+
+const normalizeCategoryTerm = (value: string) =>
+  normalizeText(value)
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[-_/]/g, ' ')
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const genericCategoryTerms = new Set([
+  'business',
+  'company',
+  'contractor',
+  'office',
+  'provider',
+  'service',
+  'services',
+]);
+
+const getExplicitCategoryTerms = (companyType: string) => {
+  const profile = resolveCategoryProfile(companyType);
+  return unique([
+    companyType,
+    profile.label,
+    ...profile.searchTerms,
+    ...(profile.aliases ?? []),
+    ...(isNotaryCafeCategory(companyType)
+      ? ['notary', 'mobile notary', 'notary signing agent', 'loan signing agent', 'apostille']
+      : []),
+  ])
+    .map(normalizeCategoryTerm)
+    .filter((term) => term.length >= 3 && !genericCategoryTerms.has(term))
+    .sort((left, right) => right.length - left.length);
+};
+
+const hasExplicitCategoryEvidence = (searchable: string, companyType: string) => {
+  const normalized = normalizeCategoryTerm(searchable);
+  return getExplicitCategoryTerms(companyType).some((term) => {
+    const expression = escapeRegExp(term).replace(/\s+/g, '\\s+');
+    return new RegExp(`(?:^|[^a-z0-9])${expression}(?=$|[^a-z0-9])`, 'i').test(normalized);
+  });
+};
+
+type LocationAssessment = {
+  stateCode?: UsStateCode;
+  city: string;
+  zip: string;
+  reason?: ReviewCandidateReason;
+  reasonDetail?: string;
+};
+
+const assessLocation = (
+  searchable: string,
+  snippetText: string,
   location: NormalizedUsLocation,
-  observedAt: string,
-): Lead | undefined => {
-  const profileUrl = normalizeNotaryCafeProfileUrl(result.url);
-  if (!profileUrl) return undefined;
-
-  // Keep the universal cross-source connection safe: NotaryCafe profiles are
-  // only eligible for notary searches. Non-notary probes may still run for
-  // coverage visibility, but they can never become misclassified leads.
-  if (!isNotaryCafeCategory(request.companyType)) return undefined;
-
-  const snippetText = normalizeText(result.snippet);
-  const searchable = normalizeText(`${result.title} ${snippetText}`);
-  const phone = extractPhone(searchable);
-  const name = profileNameFromTitle(result.title);
-  if (!phone || !name) return undefined;
-
-  // Titles commonly contain the person's name and the word "Notary". Read
-  // location evidence from the snippet first so title text cannot be
-  // mistaken for a multi-word city (for example, "Houston Notary Houston").
+): LocationAssessment => {
   const observedStateCode = extractStateCode(snippetText) || extractStateCode(searchable);
   const requestedStateCode = usStateCodes.find(
     (code) => code === location.stateCode.trim().toUpperCase(),
   );
+  const observedCity = extractCity(snippetText, requestedStateCode || observedStateCode);
+  const zip = extractZip(searchable);
+
   if (
     location.mode === 'local' &&
     requestedStateCode &&
     observedStateCode &&
     observedStateCode !== requestedStateCode
   ) {
-    return undefined;
+    return {
+      stateCode: observedStateCode,
+      city: observedCity,
+      zip,
+      reason: 'location_mismatch',
+      reasonDetail: `The indexed profile identified ${usStateNames[observedStateCode]}, which conflicts with ${location.label}.`,
+    };
   }
 
   const stateCode = requestedStateCode || observedStateCode;
-  if (location.mode === 'timezone' && !stateCode) return undefined;
-
-  const observedCity = extractCity(snippetText, stateCode);
-  const zip = extractZip(searchable);
+  if (location.mode === 'timezone' && !stateCode) {
+    return {
+      city: observedCity,
+      zip,
+      reason: 'location_mismatch',
+      reasonDetail: `The indexed profile did not include deterministic state evidence for ${location.label}.`,
+    };
+  }
+  if (location.mode === 'nationwide' && !stateCode && !zip) {
+    return {
+      city: observedCity,
+      zip,
+      reason: 'location_mismatch',
+      reasonDetail: 'The indexed profile did not include deterministic US location evidence.',
+    };
+  }
   if (location.mode === 'local' && !observedCity && !zip) {
-    return undefined;
+    return {
+      stateCode,
+      city: '',
+      zip,
+      reason: 'location_mismatch',
+      reasonDetail: `The indexed profile did not include city or postal evidence for ${location.label}.`,
+    };
   }
   if (
     location.mode === 'local' &&
@@ -745,16 +825,145 @@ const toLead = (
     location.city &&
     normalizeCityForComparison(observedCity) !== normalizeCityForComparison(location.city)
   ) {
-    return undefined;
+    return {
+      stateCode,
+      city: observedCity,
+      zip,
+      reason: 'location_mismatch',
+      reasonDetail: `The indexed profile named ${observedCity}, which conflicts with ${location.label}.`,
+    };
   }
-  const city = location.mode === 'local'
-    ? observedCity || location.city || location.label
-    : extractCity(searchable, stateCode) || (stateCode ? usStateNames[stateCode] : 'United States');
-  const website = extractExternalWebsite(searchable);
-  const email = extractEmail(searchable);
-  const claim = `Public search-index evidence exposed ${name}'s NotaryCafe profile and a phone number. The profile page was not fetched by this worker.`;
 
   return {
+    stateCode,
+    city: location.mode === 'local'
+      ? observedCity || location.city || location.label
+      : extractCity(searchable, stateCode) || (stateCode ? usStateNames[stateCode] : 'United States'),
+    zip,
+  };
+};
+
+const buildReviewCandidate = ({
+  result,
+  profileUrl,
+  reason,
+  reasonDetail,
+  observedAt,
+  searchable,
+  location,
+}: {
+  result: SearchResult & { url: string };
+  profileUrl: string;
+  reason: ReviewCandidateReason;
+  reasonDetail: string;
+  observedAt: string;
+  searchable: string;
+  location: LocationAssessment;
+}): ReviewCandidate => {
+  const name = profileNameFromTitle(result.title);
+  const reportedPhone = extractReportedPhone(searchable);
+  const email = extractEmail(searchable);
+  const organizationName = extractOrganizationName(searchable, name) || undefined;
+
+  return {
+    id: `${createLeadId(profileUrl)}-review-${reason}`,
+    providerId,
+    providerName,
+    reason,
+    reasonDetail,
+    name: name || undefined,
+    personName: name || undefined,
+    organizationName,
+    location: location.city || undefined,
+    website: extractExternalWebsite(searchable) || undefined,
+    profileUrl,
+    reportedPhone: reportedPhone || undefined,
+    reportedEmail: email || undefined,
+    sourceUrls: [profileUrl],
+    sourceTitles: [normalizeText(result.title).slice(0, 240)],
+    evidence: normalizeText(result.snippet).slice(0, 600) || undefined,
+    discoveredAt: observedAt,
+  };
+};
+
+const classifyIndexedProfile = (
+  result: SearchResult & { url: string },
+  request: SearchRequest,
+  location: NormalizedUsLocation,
+  observedAt: string,
+): { lead?: Lead; reviewCandidate?: ReviewCandidate } => {
+  const profileUrl = normalizeNotaryCafeProfileUrl(result.url);
+  if (!profileUrl) return {};
+
+  const snippetText = normalizeText(result.snippet);
+  const searchable = normalizeText(`${result.title} ${snippetText}`);
+  const preliminaryLocation = assessLocation(searchable, snippetText, location);
+  if (!hasExplicitCategoryEvidence(searchable, request.companyType)) {
+    return {
+      reviewCandidate: buildReviewCandidate({
+        result,
+        profileUrl,
+        reason: 'category_mismatch',
+        reasonDetail: `The indexed snippet did not explicitly evidence the requested ${request.companyType} category.`,
+        observedAt,
+        searchable,
+        location: preliminaryLocation,
+      }),
+    };
+  }
+  if (preliminaryLocation.reason) {
+    return {
+      reviewCandidate: buildReviewCandidate({
+        result,
+        profileUrl,
+        reason: preliminaryLocation.reason,
+        reasonDetail: preliminaryLocation.reasonDetail ?? 'The indexed profile did not match the requested location.',
+        observedAt,
+        searchable,
+        location: preliminaryLocation,
+      }),
+    };
+  }
+
+  const reportedPhone = extractReportedPhone(searchable);
+  const phone = extractPhone(searchable);
+  const name = profileNameFromTitle(result.title);
+  if (!reportedPhone || !phone) {
+    const reason: ReviewCandidateReason = reportedPhone ? 'invalid_public_phone' : 'missing_public_phone';
+    return {
+      reviewCandidate: buildReviewCandidate({
+        result,
+        profileUrl,
+        reason,
+        reasonDetail: reportedPhone
+          ? 'The indexed snippet contained a phone-like value that did not validate as a US phone number.'
+          : 'The indexed snippet did not expose a public US phone number.',
+        observedAt,
+        searchable,
+        location: preliminaryLocation,
+      }),
+    };
+  }
+  if (!name) {
+    return {
+      reviewCandidate: buildReviewCandidate({
+        result,
+        profileUrl,
+        reason: 'missing_source_evidence',
+        reasonDetail: 'The indexed snippet did not expose a usable public profile name.',
+        observedAt,
+        searchable,
+        location: preliminaryLocation,
+      }),
+    };
+  }
+
+  const { stateCode, city, zip } = preliminaryLocation;
+  const website = extractExternalWebsite(searchable);
+  const email = extractEmail(searchable);
+  const claim = `Public search-index evidence exposed ${name}'s NotaryCafe profile, explicit ${request.companyType} relevance, deterministic location evidence, and a public US phone number. The profile page was not fetched by this worker.`;
+
+  return { lead: {
     id: createLeadId(profileUrl),
     name,
     organizationName: extractOrganizationName(searchable, name) || name,
@@ -823,12 +1032,18 @@ const toLead = (
     verifiedPhone: Boolean(phone),
     verifiedEmail: Boolean(email),
     scrapedAt: observedAt,
-  };
+  } };
 };
 
 const createProviderHealth = () =>
   new Map<string, ProviderHealth>(
-    searchSources.map((source) => [source.name, { attempts: 0, failures: 0, disabled: false, lastMessage: '' }]),
+    searchSources.map((source) => [source.name, {
+      attempts: 0,
+      failures: 0,
+      blocked: 0,
+      disabled: false,
+      lastMessage: '',
+    }]),
   );
 
 export const discoverUsLeadsFromNotaryCafeIndex = async ({
@@ -840,15 +1055,19 @@ export const discoverUsLeadsFromNotaryCafeIndex = async ({
   location: NormalizedUsLocation;
   deadlineMs?: number;
 }): Promise<NotaryCafeDiscoveryResult> => {
-  const isNotaryRequest = isNotaryCafeCategory(request.companyType);
   const queries = buildNotaryCafeSearchQueries(location, request.count, request.companyType);
   const health = createProviderHealth();
   const resultsByUrl = new Map<string, SearchResult & { url: string }>();
   const warnings: ProviderWarning[] = [];
   let queriesAttempted = 0;
+  let stoppedByDeadline = false;
 
   for (let queryIndex = 0; queryIndex < queries.length; queryIndex += 1) {
-    if (Date.now() >= deadlineMs || resultsByUrl.size >= maxResults) break;
+    if (Date.now() >= deadlineMs) {
+      stoppedByDeadline = true;
+      break;
+    }
+    if (resultsByUrl.size >= maxResults) break;
 
     const available = searchSources.filter((source) => !health.get(source.name)?.disabled);
     if (!available.length) break;
@@ -871,6 +1090,7 @@ export const discoverUsLeadsFromNotaryCafeIndex = async ({
         sourceHealth.attempts += 1;
         if (outcome.failure) {
           sourceHealth.failures += 1;
+          if (outcome.failure === 'blocked') sourceHealth.blocked += 1;
           sourceHealth.lastMessage = outcome.message ?? `${source.label} search failed.`;
           sourceHealth.disabled = sourceHealth.failures >= sourceFailureThreshold;
         }
@@ -910,39 +1130,53 @@ export const discoverUsLeadsFromNotaryCafeIndex = async ({
   }
 
   const observedAt = new Date().toISOString();
-  const leads = [...resultsByUrl.values()]
-    .map((result) => toLead(result, request, location, observedAt))
+  const classifications = [...resultsByUrl.values()].map((result) =>
+    classifyIndexedProfile(result, request, location, observedAt),
+  );
+  const leads = classifications
+    .map((classification) => classification.lead)
     .filter((lead): lead is Lead => Boolean(lead));
+  const reviewCandidates = [...new Map(
+    classifications
+      .map((classification) => classification.reviewCandidate)
+      .filter((candidate): candidate is ReviewCandidate => Boolean(candidate))
+      .map((candidate) => [candidate.id, candidate]),
+  ).values()].slice(0, maxResults);
 
-  if (!isNotaryRequest) {
+  if (!leads.length && resultsByUrl.size) {
     warnings.push({
       providerId,
       providerName,
-      message: `Indexed NotaryCafe cross-check completed for ${request.companyType}, but NotaryCafe profiles are only eligible for notary-category searches; unrelated profiles were not promoted.`,
-      severity: 'info',
-    });
-  } else if (!leads.length && resultsByUrl.size) {
-    warnings.push({
-      providerId,
-      providerName,
-      message: 'Indexed NotaryCafe profiles were found, but none exposed a parseable US phone in the public search result. No unverified records were promoted.',
+      message: `Indexed NotaryCafe search screened ${resultsByUrl.size} public profile${resultsByUrl.size === 1 ? '' : 's'} for ${request.companyType}; 0 matched the category, location, and public-phone gates. ${reviewCandidates.length} candidate${reviewCandidates.length === 1 ? '' : 's'} retained for review.`,
       severity: 'info',
     });
   }
 
   if (!leads.length && !resultsByUrl.size && [...health.values()].every((source) => source.disabled)) {
-    throw new Error('All public search-index providers were blocked or unavailable; NotaryCafe direct access was not attempted.');
+    warnings.push({
+      providerId,
+      providerName,
+      message: 'All indexed public-search providers were blocked or unavailable. NotaryCafe direct access was not attempted and no access control was bypassed.',
+      severity: 'info',
+    });
   }
 
   const acceptedLeads = leads.slice(0, Math.min(maxResults, Math.max(request.count * 3, request.count)));
+  const deferredQueries = stoppedByDeadline ? Math.max(0, queries.length - queriesAttempted) : 0;
+  const blockedProviders = [...health.values()].filter((source) => source.blocked > 0).length;
 
   return {
     leads: acceptedLeads,
+    reviewCandidates,
     warnings,
     coverage: {
       queriesAttempted,
       providersChecked: [...health.values()].filter((source) => source.attempts > 0).length,
+      observedCandidates: resultsByUrl.size,
       acceptedCandidates: acceptedLeads.length,
+      reviewCandidates: reviewCandidates.length,
+      deferredQueries,
+      blockedProviders,
     },
   } satisfies NotaryCafeDiscoveryResult;
 };

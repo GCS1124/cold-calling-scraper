@@ -188,6 +188,8 @@ describe('search completion callback', () => {
       { ...request, callback: { url: 'https://hooks.example.com/lead-finder' } },
       { ownerId: 'owner-1' },
     );
+    await service.getSearch(started.searchId, { ownerId: 'owner-1' });
+    await service.getSearch(started.searchId, { ownerId: 'owner-1' });
     const completed = await service.getSearch(started.searchId, { ownerId: 'owner-1' });
     const replay = await service.getSearch(started.searchId, { ownerId: 'owner-1' });
 

@@ -68,6 +68,20 @@ describe('AI public source priority', () => {
       listingUrl: 'https://www.google.com/maps/place/public-lead',
       publicSocialLinks: undefined,
     };
+    const generic = {
+      ...baseLead,
+      id: 'generic',
+      source: 'OpenStreetMap, Public Business Listing',
+      listingUrl: 'https://www.openstreetmap.org/node/public-lead',
+      publicSocialLinks: undefined,
+    };
+    const website = {
+      ...baseLead,
+      id: 'website',
+      source: 'Public Website Enrichment',
+      listingUrl: 'https://public-lead.example/contact',
+      publicSocialLinks: undefined,
+    };
 
     expect(getPublicSourcePriority(notary)).toBe(1);
     expect(getPublicSourcePriority(baseLead)).toBe(2);
@@ -75,13 +89,15 @@ describe('AI public source priority', () => {
     expect(getPublicSourceOrder(baseLead)).toBe(2);
     expect(getPublicSourceOrder(yelp)).toBe(3);
     expect(getPublicSourceOrder(yellowPages)).toBe(4);
-    expect(getPublicSourceOrder(gemini)).toBe(5);
-    expect(getPublicSourceOrder(googlePlaces)).toBe(6);
-    expect(getPublicSourcePriority(fusion)).toBe(4);
-    expect(getPublicSourceOrder(fusion)).toBe(7);
+    expect(getPublicSourceOrder(generic)).toBe(5);
+    expect(getPublicSourceOrder(gemini)).toBe(6);
+    expect(getPublicSourceOrder(googlePlaces)).toBe(7);
+    expect(getPublicSourceOrder(website)).toBe(8);
+    expect(getPublicSourcePriority(fusion)).toBe(9);
+    expect(getPublicSourceOrder(fusion)).toBe(9);
     expect(comparePublicSourcePriority(notary, baseLead)).toBeLessThan(0);
     expect(comparePublicSourcePriority(googlePlaces, fusion)).toBeLessThan(0);
-    expect(publicLeadSourceOrderLabels[7]).toContain('fusion');
+    expect(publicLeadSourceOrderLabels[9]).toContain('fusion');
   });
 
   it('detects fusion from merged evidence even when the source label was normalized', () => {
@@ -101,10 +117,10 @@ describe('AI public source priority', () => {
       contactSourceUrl: undefined,
     };
 
-    expect(getPublicSourcePriority(fusedAfterMerge)).toBe(4);
-    expect(getPublicSourcePriority(businessOnly)).toBe(3);
-    expect(getPublicSourceOrder(fusedAfterMerge)).toBe(7);
-    expect(getPublicSourceOrder(businessOnly)).toBe(6);
+    expect(getPublicSourcePriority(fusedAfterMerge)).toBe(9);
+    expect(getPublicSourcePriority(businessOnly)).toBe(7);
+    expect(getPublicSourceOrder(fusedAfterMerge)).toBe(9);
+    expect(getPublicSourceOrder(businessOnly)).toBe(7);
   });
 
   it('recognizes notary-related request language without widening unrelated categories', () => {
@@ -131,8 +147,8 @@ describe('AI public source priority', () => {
       'linkedin-public-search',
       'yelp-public-directory',
       'yellow-pages-public-directory',
-      'gemini-public-discovery',
       'public-business-listings',
+      'gemini-public-discovery',
       'google-places-ai',
       'linkedin-public-google-business-fusion',
       'apollo-audit',

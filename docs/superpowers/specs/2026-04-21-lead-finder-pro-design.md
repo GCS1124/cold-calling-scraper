@@ -94,8 +94,8 @@ export type Lead = {
 
 1. User submits `companyType`, `city`, and `count`
 2. Backend validates input
-3. Gemini expands the human query into provider-friendly search terms
-4. Providers run in parallel with concurrency limits and timeouts
+3. Deterministic category, role, and location lenses are prepared; one grounded Gemini pass may use them
+4. Providers run in bounded, independently scheduled stages with concurrency limits and timeouts
 5. Results are normalized to the shared lead schema
 6. Deduplication merges overlapping leads
 7. Validation updates booleans and confidence
@@ -105,7 +105,7 @@ export type Lead = {
 
 - Every provider has a timeout
 - Provider failures do not fail the full request
-- Query expansion is optional and falls back to the raw query
+- Deterministic query lenses do not require a second Gemini request
 - Deduplication is deterministic
 - Validation is deterministic
 
