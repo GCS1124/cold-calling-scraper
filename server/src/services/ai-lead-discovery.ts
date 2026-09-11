@@ -574,6 +574,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
                 error instanceof Error
                   ? `${error.message} Other public results were preserved.`
                   : 'Public business-listing discovery failed. Other public results were preserved.',
+              severity: isTimeoutFailure(error) ? 'info' : 'warning',
             });
             updateCoverage(coverage, 'public-business-listings', {
               status: isTimeoutFailure(error) ? 'partial' : 'failed',
@@ -754,7 +755,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
               providerId: 'gemini-public-discovery',
               providerName: 'Gemini public discovery',
               message,
-              severity: 'warning',
+              severity: timedOut || rateLimited ? 'info' : 'warning',
             });
             updateCoverage(coverage, 'gemini-public-discovery', {
               status: timedOut || rateLimited ? 'partial' : 'failed',
@@ -808,6 +809,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
             error instanceof Error
               ? `${error.message} No unverified leads were added.`
               : 'Free public discovery failed. No unverified leads were added.',
+          severity: isTimeoutFailure(error) ? 'info' : 'warning',
         });
         updateCoverage(coverage, 'linkedin-public-search', {
           status: 'failed',
@@ -1005,6 +1007,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
             error instanceof Error
               ? `${error.message} Public profiles were preserved; contact fields may be incomplete.`
               : 'Public website enrichment failed. Public profiles were preserved; contact fields may be incomplete.',
+          severity: isTimeoutFailure(error) ? 'info' : 'warning',
         });
         updateCoverage(coverage, 'public-website-enrichment', {
           status: 'failed',

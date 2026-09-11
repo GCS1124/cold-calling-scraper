@@ -2164,12 +2164,16 @@ const buildProviderHealthWarnings = (providerHealth: Map<string, ProviderHealth>
     const continuation = allProvidersDisabled
       ? 'No public-search fallback remained available.'
       : 'Discovery continued with available fallback providers.';
+    const severity: NonNullable<ProviderWarning['severity']> = allProvidersDisabled
+      ? 'warning'
+      : 'info';
 
     return [
       {
         providerId: `${providerId}-${source.name}`,
         providerName: source.label,
         message: `${source.label} ${status} (${health.failures}/${health.attempts} attempts). ${continuation}`,
+        severity,
       },
     ];
   });

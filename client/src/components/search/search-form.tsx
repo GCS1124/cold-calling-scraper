@@ -140,21 +140,21 @@ export function SearchForm({
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">3 · LinkedIn + GMB fusion</p>
+                <p className="text-sm font-bold">3 · Other public sources</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Business identity and public phone corroboration
+                  OSM, Yelp, Yellow Pages, websites, and public context
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">4 · Other public sources</p>
-                <p className="mt-1 text-xs leading-5 text-slate-400">
-                  OSM, Yelp, Yellow Pages, websites, and bounded context
-                </p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-sm font-bold">5 · Gemini grounding</p>
+                <p className="text-sm font-bold">4 · Gemini grounding</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">
                   Multi-lens public research, never guessed details
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-sm font-bold">5 · LinkedIn + GMB fusion</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  Final corroboration tier for business identity and phone
                 </p>
               </div>
             </div>
@@ -198,7 +198,7 @@ export function SearchForm({
                   Notary priority route active
                 </p>
                 <p className="mt-1 text-xs leading-5 text-slate-200">
-                  1 NotaryCafe indexed profile evidence → 2 public LinkedIn → 3 LinkedIn + Google Business fusion. Direct NotaryCafe access stays disabled; only public-index evidence with a phone can qualify.
+                  1 NotaryCafe indexed profile evidence → 2 public LinkedIn → 3 generic public sources → 4 LinkedIn + Google Business fusion last. Direct NotaryCafe access stays disabled; only public-index evidence with a phone can qualify.
                 </p>
               </div>
             ) : null}

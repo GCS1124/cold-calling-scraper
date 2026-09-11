@@ -18,7 +18,7 @@ const modeCopy = {
   ai: {
     title: 'AI mode coverage',
     description:
-      'AI mode checks the four public-source tiers in a stable order: indexed NotaryCafe evidence, pure public LinkedIn, LinkedIn + Google Business fusion, then other sources including OSM, Yelp, Yellow Pages, websites, and Gemini-grounded research. NotaryCafe is queried as a bounded cross-check on every AI search, but only relevant notary profiles with public phones can qualify. Commercial lead databases are audited but never called.',
+      'AI mode checks the four public-source tiers in a stable order: indexed NotaryCafe evidence, pure public LinkedIn, other sources including OSM, Yelp, Yellow Pages, websites, and Gemini-grounded research, then LinkedIn + Google Business fusion last. NotaryCafe is queried as a bounded cross-check on every AI search, but only relevant notary profiles with public phones can qualify. Commercial lead databases are audited but never called.',
     badge: 'Public-source fusion',
   },
 } as const;
@@ -97,10 +97,10 @@ export function ProviderCoveragePanel({ coverage, mode }: ProviderCoveragePanelP
               <span className="font-black">2</span> · Pure public LinkedIn evidence
             </div>
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
-              <span className="font-black">3</span> · LinkedIn + Google Business fusion
+              <span className="font-black">3</span> · Other public sources
             </div>
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
-              <span className="font-black">4</span> · Other public sources
+              <span className="font-black">4</span> · LinkedIn + Google Business fusion
             </div>
           </div>
           <p className="mt-2 text-[11px] leading-4 text-slate-500">

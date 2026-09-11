@@ -174,8 +174,8 @@ describe('phone requirement', () => {
     expect(result.leads.map((lead) => lead.id)).toEqual([
       'sequence-notarycafe',
       'sequence-linkedin',
-      'sequence-fusion',
       'sequence-other',
+      'sequence-fusion',
     ]);
   });
 });

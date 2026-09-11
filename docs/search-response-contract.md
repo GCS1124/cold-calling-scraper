@@ -98,6 +98,12 @@ Cloudflare challenge, timeout, or empty response becomes provider coverage and
 does not stop the other sources. India-oriented adapters are not part of the US
 workflow.
 
+AI lead display order is deterministic across the server and client: indexed
+NotaryCafe evidence first, pure public LinkedIn evidence second, generic public
+evidence third, and LinkedIn plus Google Business fusion last. This ordering is
+only a presentation preference; every visible lead still must pass the public
+US-phone and evidence gates.
+
 ## HTTP errors and tracing
 
 Vercel search and evidence routes preserve the human-readable `error` string

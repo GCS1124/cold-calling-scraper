@@ -8,6 +8,7 @@ import { normalizeContactPhone } from './contact-evidence';
 import { readResponseTextBounded } from '../utils/bounded-fetch';
 import { isNotaryCafeHost, isPublicHttpUrl } from '../utils/public-url';
 import { usStateCodes, usStateNames, type UsStateCode } from '../data/us-states';
+import { getPublicLeadSourcePriority } from '../../../shared/source-priority';
 
 type SearchResult = {
   title: string;
@@ -51,49 +52,23 @@ const providerName = 'NotaryCafe, Indexed Public Search';
 const publicSearchPageSize = 10;
 const sourceFailureThreshold = 2;
 
-const notaryCafeSourcePattern = /\bnotary\s*cafe\b/i;
-const linkedInSourcePattern = /\blinkedIn\b/i;
-const googleBusinessSourcePattern = /\bgoogle\s*(?:places|business|maps)\b/i;
-
 /**
  * The product's notary ordering is deliberately explicit:
  *
  * 1. NotaryCafe indexed evidence
  * 2. Pure public LinkedIn evidence
- * 3. LinkedIn + Google Business fusion
- * 4. Other public candidates
+ * 3. Other public candidates
+ * 4. LinkedIn + Google Business fusion
  *
  * This is an ordering preference, not a relaxation of the public-phone,
  * location, or evidence gates.
  */
 export const isNotaryCafeLead = (lead: Lead) => {
-  const source = typeof lead?.source === 'string' ? lead.source : '';
-  const urls = [lead?.listingUrl, lead?.contactSourceUrl, lead?.decisionMakerSourceUrl, lead?.website]
-    .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()));
-
-  return notaryCafeSourcePattern.test(source) || urls.some((url) => isNotaryCafeHost(url));
+  return getPublicLeadSourcePriority(lead) === 1;
 };
 
-const hasLinkedInEvidence = (source: string, urls: string[]) =>
-  linkedInSourcePattern.test(source) || urls.some((url) => /(?:^|\/\/)(?:www\.)?linkedin\.com\/(?:in|pub)\//i.test(url));
-
-const hasGoogleBusinessEvidence = (source: string, urls: string[]) =>
-  googleBusinessSourcePattern.test(source) || urls.some((url) =>
-    /(?:google\.[^/]+\/maps\b|maps\.google\.)/i.test(url),
-  );
-
 export const getNotaryCafeEvidencePriority = (lead: Lead) => {
-  const source = typeof lead?.source === 'string' ? lead.source : '';
-  const urls = [lead?.listingUrl, lead?.contactSourceUrl, lead?.decisionMakerSourceUrl, lead?.website]
-    .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()));
-
-  if (isNotaryCafeLead(lead)) return 1;
-
-  const hasLinkedIn = hasLinkedInEvidence(source, urls);
-  const hasGoogleBusiness = hasGoogleBusinessEvidence(source, urls);
-  if (hasLinkedIn && hasGoogleBusiness) return 3;
-  if (hasLinkedIn) return 2;
-  return 4;
+  return getPublicLeadSourcePriority(lead);
 };
 
 export const isNotaryCafeCategory = (value: unknown) =>
@@ -125,8 +100,9 @@ export const prioritizeNotaryCafeLeads = (
 
 /**
  * Apply the complete AI display sequence, regardless of category:
- * NotaryCafe indexed evidence, pure LinkedIn, LinkedIn plus Google Business,
- * then every other public source. The caller is responsible for eligibility.
+ * NotaryCafe indexed evidence, pure LinkedIn, generic public sources, then
+ * LinkedIn plus Google Business fusion. The caller is responsible for
+ * eligibility.
  */
 export const prioritizeAiLeadSources = (leads: Lead[]) => {
   const safeLeads = Array.isArray(leads) ? leads : [];
@@ -924,6 +900,7 @@ export const discoverUsLeadsFromNotaryCafeIndex = async ({
         providerId: `${providerId}-${source.name}`,
         providerName: source.label,
         message: `${source.label} was unavailable for part of the indexed NotaryCafe search (${sourceHealth.failures}/${sourceHealth.attempts} attempts).`,
+        severity: 'info',
       });
     }
   }

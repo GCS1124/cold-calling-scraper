@@ -352,7 +352,7 @@ describe('free AI lead discovery', () => {
     );
   });
 
-  it('prioritizes NotaryCafe evidence before LinkedIn and GMB plus LinkedIn fusion', async () => {
+  it('prioritizes NotaryCafe, pure LinkedIn, generic public evidence, then fusion', async () => {
     const notaryCafe = makeLead({
       id: 'notarycafe-priority',
       name: 'NotaryCafe Priority',
@@ -414,6 +414,30 @@ describe('free AI lead discovery', () => {
         association: 'business',
       }],
     });
+    const generic = makeLead({
+      id: 'generic-priority',
+      name: 'Generic Public Priority',
+      category: 'Notary Public',
+      organizationName: 'Generic Public Priority',
+      headline: undefined,
+      source: 'OpenStreetMap, Public Business Listing',
+      listingUrl: 'https://www.openstreetmap.org/node/generic-priority',
+      contactSourceUrl: 'https://www.openstreetmap.org/node/generic-priority',
+      website: 'https://generic-public-priority.example',
+      mobile: '+1 512 555 0104',
+      hasPhone: true,
+      verifiedPhone: true,
+      confidence: 65,
+      sourceScore: 65,
+      contactEvidence: [{
+        field: 'phone',
+        value: '+1 512 555 0104',
+        sourceUrl: 'https://www.openstreetmap.org/node/generic-priority',
+        sourceName: 'OpenStreetMap, Public Business Listing',
+        sourceKind: 'business_listing',
+        association: 'business',
+      }],
+    });
 
     const result = await createAiLeadDiscovery({
       discoverLinkedin: vi.fn().mockResolvedValue({
@@ -426,6 +450,7 @@ describe('free AI lead discovery', () => {
         warnings: [],
         coverage: { queriesAttempted: 1, providersChecked: 1, acceptedCandidates: 1 },
       }) as never,
+      discoverPublicListings: vi.fn().mockResolvedValue([generic]) as never,
       enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
         leads,
         warnings: [],
@@ -436,9 +461,10 @@ describe('free AI lead discovery', () => {
       location,
     });
 
-    expect(result.leads.slice(0, 3).map((lead) => lead.id)).toEqual([
+    expect(result.leads.slice(0, 4).map((lead) => lead.id)).toEqual([
       'notarycafe-priority',
       'linkedin-priority',
+      'generic-priority',
       'gmb-linkedin-priority',
     ]);
   });

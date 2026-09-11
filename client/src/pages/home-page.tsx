@@ -54,6 +54,7 @@ import {
   isHighFitLinkedInLead,
   type LinkedInSortMode,
 } from '../utils/linkedin-quality';
+import { normalizeProviderWarningsForDisplay } from '../utils/provider-warnings';
 import { comparePublicSourcePriority } from '../utils/source-priority';
 import { sourceModeLabelsByCode } from '../data/search-options';
 import type { Lead, SearchDraft, SearchRequest, SearchResponse } from '../types/lead';
@@ -248,12 +249,15 @@ export function HomePage({ searchApi }: HomePageProps) {
   const publicQueryFamilies = result?.meta.progress.publicQueryFamilies ?? [];
   const publicQueryFamilyCounts = result?.meta.progress.publicQueryFamilyCounts ?? {};
   const providerCoverage = result?.meta.progress.providerCoverage ?? [];
-  const displayedProviderWarnings =
+  const rawDisplayedProviderWarnings =
     activeSourceMode === 'ai'
       ? (result?.meta.providerWarnings ?? []).filter(
           (warning) => warning.providerId !== 'ai-mode-policy',
         )
       : result?.meta.providerWarnings ?? [];
+  const displayedProviderWarnings = normalizeProviderWarningsForDisplay(
+    rawDisplayedProviderWarnings,
+  );
   const phoneRequirementWarning = Boolean(
     result?.meta.providerWarnings.some((warning) => warning.providerId === 'phone-required'),
   );
@@ -272,10 +276,8 @@ export function HomePage({ searchApi }: HomePageProps) {
       ),
   );
   const providerFailureNotice = Boolean(
-    result?.meta.providerWarnings.some(
-      (warning) =>
-        warning.severity === 'error' ||
-        /failed|blocked|rate-limited|timed out|timeout/i.test(warning.message),
+    displayedProviderWarnings.some(
+      (warning) => warning.severity === 'error' || warning.severity === 'warning',
     ),
   );
   const resultsExhausted =
@@ -1000,10 +1002,10 @@ export function HomePage({ searchApi }: HomePageProps) {
                       <p className="font-bold">
                         {publicDiscoveryBlocked
                           ? 'Public source access constrained'
-                          : activeSourceMode === 'ai'
-                            ? 'Public source notices'
-                            : providerNoticesAreInformational
-                              ? 'Provider notes'
+                          : providerNoticesAreInformational
+                            ? 'Provider notes'
+                            : activeSourceMode === 'ai'
+                              ? 'Public source notices'
                               : 'Provider notices'}
                       </p>
                       <ul

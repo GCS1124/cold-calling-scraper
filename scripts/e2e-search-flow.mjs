@@ -214,6 +214,14 @@ const makeResponse = (mode, failed = false) => ({
             providerName: 'AI mode',
             message: 'Free AI mode does not use paid databases.',
             severity: 'info',
+          }, {
+            providerId: 'notarycafe-indexed-search-brave',
+            providerName: 'Brave Search',
+            message: 'Brave Search was unavailable for part of the indexed NotaryCafe search.',
+          }, {
+            providerId: 'linkedin-search-brave',
+            providerName: 'Brave Search',
+            message: 'Brave Search was paused after repeated failures. Discovery continued with available fallback providers.',
           }]
         : [],
   },
@@ -311,12 +319,14 @@ const run = async () => {
     assert(await page.getByText('Public Business Listings').count() === 1, 'AI public listing coverage is missing');
     assert(await page.getByText('Yelp, Public Directory', { exact: true }).count() === 1, 'AI Yelp coverage is missing');
     assert(await page.getByText('Yellow Pages, Public Directory', { exact: true }).count() === 1, 'AI Yellow Pages coverage is missing');
+    assert(await page.getByText('Provider notes', { exact: true }).count() === 1, 'Handled provider notes are not informational');
+    assert(await page.getByText(/2 handled Brave Search status updates/i).count() === 1, 'Repeated search-engine notices were not consolidated');
     const aiRows = await page.locator('tbody tr').allTextContents();
     const requiredOrder = [
       'NotaryCafe Public Lead',
       'ai Public Lead',
-      'AI LinkedIn Google Lead',
       'AI Other Public Lead',
+      'AI LinkedIn Google Lead',
     ];
     let lastRowIndex = -1;
     for (const expectedLead of requiredOrder) {
@@ -327,8 +337,8 @@ const run = async () => {
     for (const priorityLabel of [
       '1 · NotaryCafe indexed evidence',
       '2 · Pure public LinkedIn evidence',
-      '3 · LinkedIn + Google Business fusion',
-      '4 · Other public evidence',
+      '3 · Other public evidence',
+      '4 · LinkedIn + Google Business fusion',
     ]) {
       const escapedLabel = priorityLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       assert(await page.locator('tbody').getByText(new RegExp(`^${escapedLabel}$`, 'i')).count() === 1, `Missing visible source tier: ${priorityLabel}`);
