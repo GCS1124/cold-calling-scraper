@@ -180,6 +180,34 @@ describe('contact attribution and identity', () => {
     });
   });
 
+  it('prefers the Google Business listing when several public directories corroborate one profile', () => {
+    const person = lead({
+      id: 'public-owner-multi-source',
+      name: 'Avery Smith',
+      organizationName: 'Alpha Dental',
+      listingUrl: 'https://www.linkedin.com/in/avery-smith',
+      mobile: '',
+      hasPhone: false,
+      verifiedPhone: false,
+      source: 'LinkedIn, Public Profile',
+    });
+    const yelpListing = lead({
+      id: 'alpha-yelp',
+      source: 'Yelp',
+      listingUrl: 'https://www.yelp.com/biz/alpha-dental',
+      contactSourceUrl: 'https://www.yelp.com/biz/alpha-dental',
+    });
+
+    const [merged] = bridgeLinkedInWithPublicListings([person], [yelpListing, lead()]);
+
+    expect(merged).toMatchObject({
+      listingUrl: 'https://www.linkedin.com/in/avery-smith',
+      contactSourceUrl: 'https://www.google.com/maps/place/alpha',
+      organizationName: 'Alpha Dental',
+    });
+    expect(merged?.source).toContain('Google Places');
+  });
+
   it.each(['former', 'conflicting'] as const)('does not attach an employer phone to a %s role', (employmentStatus) => {
     const person = lead({ mobile: '', hasPhone: false, listingUrl: 'https://linkedin.com/in/owner', employmentStatus });
     expect(bridgeLinkedInWithPublicListings([person], [lead()])[0]?.mobile).toBe('');

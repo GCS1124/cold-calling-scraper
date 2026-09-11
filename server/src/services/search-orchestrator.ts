@@ -720,9 +720,9 @@ const runRegionalDiscovery = async (
         const coverage = result.coverage.map((entry) => ({
           ...entry,
           leadCount: entry.providerId === 'yelp-public-directory'
-            ? acceptedDirectoryLeads.filter((lead) => lead.source === 'Yelp').length
+            ? acceptedDirectoryLeads.filter((lead) => lead.source.trim().toLowerCase().includes('yelp')).length
             : entry.providerId === 'yellow-pages-public-directory'
-              ? acceptedDirectoryLeads.filter((lead) => lead.source === 'Yellow Pages').length
+              ? acceptedDirectoryLeads.filter((lead) => lead.source.trim().toLowerCase().includes('yellow pages')).length
               : entry.leadCount,
         }));
         recordProviderCoverage(job.progress, coverage);

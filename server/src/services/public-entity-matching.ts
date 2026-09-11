@@ -60,54 +60,133 @@ export const extractOrganizationHint = (headline?: unknown) => {
   return (match?.[1] ?? '').replace(/\s*[-|].*$/g, '').trim();
 };
 
-const sameLocation = (person: Lead, listing: Lead) => {
-  const personCity = normalizeText(person.city);
-  const listingLocations = [listing.city, listing.address].map(normalizeText).filter(Boolean);
+const broadLocationPattern = /\b(?:eastern|central|mountain|pacific)\s+time(?:\s+zone)?\b|\b(?:nationwide|united states|usa)\b/i;
 
+const extractComparableCity = (value: unknown, stateCode?: string) => {
+  const normalized = normalizeText(value);
+  if (!normalized || broadLocationPattern.test(normalized)) return '';
+
+  const withoutZip = normalized.replace(/\b\d{5}(?:-\d{4})?\b/g, '').trim();
+  const segments = withoutZip.split(/\s*,\s*/).map((segment) => segment.trim()).filter(Boolean);
+  const normalizedState = normalizeText(stateCode);
+
+  if (normalizedState) {
+    const stateIndex = segments.findIndex((segment) =>
+      segment === normalizedState || segment.split(' ').includes(normalizedState),
+    );
+    if (stateIndex > 0) {
+      return normalizeText(segments[stateIndex - 1]);
+    }
+  }
+
+  return normalizeText(segments[0] ?? withoutZip);
+};
+
+const sameLocation = (person: Lead, listing: Lead) => {
+  const personCity = extractComparableCity(person.city, person.stateCode);
+  const listingLocations = [listing.city, listing.address]
+    .map((value) => extractComparableCity(value, listing.stateCode))
+    .filter(Boolean);
+
+  // A broad timezone/nationwide label is intentionally non-specific. State
+  // conflicts are still rejected by the match scorer below, while concrete
+  // address/city evidence can establish the bridge.
   return (
     !personCity ||
     !listingLocations.length ||
     listingLocations.some(
       (listingLocation) =>
-        personCity.includes(listingLocation) || listingLocation.includes(personCity),
+        personCity === listingLocation ||
+        personCity.includes(listingLocation) ||
+        listingLocation.includes(personCity),
     )
   );
 };
 
-const hasStrongOrganizationMatch = (person: Lead, listing: Lead) => {
-  if (['former', 'conflicting'].includes(person.employmentStatus ?? '')) return false;
-  if (person.stateCode && listing.stateCode && person.stateCode !== listing.stateCode) return false;
+const isGoogleBusinessListing = (listing: Lead) =>
+  /\b(?:google\s*(?:places|business|maps)|gmb)\b|maps\.google\./i.test(
+    [listing.source, listing.listingUrl, listing.contactSourceUrl].filter(Boolean).join(' '),
+  );
+
+const listingSourceBoost = (listing: Lead) => {
+  if (isGoogleBusinessListing(listing)) return 16;
+  if (/\byelp\b/i.test(listing.source)) return 6;
+  if (/\byellow\s*pages\b/i.test(listing.source)) return 5;
+  if (/\bnotary\s*cafe\b/i.test(listing.source)) return 2;
+  return 3;
+};
+
+type OrganizationMatch = {
+  listing: Lead;
+  score: number;
+  exactDomain: boolean;
+};
+
+const scoreOrganizationMatch = (person: Lead, listing: Lead): OrganizationMatch | undefined => {
+  if (['former', 'conflicting'].includes(person.employmentStatus ?? '')) return undefined;
+  if (
+    person.stateCode &&
+    listing.stateCode &&
+    person.stateCode.trim().toUpperCase() !== listing.stateCode.trim().toUpperCase()
+  ) return undefined;
 
   const personDomain = toDomain(person.website);
   const listingDomain = toDomain(listing.website);
+  const exactDomain = Boolean(personDomain && listingDomain && personDomain === listingDomain);
+  if (personDomain && listingDomain && !exactDomain) return undefined;
 
-  // An exact public company domain is stronger than a broad or differently
-  // formatted location string (for example, a profile in Miami matched to a
-  // timezone-scoped listing). State conflicts were rejected above.
-  if (personDomain && listingDomain) {
-    return personDomain === listingDomain;
-  }
-
-  if (!sameLocation(person, listing)) {
-    return false;
-  }
+  const locationMatched = sameLocation(person, listing);
+  if (!exactDomain && !locationMatched) return undefined;
 
   const organization = person.organizationName || extractOrganizationHint(person.headline);
-  if (!organization) {
-    return false;
-  }
-
   const organizationTokens = new Set(toTokens(organization));
   const listingTokens = new Set(toTokens(listing.name));
+  const overlap = organizationTokens.size && listingTokens.size
+    ? [...organizationTokens].filter((token) => listingTokens.has(token)).length
+    : 0;
+  const coverage = organizationTokens.size && listingTokens.size
+    ? overlap / Math.max(organizationTokens.size, listingTokens.size)
+    : 0;
 
-  if (!organizationTokens.size || !listingTokens.size) {
-    return false;
+  if (!exactDomain && (!organizationTokens.size || !listingTokens.size || coverage < 0.75)) {
+    return undefined;
   }
 
-  const overlap = [...organizationTokens].filter((token) => listingTokens.has(token)).length;
-  const coverage = overlap / Math.max(organizationTokens.size, listingTokens.size);
+  let score = exactDomain ? 100 : 65 + Math.round(coverage * 30);
+  if (locationMatched) score += 18;
+  if (coverage >= 0.75) score += 15;
+  if (normalizeText(organization) && normalizeText(organization) === normalizeText(listing.name)) {
+    score += 10;
+  }
+  score += listingSourceBoost(listing);
 
-  return coverage >= 0.75;
+  return { listing, score, exactDomain };
+};
+
+const hasPublicLinkedInEvidence = (lead: Lead) => {
+  const providerText = [
+    lead.source,
+    ...(Array.isArray(lead.publicEvidence?.sources)
+      ? lead.publicEvidence.sources.map((source) => source.providerName)
+      : []),
+    ...(Array.isArray(lead.evidence)
+      ? lead.evidence.map((item) => item?.sourceName)
+      : []),
+  ].filter((value): value is string => typeof value === 'string').join(' ');
+
+  return /\blink(?:ed\s*-?in)\b/i.test(providerText) || [
+    lead.listingUrl,
+    lead.contactSourceUrl,
+    lead.decisionMakerSourceUrl,
+  ].some((value) => isLinkedInProfileListing(value));
+};
+
+const listingIdentityKey = (listing: Lead) => {
+  const domain = toDomain(listing.website);
+  const phone = asString(listing.mobile).replace(/\D/g, '');
+  const city = extractComparableCity(listing.city, listing.stateCode) ||
+    extractComparableCity(listing.address, listing.stateCode);
+  return [domain || normalizeText(listing.name), city, phone].filter(Boolean).join('|');
 };
 
 const mergeSocialLinks = (person: Lead, listing: Lead): PublicSocialLink[] => {
@@ -236,19 +315,32 @@ const matchLinkedInPeopleToPublicListings = (
   const safePublicListingLeads = (Array.isArray(publicListingLeads) ? publicListingLeads : []).filter(isLeadRecord);
   const usedListingIds = new Set<string>();
   const mergedPeople = safeLinkedInLeads.map((person) => {
-    const matches = safePublicListingLeads.filter(
-      (listing) => hasStrongOrganizationMatch(person, listing),
-    );
-
-    if (matches.length !== 1) {
+    // Gemini can return business candidates, but the final fusion stage is
+    // specifically a public LinkedIn-to-business bridge. Keep non-LinkedIn
+    // Gemini records in their own tier until they have an actual public
+    // LinkedIn profile URL or provider signal.
+    if (!hasPublicLinkedInEvidence(person)) {
       return person;
     }
 
-    const [listing] = matches;
-    if (!listing) return person;
+    const matches = safePublicListingLeads
+      .map((listing) => scoreOrganizationMatch(person, listing))
+      .filter((match): match is OrganizationMatch => Boolean(match))
+      .sort((left, right) => right.score - left.score);
+    const best = matches[0];
+    const second = matches[1];
 
-    usedListingIds.add(listing.id);
-    return mergePersonWithListing(person, listing);
+    if (!best) return person;
+
+    const isDuplicateListing = Boolean(
+      second && listingIdentityKey(best.listing) &&
+        listingIdentityKey(best.listing) === listingIdentityKey(second.listing),
+    );
+    const hasClearWinner = !second || isDuplicateListing || best.score - second.score >= 10;
+    if (!hasClearWinner) return person;
+
+    usedListingIds.add(best.listing.id);
+    return mergePersonWithListing(person, best.listing);
   });
 
   return { mergedPeople, usedListingIds, safePublicListingLeads };

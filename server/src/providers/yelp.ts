@@ -1,12 +1,13 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import type { Cheerio } from 'cheerio';
+import type { Cheerio, CheerioAPI } from 'cheerio';
 import type { AnyNode } from 'domhandler';
 
 import type { Lead } from '../types/lead';
 import { normalizeContactPhone } from '../services/contact-evidence';
 import { publicProviderAxiosLimits } from '../utils/provider-http-limits';
 import {
+  buildStableProviderLeadId,
   buildDirectoryPhoneEvidence,
   buildProviderSearchUrl,
   extractDirectoryPhone,
@@ -33,6 +34,34 @@ const pickPhone = (scope: Cheerio<AnyNode>, structuredPhone?: string) =>
     structuredPhone,
     scope.text(),
   );
+
+const getYelpCardElements = ($: CheerioAPI) => {
+  const preferred = $('[data-testid="serp-ia-card"]')
+    .filter((_, element) => $(element).parents('[data-testid="serp-ia-card"]').length === 0)
+    .toArray();
+  const fallback = preferred.length
+    ? preferred
+    : $('.businessName').map((_, element) => {
+        const root = $(element).closest('li, article, [role="article"]').first();
+        return root.length ? root[0] : element;
+      }).get();
+  const seen = new Set<AnyNode>();
+
+  return fallback.filter((element) => {
+    if (!element || seen.has(element)) return false;
+    seen.add(element);
+    return true;
+  });
+};
+
+const chooseBetterLead = (current: Lead, incoming: Lead) => {
+  const score = (lead: Lead) =>
+    Number(Boolean(lead.mobile)) * 4 +
+    Number(Boolean(lead.website)) * 2 +
+    Number(Boolean(lead.address));
+
+  return score(incoming) > score(current) ? incoming : current;
+};
 
 export const yelpProvider: LeadProvider = {
   id: 'yelp',
@@ -63,18 +92,19 @@ export const yelpProvider: LeadProvider = {
     }
 
     const $ = cheerio.load(body);
-    const cards = $('li[data-testid="serp-ia-card"], .businessName').slice(0, request.count);
+    const cards = getYelpCardElements($);
     const structured = extractStructuredDirectoryEntities(
       $('script[type="application/ld+json"]').map((_, element) => $(element).text()).get(),
     );
     const observedAt = new Date().toISOString();
 
-    return cards
-      .map((index, element) => {
-        const scope = $(element).is('li') ? $(element) : $(element).closest('li');
+    const parsedLeads = cards
+      .map((element) => {
+        const scope = $(element);
         const name =
           scope.find('a[href*="/biz/"]').first().text().trim() ||
-          scope.find('.businessName').first().text().trim();
+          scope.find('.businessName').first().text().trim() ||
+          (scope.is('.businessName') ? scope.text().trim() : '');
 
         if (!name) {
           return null;
@@ -94,6 +124,7 @@ export const yelpProvider: LeadProvider = {
           yelpSearchUrl,
           /\/biz\//i,
           searchUrl,
+          yelpBlockedHosts,
         );
         const contactEvidence = buildDirectoryPhoneEvidence({
           phone,
@@ -103,7 +134,13 @@ export const yelpProvider: LeadProvider = {
         });
 
         const lead: Lead = {
-          id: `yelp-${request.city}-${index}`,
+          id: buildStableProviderLeadId('yelp', [
+            listingUrl !== searchUrl ? listingUrl : undefined,
+            name,
+            phone,
+            address,
+            request.city,
+          ]),
           name,
           mobile: phone,
           email: '',
@@ -127,7 +164,19 @@ export const yelpProvider: LeadProvider = {
 
         return lead;
       })
-      .get()
       .filter((lead): lead is Lead => Boolean(lead));
+
+    const deduped = new Map<string, Lead>();
+    for (const lead of parsedLeads) {
+      const key = lead.listingUrl && lead.listingUrl !== searchUrl
+        ? `url:${lead.listingUrl.toLowerCase()}`
+        : `record:${[lead.name, lead.mobile, lead.address]
+            .map((value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' '))
+            .join('|')}`;
+      const previous = deduped.get(key);
+      deduped.set(key, previous ? chooseBetterLead(previous, lead) : lead);
+    }
+
+    return [...deduped.values()].slice(0, request.count);
   },
 };

@@ -1,12 +1,13 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import type { Cheerio } from 'cheerio';
-import type { Element } from 'domhandler';
+import type { Cheerio, CheerioAPI } from 'cheerio';
+import type { AnyNode } from 'domhandler';
 
 import type { Lead } from '../types/lead';
 import { normalizeContactPhone } from '../services/contact-evidence';
 import { publicProviderAxiosLimits } from '../utils/provider-http-limits';
 import {
+  buildStableProviderLeadId,
   buildDirectoryPhoneEvidence,
   buildProviderSearchUrl,
   extractDirectoryPhone,
@@ -26,13 +27,46 @@ const isBlockedResponse = (status: number, body: string) =>
 const yellowPagesSearchUrl = 'https://www.yellowpages.com/search';
 const yellowPagesBlockedHosts = ['yellowpages.com'];
 
-const pickPhone = (scope: Cheerio<Element>, structuredPhone?: string) =>
+const pickPhone = (scope: Cheerio<AnyNode>, structuredPhone?: string) =>
   extractDirectoryPhone(
     scope.find('a[href^="tel:"]').first().attr('href'),
     scope.find('[data-phone], [data-testid*="phone"], .phone, .phones, [class*="phone"]').first().text(),
     structuredPhone,
     scope.text(),
   );
+
+const getYellowPagesCardElements = ($: CheerioAPI) => {
+  const resultCards = $('.result')
+    .filter((_, element) => $(element).parents('.result').length === 0)
+    .toArray();
+  const vCards = $('.v-card')
+    .filter((_, element) => $(element).parents('.v-card').length === 0)
+    .toArray();
+  const fallback = resultCards.length
+    ? resultCards
+    : vCards.length
+      ? vCards
+      : $('.business-name').map((_, element) => {
+          const root = $(element).closest('.result, .v-card, article, [role="article"]').first();
+          return root.length ? root[0] : element;
+        }).get();
+  const seen = new Set<AnyNode>();
+
+  return fallback.filter((element) => {
+    if (!element || seen.has(element)) return false;
+    seen.add(element);
+    return true;
+  });
+};
+
+const chooseBetterLead = (current: Lead, incoming: Lead) => {
+  const score = (lead: Lead) =>
+    Number(Boolean(lead.mobile)) * 4 +
+    Number(Boolean(lead.website)) * 2 +
+    Number(Boolean(lead.address));
+
+  return score(incoming) > score(current) ? incoming : current;
+};
 
 export const yellowPagesProvider: LeadProvider = {
   id: 'yellow-pages',
@@ -63,16 +97,18 @@ export const yellowPagesProvider: LeadProvider = {
     }
 
     const $ = cheerio.load(body);
-    const cards = $('.result, .v-card').slice(0, request.count);
+    const cards = getYellowPagesCardElements($);
     const structured = extractStructuredDirectoryEntities(
       $('script[type="application/ld+json"]').map((_, element) => $(element).text()).get(),
     );
     const observedAt = new Date().toISOString();
 
-    return cards
-      .map((index, element) => {
+    const parsedLeads = cards
+      .map((element) => {
         const scope = $(element);
-        const name = scope.find('.business-name, .n a, a.business-name').first().text().trim();
+        const name =
+          scope.find('.business-name, .n a, a.business-name').first().text().trim() ||
+          (scope.is('.business-name') ? scope.text().trim() : '');
         if (!name) {
           return null;
         }
@@ -95,6 +131,7 @@ export const yellowPagesProvider: LeadProvider = {
           yellowPagesSearchUrl,
           /\/(?:biz|mip)\//i,
           searchUrl,
+          yellowPagesBlockedHosts,
         );
         const contactEvidence = buildDirectoryPhoneEvidence({
           phone,
@@ -104,7 +141,13 @@ export const yellowPagesProvider: LeadProvider = {
         });
 
         const lead: Lead = {
-          id: `yellow-pages-${request.city}-${index}`,
+          id: buildStableProviderLeadId('yellow-pages', [
+            listingUrl !== searchUrl ? listingUrl : undefined,
+            name,
+            phone,
+            address,
+            request.city,
+          ]),
           name,
           mobile: phone,
           email: '',
@@ -128,7 +171,19 @@ export const yellowPagesProvider: LeadProvider = {
 
         return lead;
       })
-      .get()
       .filter((lead): lead is Lead => Boolean(lead));
+
+    const deduped = new Map<string, Lead>();
+    for (const lead of parsedLeads) {
+      const key = lead.listingUrl && lead.listingUrl !== searchUrl
+        ? `url:${lead.listingUrl.toLowerCase()}`
+        : `record:${[lead.name, lead.mobile, lead.address]
+            .map((value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' '))
+            .join('|')}`;
+      const previous = deduped.get(key);
+      deduped.set(key, previous ? chooseBetterLead(previous, lead) : lead);
+    }
+
+    return [...deduped.values()].slice(0, request.count);
   },
 };

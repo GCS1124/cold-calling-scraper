@@ -90,6 +90,33 @@ describe('Gemini public research layer', () => {
     expect(isGeminiQueryAssistanceEnabled()).toBe(true);
   });
 
+  it('reads numbered key variables and rotates through the full pool by default', async () => {
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEYS;
+    for (const [index, key] of ['key-one', 'key-two', 'key-three', 'key-four', 'key-five'].entries()) {
+      process.env[`GEMINI_API_KEY_${index + 1}`] = key;
+    }
+    process.env.GEMINI_MAX_RETRIES = '0';
+    process.env.GEMINI_MIN_REQUEST_GAP_MS = '0';
+    process.env.GEMINI_RATE_LIMIT_COOLDOWN_MS = '60_000';
+    delete process.env.GEMINI_KEY_ROTATION_ATTEMPTS;
+    axiosPost.mockRejectedValue({
+      message: '429 Too Many Requests',
+      response: { headers: {} },
+    });
+
+    await expect(expandQueryWithGemini('HVAC in Austin, TX', {
+      companyType: 'HVAC contractor',
+      city: 'Austin, TX',
+      count: 50,
+    })).rejects.toBeInstanceOf(GeminiRateLimitError);
+
+    expect(axiosPost).toHaveBeenCalledTimes(5);
+    expect(axiosPost.mock.calls.map((call) => (
+      (call[2] as { headers?: Record<string, string> }).headers?.['x-goog-api-key']
+    ))).toEqual(['key-one', 'key-two', 'key-three', 'key-four', 'key-five']);
+  });
+
   it('does not append the raw JSON response as a search hint', () => {
     const hints = normalizeGeminiQueryHints(
       JSON.stringify({

@@ -6,11 +6,15 @@ import { publicProviderAxiosLimits } from '../utils/provider-http-limits';
 import { isPublicHttpUrl } from '../utils/public-url';
 import { isLikelyPublicPersonName, normalizePublicPersonName } from '../utils/public-person';
 
-const geminiQueryModel = (process.env.GEMINI_QUERY_MODEL?.trim() || 'gemini-2.5-flash').replace(
-  /^models\//,
-  '',
-);
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiQueryModel)}:generateContent`;
+const getGeminiEndpoint = () => {
+  // Read the model at request time so a long-lived server can receive a safe
+  // model/config change without requiring a process restart.
+  const model = (process.env.GEMINI_QUERY_MODEL?.trim() || 'gemini-2.5-flash').replace(
+    /^models\//,
+    '',
+  );
+  return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+};
 const MAX_QUERY_HINTS = 8;
 const MAX_RESEARCH_CANDIDATES = 120;
 const MAX_LISTING_SEEDS = 40;
@@ -167,7 +171,9 @@ export class GeminiKeyPoolError extends Error {
 }
 
 export const isGeminiRateLimitError = (error: unknown): error is GeminiRateLimitError =>
-  error instanceof GeminiRateLimitError || responseStatus(error) === 429;
+  error instanceof GeminiRateLimitError ||
+  responseStatus(error) === 429 ||
+  (error instanceof Error && /\b429\b|rate.?limit|quota|too many requests/i.test(error.message));
 
 const isGeminiKeyRotationFailure = (error: unknown) => {
   const status = responseStatus(error);
@@ -177,6 +183,16 @@ const isGeminiKeyRotationFailure = (error: unknown) => {
     status === 408 ||
     status === 425 ||
     status >= 500;
+};
+
+const isGeminiRateLimitResponse = (error: unknown) => {
+  const status = responseStatus(error);
+  const message = error instanceof Error
+    ? error.message
+    : error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message
+      : String(error ?? '');
+  return status === 429 || /\b429\b|rate.?limit|quota|too many requests/i.test(message);
 };
 
 type GeminiKeyState = {
@@ -746,7 +762,7 @@ const geminiRequest = async (body: Record<string, unknown>, timeout: number) => 
       geminiNextRequestAt = Date.now() + policy.minRequestGapMs;
 
       try {
-        return await axios.post(GEMINI_ENDPOINT, body, {
+        return await axios.post(getGeminiEndpoint(), body, {
           timeout: remainingMs,
           ...publicProviderAxiosLimits,
           headers: {
@@ -756,7 +772,7 @@ const geminiRequest = async (body: Record<string, unknown>, timeout: number) => 
         });
       } catch (error) {
         const status = responseStatus(error);
-        if (status !== 429) {
+        if (!isGeminiRateLimitResponse(error)) {
           const canRotate = triedKeys.size < maxKeyAttempts;
           if (!isGeminiKeyRotationFailure(error)) throw error;
           if (!canRotate) throw new GeminiKeyPoolError(triedKeys.size);

@@ -40,6 +40,12 @@ const getStatusLabel = (provider: ProviderCoverage) => {
       : 'Partial';
   }
   if (provider.status === 'failed') return 'Unavailable';
+  if (
+    provider.status === 'configured' &&
+    provider.providerId === 'linkedin-public-google-business-fusion'
+  ) {
+    return 'Awaiting corroboration';
+  }
   if (provider.providerId === 'notarycafe-indexed-search') return 'Connected';
   if (provider.providerId.endsWith('-public-directory')) return 'Connected';
   return 'Ready';
@@ -83,11 +89,11 @@ export function ProviderCoveragePanel({ coverage, mode }: ProviderCoveragePanelP
 
       {mode === 'ai' ? (
         <div
-          aria-label="Required AI source sequence"
+          aria-label="Required AI result priority"
           className="mt-4 rounded-xl border border-blue-200 bg-white/75 p-3"
         >
           <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">
-            Required AI source sequence
+            Required AI result priority
           </p>
           <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-lg bg-blue-50 px-3 py-2 text-blue-950">
@@ -113,7 +119,8 @@ export function ProviderCoveragePanel({ coverage, mode }: ProviderCoveragePanelP
             </div>
           </div>
           <p className="mt-2 text-[11px] leading-4 text-slate-500">
-            Ranking order only; every accepted row still needs a public US phone and source evidence.
+            Result priority order; provider requests run in bounded independent windows. Every accepted
+            row still needs a public US phone and source evidence.
           </p>
         </div>
       ) : null}
@@ -124,6 +131,7 @@ export function ProviderCoveragePanel({ coverage, mode }: ProviderCoveragePanelP
             className="rounded-xl border border-white/80 bg-white/80 p-3"
             key={provider.providerId}
             title={provider.message}
+            aria-describedby={provider.message ? `coverage-detail-${provider.providerId}` : undefined}
           >
             <p className="truncate text-sm font-bold text-slate-900">{provider.providerName}</p>
             <p
@@ -132,6 +140,15 @@ export function ProviderCoveragePanel({ coverage, mode }: ProviderCoveragePanelP
               <StatusIcon status={provider.status} />
               {getStatusLabel(provider)}
             </p>
+            {provider.message ? (
+              <p
+                className="mt-2 max-h-12 overflow-hidden text-[11px] leading-4 text-slate-500"
+                id={`coverage-detail-${provider.providerId}`}
+                title={provider.message}
+              >
+                {provider.message}
+              </p>
+            ) : null}
           </div>
         ))}
       </div>

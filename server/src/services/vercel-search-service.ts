@@ -590,9 +590,9 @@ const discoverRegionLeads = async (
       updateCoverage({
         ...entry,
         leadCount: entry.providerId === 'yelp-public-directory'
-          ? publicDirectoryLeads.filter((lead) => lead.source === 'Yelp').length
+          ? publicDirectoryLeads.filter((lead) => lead.source.trim().toLowerCase().includes('yelp')).length
           : entry.providerId === 'yellow-pages-public-directory'
-            ? publicDirectoryLeads.filter((lead) => lead.source === 'Yellow Pages').length
+            ? publicDirectoryLeads.filter((lead) => lead.source.trim().toLowerCase().includes('yellow pages')).length
             : entry.leadCount,
       });
     }

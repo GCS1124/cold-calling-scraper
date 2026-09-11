@@ -519,9 +519,12 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       ? withTimeout(
           discoverGmbListings({
             request: {
-              companyType: request.companyType,
+              ...request,
+              city: location.label,
               count: request.count,
-            },
+              sourceMode: 'gmb',
+              phoneRequired: true,
+            } as Parameters<typeof discoverUsLeadsFromOsm>[0]['request'],
             location,
             profile: resolveCategoryProfile(request.companyType),
             deadlineMs: discoveryDeadlineMs,
@@ -898,7 +901,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       geminiDiscoveryPromise,
       notaryCafePromise,
     ]);
-    if (geminiDiscoveryRateLimited && aiAssistance === 'disabled') {
+    if (geminiDiscoveryRateLimited) {
       aiAssistance = 'rate_limited';
     }
 
@@ -953,7 +956,9 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       if (!directoryCoverage) continue;
 
       updateCoverage(coverage, providerId, {
-        leadCount: scopedPublicDirectoryLeads.filter((lead) => lead.source === source).length,
+        leadCount: scopedPublicDirectoryLeads.filter((lead) =>
+          lead.source.trim().toLowerCase().includes(source.toLowerCase()),
+        ).length,
         message: directoryCoverage.message
           ? `${directoryCoverage.message} Location-checked results were merged.`
           : 'Public directory discovery completed; location-checked results were merged.',

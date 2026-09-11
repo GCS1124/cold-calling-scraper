@@ -54,6 +54,9 @@ describe('public directory providers', () => {
         sourceName: 'Yelp, Public Directory',
       }),
     ]);
+
+    const [repeat] = await yelpProvider.fetchLeads(request);
+    expect(repeat?.id).toBe(lead?.id);
   });
 
   it('uses matching public JSON-LD when a Yelp card hides the phone in visible markup', async () => {
@@ -65,7 +68,7 @@ describe('public directory providers', () => {
           <address>Austin, TX</address>
         </li>
         <script type="application/ld+json">
-          {"@type":"LocalBusiness","name":"Central Texas Plumbing","telephone":"(512) 555-0177","url":"https://centraltexasplumbing.example"}
+          {"itemListElement":[{"item":{"@type":"LocalBusiness","name":"Central Texas Plumbing","telephone":"5125550177","url":"https://centraltexasplumbing.example"}}]}
         </script>
       `,
     } as never);
@@ -78,6 +81,33 @@ describe('public directory providers', () => {
     expect(lead?.mobile).toBe('+15125550177');
     expect(lead?.verifiedPhone).toBe(true);
     expect(lead?.website).toBe('https://centraltexasplumbing.example/');
+  });
+
+  it('deduplicates nested Yellow Pages cards and refuses an off-domain listing URL', async () => {
+    vi.spyOn(axios, 'get').mockResolvedValue({
+      status: 200,
+      data: `
+        <div class="result">
+          <a class="business-name" href="https://outside.example/biz/forged">Lone Star Dental</a>
+          <div class="v-card"><span class="phones">5125550144</span></div>
+        </div>
+        <div class="result">
+          <a class="business-name" href="https://outside.example/biz/forged">Lone Star Dental</a>
+          <span class="phones">(512) 555-0144</span>
+        </div>
+      `,
+    } as never);
+
+    const leads = await yellowPagesProvider.fetchLeads({
+      ...request,
+      query: 'dentist in Austin, TX',
+    });
+
+    expect(leads).toHaveLength(1);
+    expect(leads[0]).toMatchObject({
+      mobile: '+15125550144',
+      listingUrl: expect.stringContaining('yellowpages.com/search'),
+    });
   });
 
   it('normalizes Yellow Pages phones and rejects provider-owned URLs as business websites', async () => {

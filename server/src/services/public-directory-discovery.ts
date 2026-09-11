@@ -47,6 +47,7 @@ type ProviderRun = {
   returned: number;
   failed: number;
   messages: string[];
+  leads: Lead[];
 };
 
 const defaultDiscoveryWindowMs = 12_000;
@@ -145,7 +146,6 @@ export const createPublicDirectoryDiscovery = (
     );
     const runs = new Map<string, ProviderRun>();
     const warnings: ProviderWarning[] = [];
-    const returnedLeads: Lead[] = [];
     let nextTaskIndex = 0;
 
     for (const provider of providers) {
@@ -155,6 +155,7 @@ export const createPublicDirectoryDiscovery = (
         returned: 0,
         failed: 0,
         messages: [],
+        leads: [],
       });
     }
 
@@ -192,8 +193,7 @@ export const createPublicDirectoryDiscovery = (
             `${task.provider.name} public directory query timed out for ${task.locationLabel}.`,
           );
 
-          returnedLeads.push(...leads);
-          run.returned += leads.length;
+          run.leads.push(...(Array.isArray(leads) ? leads : []));
         } catch (error) {
           run.failed += 1;
           const message = error instanceof Error
@@ -210,6 +210,16 @@ export const createPublicDirectoryDiscovery = (
         () => worker(),
       ),
     );
+
+    // Keep coverage as provider observations across concrete location seeds,
+    // while the lead pool itself is deduplicated before it is returned. This
+    // preserves useful broad-location coverage telemetry without exporting
+    // the same business repeatedly.
+    const returnedLeads = [...runs.values()].flatMap((run) => {
+      const uniqueLeads = deduplicateLeads(run.leads);
+      run.returned = run.leads.length;
+      return uniqueLeads;
+    });
 
     const coverage = [...runs.values()].map((run) => {
       const failed = run.failed > 0;

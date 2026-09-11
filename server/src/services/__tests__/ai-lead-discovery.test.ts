@@ -707,6 +707,27 @@ describe('free AI lead discovery', () => {
     );
   });
 
+  it('reports grounded Gemini rate limits even when query planning itself succeeded', async () => {
+    process.env.GEMINI_API_KEY = 'user-supplied-test-key';
+    process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = 'true';
+    process.env.GEMINI_LEAD_DISCOVERY_ENABLED = 'true';
+
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({ leads: [], warnings: [], blocked: false }) as never,
+      expandQuery: vi.fn().mockResolvedValue([]) as never,
+      discoverGemini: vi.fn().mockRejectedValue(new Error('Request failed with status code 429')) as never,
+    })({
+      request: { companyType: 'Dentist', city: 'Austin, TX', count: 50 },
+      location,
+    });
+
+    expect(result.aiAssistance).toBe('rate_limited');
+    expect(result.coverage.find((entry) => entry.providerId === 'gemini-public-discovery')).toMatchObject({
+      status: 'partial',
+      message: expect.stringContaining('free-tier quota'),
+    });
+  });
+
   it('does not add unverified profiles when public search is blocked', async () => {
     const result = await createAiLeadDiscovery({
       discoverLinkedin: vi.fn().mockResolvedValue({
@@ -832,13 +853,14 @@ describe('free AI lead discovery', () => {
       }),
     );
 
+    const discoverGmbListings = vi.fn().mockResolvedValue([gmbLead]);
     const result = await createAiLeadDiscovery({
       discoverLinkedin: vi.fn().mockResolvedValue({
         leads: [],
         warnings: [],
         blocked: false,
       }) as never,
-      discoverGmbListings: vi.fn().mockResolvedValue([gmbLead]) as never,
+      discoverGmbListings: discoverGmbListings as never,
       expandQuery: vi.fn().mockResolvedValue([]) as never,
       discoverGemini: discoverGemini as never,
       enrichPublicContacts: vi.fn().mockImplementation(async ({ leads }: { leads: Lead[] }) => ({
@@ -853,6 +875,12 @@ describe('free AI lead discovery', () => {
 
     expect(discoverGemini).toHaveBeenCalledTimes(1);
     expect(discoverGemini.mock.calls[0]?.[2]).toEqual([gmbLead]);
+    expect(discoverGmbListings.mock.calls[0]?.[0]?.request).toMatchObject({
+      companyType: 'Dentist',
+      city: 'Austin, TX',
+      sourceMode: 'gmb',
+      phoneRequired: true,
+    });
     expect(result.researchCandidates).toEqual([candidate]);
     expect(result.coverage).toContainEqual(
       expect.objectContaining({

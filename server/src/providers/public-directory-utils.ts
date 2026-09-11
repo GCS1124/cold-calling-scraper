@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { mergeContactEvidence, normalizeContactPhone } from '../services/contact-evidence';
 import { isPublicHttpUrl } from '../utils/public-url';
 import type { ContactEvidence } from '../../../shared/lead-quality';
@@ -7,7 +9,10 @@ export type StructuredDirectoryEntity = {
   telephone?: string;
   url?: string;
 };
-const phonePattern = /(?:\+?1[\s.-]?)?(?:\(\s*[2-9]\d{2}\s*\)|[2-9]\d{2})[\s.-]\d{3}[\s.-]\d{4}(?:\s*(?:x|ext\.?|extension)\s*\d+)?/gi;
+// Accept both formatted numbers and the compact 10/11 digit form commonly
+// emitted by directory JSON-LD, while keeping digit boundaries strict enough
+// to avoid treating IDs and timestamps as phones.
+const phonePattern = /(?<!\d)(?:\+?1[\s().-]*)?(?:\(\s*[2-9]\d{2}\s*\)|[2-9]\d{2})[\s.-]*[2-9]\d{2}[\s.-]*\d{4}(?:\s*(?:x|ext\.?|extension)\s*\d+)?(?!\d)/gi;
 
 const normalizeName = (value?: string) =>
   typeof value === 'string'
@@ -51,16 +56,43 @@ export const toProviderListingUrl = (
   baseUrl: string,
   pathPattern: RegExp,
   fallbackUrl: string,
+  allowedHosts: readonly string[] = [],
 ) => {
   if (!value?.trim()) return fallbackUrl;
 
   try {
     const url = new URL(value.trim(), baseUrl);
-    if (!isPublicHttpUrl(url) || !pathPattern.test(url.pathname)) return fallbackUrl;
+    const hostname = url.hostname.replace(/^www\./i, '').toLowerCase();
+    const hostAllowed = !allowedHosts.length || allowedHosts.some(
+      (allowedHost) => hostname === allowedHost || hostname.endsWith(`.${allowedHost}`),
+    );
+
+    if (
+      !isPublicHttpUrl(url) ||
+      !hostAllowed ||
+      !pathPattern.test(url.pathname)
+    ) return fallbackUrl;
     return url.toString();
   } catch {
     return fallbackUrl;
   }
+};
+
+/** Stable across query order, provider retries, and pagination. */
+export const buildStableProviderLeadId = (
+  providerId: string,
+  identityParts: Array<string | undefined>,
+) => {
+  const identity = identityParts
+    .map((part) => (part ?? '').trim().toLowerCase().replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .join('|') || 'unknown';
+  const digest = createHash('sha256')
+    .update(`${providerId}|${identity}`)
+    .digest('hex')
+    .slice(0, 20);
+
+  return `${providerId}-${digest}`;
 };
 
 export const extractDirectoryPhone = (...values: Array<string | undefined>) => {
@@ -103,9 +135,9 @@ export const extractStructuredDirectoryEntities = (scripts: string[]) => {
       });
     }
 
-    if (record['@graph']) visit(record['@graph']);
-    if (record.item) visit(record.item);
-    if (record.mainEntity) visit(record.mainEntity);
+    for (const key of ['@graph', 'item', 'itemListElement', 'mainEntity', 'mainEntityOfPage']) {
+      if (record[key]) visit(record[key]);
+    }
   };
 
   for (const script of scripts) {
