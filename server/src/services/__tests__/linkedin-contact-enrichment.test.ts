@@ -508,6 +508,89 @@ Metro HVAC serves Austin, TX. Call (512) 555-0188.
     expect(result.leads[0]?.mobile).toBe('+1 512 555 0188');
   });
 
+  it('finds and pairs a public decision-maker for a company record with omitted optional fields', async () => {
+    const queries: string[] = [];
+    const publicCompanySearchBody = `Title: public company results
+
+Markdown Content:
+1. [Northstar Heating](https://northstar-heating.example/about)
+Jordan Lee, owner of Northstar Heating in Austin, TX. Call (512) 555-0177.
+`;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('search.brave.com') || url.includes('bing.com')) {
+          queries.push(decodeURIComponent(url));
+          return new Response(publicCompanySearchBody, {
+            status: 200,
+            headers: { 'Content-Type': 'text/plain' },
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      }) as typeof fetch,
+    );
+
+    vi.mocked(httpClient.get).mockImplementation(async (url) => {
+      if (String(url).endsWith('/robots.txt')) {
+        return {
+          status: 404,
+          headers: { 'content-type': 'text/plain' },
+          data: '',
+        } as never;
+      }
+
+      return {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+        data: `
+          <html><body>
+            <h1>Northstar Heating</h1>
+            <p>Jordan Lee, Owner, serves Austin, TX.</p>
+            <a href="tel:+15125550177">Call the office</a>
+          </body></html>
+        `,
+      } as never;
+    });
+
+    const result = await enrichLinkedinLeadsWithPublicContacts({
+      leads: [makeLead({
+        id: 'gmb-northstar-heating',
+        name: 'Northstar Heating',
+        headline: undefined,
+        address: undefined,
+        organizationName: undefined,
+        mobile: '',
+        website: '',
+        listingUrl: 'https://www.google.com/maps/place/northstar-heating',
+        source: 'Google Places',
+        hasPhone: false,
+        hasWebsite: false,
+        verifiedPhone: false,
+      })],
+      request: { companyType: 'HVAC contractor', city: 'Austin', count: 1 },
+      location: sampleLocation,
+      deadlineMs: Date.now() + 10_000,
+    });
+
+    const lead = result.leads[0];
+
+    expect(result.warnings.some((warning) => warning.message.includes('malformed lead'))).toBe(false);
+    expect(lead?.decisionMakerName).toBe('Jordan Lee');
+    expect(lead?.decisionMakerRole).toBe('owner');
+    expect(lead?.mobile).toBe('+1 512 555 0177');
+    expect(lead?.decisionMakerPhonePair).toMatchObject({
+      status: 'paired',
+      phoneAssociation: 'business',
+      personSourceUrl: 'https://northstar-heating.example/about',
+    });
+    expect(lead?.decisionMakerPhonePair?.phoneSourceUrl).toContain('northstar-heating.example');
+    expect(queries[0]).toMatch(/owner|founder/i);
+  });
+
   it('uses concrete metro seeds instead of a timezone label for contact lookup', async () => {
     const queries: string[] = [];
 

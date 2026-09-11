@@ -4,6 +4,7 @@ type Filters = {
   hasEmail: boolean;
   hasPhone: boolean;
   hasWebsite: boolean;
+  decisionMakerBusinessPhoneOnly: boolean;
   highFitOnly: boolean;
   crossSourceOnly: boolean;
   contactReadyOnly: boolean;
@@ -57,6 +58,19 @@ export function FiltersPanel({ filters, onChange, sourceMode }: FiltersPanelProp
             type="checkbox"
           />
           Website
+        </label>
+        <label className="flex items-start gap-3">
+          <input
+            checked={filters.decisionMakerBusinessPhoneOnly}
+            onChange={(event) => onChange({ ...filters, decisionMakerBusinessPhoneOnly: event.target.checked })}
+            type="checkbox"
+          />
+          <span>
+            <span className="block font-semibold text-slate-900">Decision-maker + business phone</span>
+            <span className="block text-xs leading-5 text-slate-500">
+              Public human name paired with a published company phone route
+            </span>
+          </span>
         </label>
         {isAiMode ? (
           <>

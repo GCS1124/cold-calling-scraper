@@ -2,6 +2,7 @@ import type { ResearchDepth, SearchSourceMode, TimeZoneCode } from '../data/sear
 import type { UsStateCode } from '../data/us-states';
 import type {
   ContactEvidence,
+  DecisionMakerPhonePair,
   LeadQualityAssessment,
   WebsiteAssessment,
 } from '../../../shared/lead-quality';
@@ -103,6 +104,8 @@ export type Lead = {
   decisionMakerName?: string;
   decisionMakerRole?: string;
   decisionMakerSourceUrl?: string;
+  /** Derived public-evidence pairing state for safe outreach routing. */
+  decisionMakerPhonePair?: DecisionMakerPhonePair;
   originalRole?: string;
   normalizedRole?: string;
   decisionMaker?: boolean;

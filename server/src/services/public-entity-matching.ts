@@ -232,6 +232,10 @@ const mergePersonWithListing = (person: Lead, listing: Lead) => {
   );
   const personPhoneEvidence = getContactEvidence(person, 'phone');
   const listingPhoneEvidence = getContactEvidence(listing, 'phone');
+  const selectedPhoneEvidence =
+    listingPhoneEvidence.find((item) => item.association === 'business') ??
+    listingPhoneEvidence[0] ??
+    personPhoneEvidence[0];
   const personEvidence = Array.isArray(person.evidence) ? person.evidence : [];
   const listingEvidence = Array.isArray(listing.evidence) ? listing.evidence : [];
 
@@ -251,11 +255,13 @@ const mergePersonWithListing = (person: Lead, listing: Lead) => {
       ? { decisionMakerSourceUrl: asString(person.decisionMakerSourceUrl) || asString(person.listingUrl) }
       : {}),
     originalRole: asString(person.originalRole) || asString(person.headline),
-    mobile: personPhoneEvidence.length ? asString(person.mobile) : asString(listing.mobile),
+    // The listing's published business route is the safest phone to carry
+    // across a LinkedIn bridge. A person phone remains available as evidence,
+    // but is not preferred over the company's public line.
+    mobile: selectedPhoneEvidence?.value ?? '',
     email: asString(person.email) || asString(listing.email),
     website: asString(person.website) || asString(listing.website),
-    contactSourceUrl:
-      (personPhoneEvidence.length ? personPhoneEvidence : listingPhoneEvidence)[0]?.sourceUrl,
+    contactSourceUrl: selectedPhoneEvidence?.sourceUrl,
     contactEvidence: mergeContactEvidence([
       ...collectContactEvidence(person),
       ...collectContactEvidence(listing).map((item) => ({ ...item, association: 'business' as const })),

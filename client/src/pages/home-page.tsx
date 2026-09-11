@@ -90,6 +90,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     hasEmail: false,
     hasPhone: true,
     hasWebsite: false,
+    decisionMakerBusinessPhoneOnly: false,
     highFitOnly: false,
     crossSourceOnly: false,
     contactReadyOnly: false,
@@ -113,6 +114,7 @@ export function HomePage({ searchApi }: HomePageProps) {
       hasEmail: false,
       hasPhone: true,
       hasWebsite: false,
+      decisionMakerBusinessPhoneOnly: false,
       highFitOnly: false,
       crossSourceOnly: false,
       contactReadyOnly: false,
@@ -136,6 +138,15 @@ export function HomePage({ searchApi }: HomePageProps) {
         // Phone qualification is a product requirement, not an optional view filter.
         if (!lead.hasPhone || !lead.verifiedPhone || !matchesQualityFilter(lead, qualityFilter)) return false;
         if (filters.hasWebsite && !lead.hasWebsite) return false;
+        if (
+          filters.decisionMakerBusinessPhoneOnly &&
+          !(
+            lead.decisionMakerPhonePair?.status === 'paired' &&
+            lead.decisionMakerPhonePair.phoneAssociation === 'business'
+          )
+        ) {
+          return false;
+        }
         if (
           activeSourceMode === 'ai' &&
           filters.highFitOnly &&
@@ -171,6 +182,11 @@ export function HomePage({ searchApi }: HomePageProps) {
           const sourcePriority = comparePublicSourcePriority(left, right);
           if (sourcePriority) return sourcePriority;
         }
+        const pairOrder = { paired: 3, decision_maker_only: 2, phone_only: 1, unpaired: 0 } as const;
+        const pairPriority =
+          (pairOrder[right.decisionMakerPhonePair?.status ?? 'unpaired'] ?? 0) -
+          (pairOrder[left.decisionMakerPhonePair?.status ?? 'unpaired'] ?? 0);
+        if (pairPriority) return pairPriority;
         const qualityOrder = compareLeadQuality(left, right);
         if (qualityOrder) return qualityOrder;
         if (activeSourceMode === 'ai') {
@@ -188,6 +204,7 @@ export function HomePage({ searchApi }: HomePageProps) {
     activeSourceMode,
     filters.crossSourceOnly,
     filters.contactReadyOnly,
+    filters.decisionMakerBusinessPhoneOnly,
     filters.evidenceBackedOnly,
     filters.hasEmail,
     filters.hasWebsite,

@@ -51,6 +51,11 @@ labels:
 - Public phone evidence remains compulsory for an eligible final lead. A
   business phone can be retained as a business contact route for a person, but
   it must not be labeled as that person's mobile or direct line.
+- `decisionMakerPhonePair` is a derived, additive routing signal. `paired`
+  requires an explicitly published decision-maker name/source plus public
+  evidence for the selected phone. `phoneAssociation` records whether the
+  phone is a business, person, or unknown route; even a paired business phone
+  is never represented as a personal or direct line.
 
 The normalized research store persists source documents, person/organization
 relationships, role and relationship status, observation timestamps, and

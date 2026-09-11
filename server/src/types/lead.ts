@@ -1,5 +1,6 @@
 import type {
   ContactEvidence,
+  DecisionMakerPhonePair,
   LeadQualityAssessment,
   WebsiteAssessment,
 } from '../../../shared/lead-quality';
@@ -99,6 +100,8 @@ export type Lead = {
   decisionMakerName?: string;
   decisionMakerRole?: string;
   decisionMakerSourceUrl?: string;
+  /** Derived public-evidence pairing state for safe outreach routing. */
+  decisionMakerPhonePair?: DecisionMakerPhonePair;
   /** Preserve the published title separately from the normalized role label. */
   originalRole?: string;
   normalizedRole?: string;

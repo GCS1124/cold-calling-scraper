@@ -1,5 +1,6 @@
 import type { LeadQualityAssessment } from '../../../shared/lead-quality';
 import type { Lead } from '../types/lead';
+import { buildDecisionMakerPhonePair } from './decision-maker-phone';
 import {
   collectContactEvidence,
   getContactEvidence,
@@ -39,6 +40,15 @@ export const assessLeadQuality = (lead: Lead, now = Date.now()): LeadQualityAsse
 
   if (phoneQualified) reasons.push('Valid US phone with public source evidence');
   else gaps.push('A valid phone with public source evidence is required');
+  if (lead.decisionMakerPhonePair?.status === 'paired') {
+    reasons.push(
+      lead.decisionMakerPhonePair.phoneAssociation === 'business'
+        ? 'Public decision-maker paired with a business phone route'
+        : 'Public decision-maker paired with public phone evidence',
+    );
+  } else if (phoneQualified && lead.decisionMakerPhonePair?.status === 'phone_only') {
+    gaps.push('No explicitly published decision-maker was identified in the checked public sources');
+  }
   if (phoneEvidence.some((item) => item.association === 'business') && person) {
     gaps.push('Business contact route; direct contact for this person is unconfirmed');
   }
@@ -82,6 +92,8 @@ export const assessLeadQuality = (lead: Lead, now = Date.now()): LeadQualityAsse
     nextAction: !phoneQualified ? 'Find a public business phone source'
       : conflict || former ? 'Resolve the conflicting company or role evidence'
         : freshness !== 'recent' ? 'Revisit the phone source before outreach'
+          : lead.decisionMakerPhonePair?.status === 'phone_only'
+            ? 'Find an explicitly published decision-maker name and verify the business route'
           : person ? 'Confirm the current role and ask for the person through the business'
             : 'Review the business and phone source before outreach',
     phone: {
@@ -99,7 +111,12 @@ export const assessLeadQuality = (lead: Lead, now = Date.now()): LeadQualityAsse
   };
 };
 
-export const withLeadQuality = (lead: Lead): Lead => ({ ...lead, quality: assessLeadQuality(lead) });
+export const withLeadQuality = (lead: Lead): Lead => {
+  const decisionMakerPhonePair = buildDecisionMakerPhonePair(lead);
+  const normalizedLead = { ...lead, decisionMakerPhonePair };
+
+  return { ...normalizedLead, quality: assessLeadQuality(normalizedLead) };
+};
 
 export const rankQualifiedLeads = (leads: Lead[]): Lead[] => {
   const tierOrder = { corroborated: 3, supported: 2, review: 1, excluded: 0 };

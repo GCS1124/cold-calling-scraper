@@ -48,6 +48,13 @@ const makeLead = (mode, index = 1) => ({
   email: mode === 'ai' ? 'hello@public-business.example' : '',
   website: 'https://public-business.example',
   contactSourceUrl: 'https://public-business.example/contact',
+  decisionMakerPhonePair: {
+    status: 'paired',
+    phoneAssociation: 'business',
+    phoneSourceUrl: 'https://public-business.example/contact',
+    phoneSourceName: 'Public website contact page',
+    personSourceUrl: 'https://public-business.example/about',
+  },
   listingUrl:
     mode === 'ai'
       ? 'https://www.linkedin.com/in/public-business-owner'
@@ -304,6 +311,8 @@ const run = async () => {
   const inspectQuality = async (mode, expectedCount = 1, leadName = `${mode} Public Lead`) => {
     await page.getByRole('button', { name: `Inspect ${leadName}`, exact: true }).click();
     await page.getByText(`${mode} Decision Maker`, { exact: true }).first().waitFor();
+    await page.getByText('Name + business phone', { exact: true }).first().waitFor();
+    await page.getByText('Decision-maker + phone route', { exact: true }).first().waitFor();
     await page.getByRole('link', { name: 'Open public name source', exact: true }).waitFor();
     await page.getByRole('region', { name: `Contact evidence for ${leadName}` }).waitFor();
     await page.getByText('Line type, reachability, email delivery', { exact: true }).waitFor();

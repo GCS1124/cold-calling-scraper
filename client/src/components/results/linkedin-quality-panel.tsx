@@ -113,6 +113,11 @@ export function LinkedInQualityPanel({
   const corroborated = leads.filter((lead) => (lead.matchSignals?.publicSources ?? 0) > 1).length;
   const ownerSignals = leads.filter(hasPublicOwnerSignal).length;
   const roleSignals = leads.filter((lead) => lead.matchSignals?.roleMatched).length;
+  const decisionMakerPhonePairs = leads.filter(
+    (lead) =>
+      lead.decisionMakerPhonePair?.status === 'paired' &&
+      lead.decisionMakerPhonePair.phoneAssociation === 'business',
+  ).length;
   const evidenceBacked = leads.filter(
     (lead) => lead.publicEvidence?.profileTitle || lead.publicEvidence?.profileSnippet,
   ).length;
@@ -121,6 +126,7 @@ export function LinkedInQualityPanel({
   const corroborationDepth = ratioPercent(corroborated, total);
   const roleDepth = ratioPercent(roleSignals, total);
   const contactDepth = ratioPercent(boundedContacts, total);
+  const pairingDepth = ratioPercent(decisionMakerPhonePairs, total);
   const checklist = [
     { label: 'Category', ready: leads.some((lead) => lead.matchSignals?.categoryMatched) },
     { label: 'Owner lens', ready: ownerSignals > 0 },
@@ -155,7 +161,7 @@ export function LinkedInQualityPanel({
         </div>
       </div>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
         <div className="rounded-2xl bg-slate-950 p-3 text-white">
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">High-fit score</p>
           <p className="mt-2 text-2xl font-black">{highFit}</p>
@@ -175,6 +181,11 @@ export function LinkedInQualityPanel({
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Role signals</p>
           <p className="mt-2 text-2xl font-black text-slate-950">{roleSignals}</p>
           <p className="mt-1 text-[11px] text-slate-500">Decision-maker evidence</p>
+        </div>
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-700">Paired route</p>
+          <p className="mt-2 text-2xl font-black text-slate-950">{decisionMakerPhonePairs}</p>
+          <p className="mt-1 text-[11px] text-slate-600">Name + business phone</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-3">
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Public contacts</p>
@@ -207,6 +218,12 @@ export function LinkedInQualityPanel({
           label="Contact coverage"
           tone="amber"
           value={contactDepth}
+        />
+        <SignalMeter
+          detail={`${decisionMakerPhonePairs} of ${total} profiles pair a public human name with a business phone route.`}
+          label="Pairing coverage"
+          tone="emerald"
+          value={pairingDepth}
         />
       </div>
 

@@ -146,6 +146,43 @@ describe('contact attribution and identity', () => {
     });
   });
 
+  it('prefers the listing business phone when pairing a public person with a company route', () => {
+    const person = enrichLead(lead({
+      id: 'public-owner-with-person-phone',
+      name: 'Avery Smith',
+      organizationName: 'Alpha Dental',
+      decisionMaker: true,
+      originalRole: 'Owner',
+      listingUrl: 'https://linkedin.com/in/avery-smith',
+      decisionMakerSourceUrl: 'https://linkedin.com/in/avery-smith',
+      mobile: '5125550202',
+      hasPhone: true,
+      verifiedPhone: true,
+      source: 'LinkedIn',
+      contactEvidence: [observation({
+        value: '+15125550202',
+        sourceUrl: 'https://linkedin.com/in/avery-smith',
+        sourceName: 'Public LinkedIn profile',
+        sourceKind: 'public_snippet',
+        association: 'person',
+      })],
+    }));
+    const listing = lead({ mobile: '5125550101' });
+
+    const [merged] = bridgeLinkedInWithPublicListings([person], [listing]);
+
+    expect(merged).toMatchObject({
+      mobile: '+1 512 555 0101',
+      contactSourceUrl: 'https://www.google.com/maps/place/alpha',
+      decisionMakerPhonePair: {
+        status: 'paired',
+        phoneAssociation: 'business',
+        personSourceUrl: 'https://linkedin.com/in/avery-smith',
+      },
+    });
+    expect(merged?.decisionMakerPhonePair?.phoneSourceUrl).toBe('https://www.google.com/maps/place/alpha');
+  });
+
   it('bridges an exact public company domain across broad location labels', () => {
     const person = lead({
       id: 'public-owner-timezone',

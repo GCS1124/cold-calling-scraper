@@ -40,6 +40,16 @@ const completedResponse: SearchResponse = {
     {
       id: 'lead-1',
       name: 'Northstar Labs',
+      decisionMakerName: 'Casey Morgan',
+      decisionMakerRole: 'Owner',
+      decisionMakerSourceUrl: 'https://northstarlabs.ai/about',
+      decisionMakerPhonePair: {
+        status: 'paired',
+        phoneAssociation: 'business',
+        phoneSourceUrl: 'https://northstarlabs.ai/contact',
+        phoneSourceName: 'Public business website',
+        personSourceUrl: 'https://northstarlabs.ai/about',
+      },
       mobile: '+1 512 555 0121',
       email: 'hello@northstarlabs.ai',
       website: 'https://northstarlabs.ai',
@@ -1206,6 +1216,10 @@ describe('App', () => {
 
     await clickElement(getCheckboxByLabel(container, /public evidence available/i));
     expect(normalizedText(container)).toContain('1 visible leads');
+
+    await clickElement(getCheckboxByLabel(container, /decision-maker \+ business phone/i));
+    expect(normalizedText(container)).toContain('1 visible leads');
+    expect(normalizedText(container)).toContain('Name + business phone');
 
     await unmount();
   });

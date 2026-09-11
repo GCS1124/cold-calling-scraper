@@ -105,6 +105,14 @@ export type ProviderWarning = {
   severity?: 'info' | 'warning' | 'error';
 };
 
+export type DecisionMakerPhonePair = {
+  status: 'paired' | 'decision_maker_only' | 'phone_only' | 'unpaired';
+  phoneAssociation: 'business' | 'person' | 'unknown';
+  phoneSourceUrl?: string;
+  phoneSourceName?: string;
+  personSourceUrl?: string;
+};
+
 export type IntegrationLead = {
   id: string;
   name: string;
@@ -117,6 +125,10 @@ export type IntegrationLead = {
   organizationName?: string;
   originalRole?: string;
   normalizedRole?: string;
+  decisionMakerName?: string;
+  decisionMakerRole?: string;
+  decisionMakerSourceUrl?: string;
+  decisionMakerPhonePair?: DecisionMakerPhonePair;
   decisionMaker?: boolean;
   employmentStatus?: 'current' | 'probable' | 'uncertain' | 'conflicting' | 'former' | 'unverified';
   mobile?: string;

@@ -20,6 +20,26 @@ export type ContactEvidence = {
   association: 'business' | 'person' | 'unknown';
 };
 
+/**
+ * A conservative, derived status for the outreach route represented by a
+ * lead. "Paired" means an explicitly published human name has a public
+ * source and the lead's selected phone has independent public evidence. It
+ * does not claim personal ownership of a business line.
+ */
+export type DecisionMakerPhonePairStatus =
+  | 'paired'
+  | 'decision_maker_only'
+  | 'phone_only'
+  | 'unpaired';
+
+export type DecisionMakerPhonePair = {
+  status: DecisionMakerPhonePairStatus;
+  phoneAssociation: ContactEvidence['association'];
+  phoneSourceUrl?: string;
+  phoneSourceName?: string;
+  personSourceUrl?: string;
+};
+
 export type WebsiteAssessment = {
   version: 1;
   status: 'confirmed' | 'probable' | 'parked' | 'unrelated' | 'unavailable' | 'blocked';

@@ -158,6 +158,10 @@ export function ResultsTable({
               const qualityTier = isLinkedInLead ? getLinkedInQualityTier(lead) : undefined;
               const sourcePriority = getPublicSourcePriority(lead);
               const sourceOrder = getPublicSourceOrder(lead);
+              const hasBusinessPhonePair =
+                lead.decisionMakerPhonePair?.status === 'paired' &&
+                lead.decisionMakerPhonePair.phoneAssociation === 'business';
+              const hasPublicPhonePair = lead.decisionMakerPhonePair?.status === 'paired';
               const matchLabel =
                 isStrongMatch
                   ? 'Strong match'
@@ -217,6 +221,14 @@ export function ResultsTable({
                             <p className="mt-0.5 truncate text-[11px] text-emerald-800" title={lead.decisionMakerRole}>
                               {lead.decisionMakerRole}
                             </p>
+                          ) : null}
+                          {hasBusinessPhonePair ? (
+                            <span
+                              className="mt-1.5 inline-flex rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black uppercase tracking-[0.08em] text-emerald-800"
+                              title="The public human name and the selected phone are supported by public evidence. The phone is a business route, not a personal-number claim."
+                            >
+                              Name + business phone
+                            </span>
                           ) : null}
                         </div>
                       ) : !isLinkedInLead ? (
@@ -504,6 +516,67 @@ export function ResultsTable({
                                   does not mean the business has no owner or operator.
                                 </p>
                               )}
+                            </div>
+                            <div className={`mt-3 rounded-xl border p-3 ${
+                              hasBusinessPhonePair
+                                ? 'border-emerald-200 bg-emerald-50/70'
+                                : hasPublicPhonePair
+                                  ? 'border-blue-100 bg-blue-50/70'
+                                  : lead.decisionMakerPhonePair?.status === 'phone_only'
+                                    ? 'border-amber-100 bg-amber-50/70'
+                                    : 'border-slate-200 bg-white'
+                            }`}>
+                              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                                Decision-maker + phone route
+                              </p>
+                              {hasBusinessPhonePair ? (
+                                <>
+                                  <p className="mt-1 text-xs font-bold text-emerald-950">
+                                    {lead.decisionMakerName} · {lead.mobile}
+                                  </p>
+                                  <p className="mt-1 text-[11px] leading-4 text-emerald-800">
+                                    Public name and public business phone align for this company. This is a
+                                    business contact route, not a verified personal or direct line.
+                                  </p>
+                                </>
+                              ) : hasPublicPhonePair ? (
+                                <p className="mt-1 text-xs leading-5 text-blue-900">
+                                  A public person and public phone were found, but the phone association is
+                                  marked {lead.decisionMakerPhonePair?.phoneAssociation ?? 'unknown'}.
+                                </p>
+                              ) : lead.decisionMakerPhonePair?.status === 'phone_only' ? (
+                                <p className="mt-1 text-xs leading-5 text-amber-900">
+                                  {lead.mobile} is publicly listed, but no explicitly published human name
+                                  was identified in the checked sources.
+                                </p>
+                              ) : (
+                                <p className="mt-1 text-xs leading-5 text-slate-600">
+                                  The checked public sources do not currently provide a verified name-and-phone
+                                  pairing for this record.
+                                </p>
+                              )}
+                              <div className="mt-2 flex flex-wrap gap-3 text-[11px] font-semibold">
+                                {lead.decisionMakerPhonePair?.personSourceUrl ? (
+                                  <a
+                                    className="text-blue-700 underline underline-offset-2 hover:text-blue-900"
+                                    href={lead.decisionMakerPhonePair.personSourceUrl}
+                                    rel="noreferrer"
+                                    target="_blank"
+                                  >
+                                    Name source
+                                  </a>
+                                ) : null}
+                                {lead.decisionMakerPhonePair?.phoneSourceUrl ? (
+                                  <a
+                                    className="text-blue-700 underline underline-offset-2 hover:text-blue-900"
+                                    href={lead.decisionMakerPhonePair.phoneSourceUrl}
+                                    rel="noreferrer"
+                                    target="_blank"
+                                  >
+                                    Phone source
+                                  </a>
+                                ) : null}
+                              </div>
                             </div>
                             {lead.contactSourceUrl ? (
                               <p className="mt-3 text-xs leading-5 text-slate-500">

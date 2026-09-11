@@ -3,7 +3,12 @@ import type { ProviderWarning, SearchRequest } from '../types/search';
 import { isPhoneQualifiedLead } from './phone-requirement';
 import type { NormalizedUsLocation } from './us-location';
 import { enrichLead } from './lead-validation';
-import { collectContactEvidence, mergeContactEvidence, normalizeContactPhone } from './contact-evidence';
+import {
+  collectContactEvidence,
+  isProfessionalProfile,
+  mergeContactEvidence,
+  normalizeContactPhone,
+} from './contact-evidence';
 import {
   enrichLeadFromWebsite,
   extractContactDetailsFromHtml,
@@ -12,6 +17,7 @@ import {
 import { buildDiscoverySeeds } from './discovery-seeds';
 import { readResponseTextBounded } from '../utils/bounded-fetch';
 import { isNotaryCafeHost } from '../utils/public-url';
+import type { PublicDecisionMaker } from '../utils/public-person';
 
 type PublicSearchResult = {
   title: string;
@@ -92,6 +98,11 @@ const queryCacheTtlMs = 15 * 60 * 1000;
 const maxQueryCacheEntries = 300;
 const maxWebsiteCandidates = 3;
 const minimumWebsiteMatchScore = 60;
+
+type PublicDecisionMakerSearchResult = PublicDecisionMaker & {
+  sourceUrl: string;
+  score: number;
+};
 
 const queryCache = new Map<
   string,
@@ -828,8 +839,15 @@ const buildQueries = (
     .replace(/["'`]+/g, ' ')
     .trim();
   const identity = `"${name}" "${headline || category}"`;
+  const decisionMakerIdentity = organization || name;
+  const decisionMakerRoles =
+    '(owner OR founder OR co-founder OR CEO OR president OR principal OR partner OR operator OR manager OR director OR proprietor OR "managing member" OR "general manager" OR "practice administrator")';
+  const decisionMakerQuery = decisionMakerIdentity
+    ? `"${decisionMakerIdentity}" "${primaryLocation}" ${decisionMakerRoles} phone -site:linkedin.com`
+    : '';
 
   return [
+    ...(decisionMakerQuery ? [decisionMakerQuery] : []),
     ...(organization
       ? [`"${organization}" "${primaryLocation}" official website phone email -site:linkedin.com`]
       : []),
@@ -893,6 +911,65 @@ const scoreResult = (
   return score;
 };
 
+const escapeHtmlText = (value: string) =>
+  value.replace(/[&<>]/g, (character) => {
+    if (character === '&') return '&amp;';
+    if (character === '<') return '&lt;';
+    return '&gt;';
+  });
+
+const extractDecisionMakersFromPublicResult = (
+  result: PublicSearchResult,
+  score: number,
+  lead: Lead,
+): PublicDecisionMakerSearchResult[] => {
+  if (score < minimumWebsiteMatchScore) return [];
+
+  const searchable = normalizeIdentityText(`${result.title} ${result.snippet} ${result.url}`);
+  const identities = [lead.organizationName, lead.name]
+    .map((value) => normalizeIdentityText(value))
+    .filter((value) => value.length >= 4);
+
+  // A role/name mention is usable only when the same result also identifies
+  // the target person or company. This keeps a generic team-page snippet from
+  // attaching a different public person to an otherwise matching website.
+  if (!identities.some((identity) => searchable.includes(identity))) {
+    return [];
+  }
+
+  const details = extractContactDetailsFromHtml(
+    `<p>${escapeHtmlText(`${result.title}\n${result.snippet}`)}</p>`,
+    result.url,
+  );
+
+  return details.decisionMakers.map((person) => ({
+    ...person,
+    sourceUrl: result.url,
+    score,
+  }));
+};
+
+const addDecisionMakers = (
+  decisionMakers: Map<string, PublicDecisionMakerSearchResult>,
+  incoming: PublicDecisionMakerSearchResult[],
+) => {
+  for (const person of incoming) {
+    const key = person.name.toLocaleLowerCase();
+    const current = decisionMakers.get(key);
+
+    if (
+      !current ||
+      person.score > current.score ||
+      (!current.role && Boolean(person.role))
+    ) {
+      decisionMakers.set(key, {
+        ...person,
+        ...(current?.role && !person.role ? { role: current.role } : {}),
+      });
+    }
+  }
+};
+
 const resolveBusinessWebsite = async (
   lead: Lead,
   request: SearchRequest,
@@ -902,6 +979,9 @@ const resolveBusinessWebsite = async (
 ) => {
   const queries = buildQueries(lead, request, location);
   const candidates = new Map<string, { result: PublicSearchResult; score: number }>();
+  const decisionMakers = new Map<string, PublicDecisionMakerSearchResult>();
+  const requiresDecisionMakerSearch =
+    !lead.decisionMakerName && !isProfessionalProfile(lead.listingUrl);
 
   for (const [queryIndex, query] of queries.entries()) {
     if (Date.now() >= deadlineMs) {
@@ -965,18 +1045,29 @@ const resolveBusinessWebsite = async (
       for (const result of sourceResults) {
         const website = isCandidateWebsite(result.url);
 
-        if (!website || candidates.has(website)) {
+        if (!website) {
           continue;
         }
 
-        candidates.set(website, {
-          result: { ...result, url: website },
-          score: scoreResult({ ...result, url: website }, lead, request, location),
-        });
+        const normalizedResult = { ...result, url: website };
+        const score = scoreResult(normalizedResult, lead, request, location);
+        const current = candidates.get(website);
+
+        if (!current || score > current.score || normalizedResult.snippet.length > current.result.snippet.length) {
+          candidates.set(website, { result: normalizedResult, score });
+        }
+
+        addDecisionMakers(
+          decisionMakers,
+          extractDecisionMakersFromPublicResult(normalizedResult, score, lead),
+        );
       }
     }
 
-    if ([...candidates.values()].some((candidate) => candidate.score >= minimumWebsiteMatchScore)) {
+    if (
+      [...candidates.values()].some((candidate) => candidate.score >= minimumWebsiteMatchScore) &&
+      (!requiresDecisionMakerSearch || decisionMakers.size > 0)
+    ) {
       break;
     }
   }
@@ -993,15 +1084,11 @@ const resolveBusinessWebsite = async (
       website: result.url,
       snippet: result.snippet,
     })),
+    decisionMakers: [...decisionMakers.values()].sort(
+      (left, right) => right.score - left.score || Number(Boolean(right.role)) - Number(Boolean(left.role)),
+    ),
   };
 };
-
-const escapeHtmlText = (value: string) =>
-  value.replace(/[&<>]/g, (character) => {
-    if (character === '&') return '&amp;';
-    if (character === '<') return '&lt;';
-    return '&gt;';
-  });
 
 const enrichLeadFromPublicSnippet = (lead: Lead, snippet: string, sourceUrl: string) => {
   if (!snippet.trim()) {
@@ -1010,13 +1097,36 @@ const enrichLeadFromPublicSnippet = (lead: Lead, snippet: string, sourceUrl: str
 
   const details = extractContactDetailsFromHtml(
     `<p>${escapeHtmlText(snippet)}</p>`,
+    sourceUrl,
   );
+  const decisionMaker = [...details.decisionMakers].sort(
+    (left, right) => Number(Boolean(right.role)) - Number(Boolean(left.role)),
+  )[0];
   const recoveredContact = Boolean(
     details.emails.length || details.phones.length || details.addresses.length,
   );
+  const decisionMakerEvidence = decisionMaker &&
+    !lead.decisionMakerName &&
+    isPublicHttpUrl(sourceUrl)
+    ? [{
+        sourceUrl,
+        sourceName: 'Public search snippet',
+        claim: `A public search result names ${decisionMaker.name}${decisionMaker.role ? ` as ${decisionMaker.role}` : ''} for this business.`,
+        status: 'corroborated' as const,
+        observedAt: new Date().toISOString(),
+      }]
+    : [];
 
   return enrichLead({
     ...lead,
+    ...(decisionMaker && !lead.decisionMakerName
+      ? {
+          decisionMakerName: decisionMaker.name,
+          ...(decisionMaker.role ? { decisionMakerRole: decisionMaker.role } : {}),
+          decisionMakerSourceUrl: sourceUrl,
+          decisionMaker: true,
+        }
+      : {}),
     email: lead.email || details.emails[0] || '',
     mobile: normalizeContactPhone(lead.mobile) ? lead.mobile : details.phones[0] || '',
     contactEvidence: mergeContactEvidence([
@@ -1029,6 +1139,7 @@ const enrichLeadFromPublicSnippet = (lead: Lead, snippet: string, sourceUrl: str
         }))),
     ]),
     address: lead.address || details.addresses[0] || '',
+    evidence: [...(lead.evidence ?? []), ...decisionMakerEvidence],
     rejectionReason:
       recoveredContact && lead.rejectionReason === 'blocked_website'
         ? undefined
@@ -1061,11 +1172,6 @@ const isLeadShapeSafeForPublicEnrichment = (lead: Lead) => {
   const requiredStringFields = [
     'id',
     'name',
-    'headline',
-    'mobile',
-    'email',
-    'website',
-    'address',
     'category',
     'city',
     'source',
@@ -1083,6 +1189,15 @@ const isLeadShapeSafeForPublicEnrichment = (lead: Lead) => {
     'decisionMakerName',
     'decisionMakerRole',
     'organizationName',
+    'headline',
+    'mobile',
+    'email',
+    'website',
+    'address',
+    'state',
+    'stateCode',
+    'postalCode',
+    'zip',
   ];
 
   if (
@@ -1133,10 +1248,19 @@ const enrichOneLead = async (
     website = resolved.website;
 
     if (website) {
+      const resolvedDecisionMaker = resolved.decisionMakers[0];
       const publicWebLead = enrichLead({
         ...enrichedLead,
         website,
         source: addSourceTag(enrichedLead.source, 'Public Web'),
+        ...(resolvedDecisionMaker && !enrichedLead.decisionMakerName
+          ? {
+              decisionMakerName: resolvedDecisionMaker.name,
+              ...(resolvedDecisionMaker.role ? { decisionMakerRole: resolvedDecisionMaker.role } : {}),
+              decisionMakerSourceUrl: resolvedDecisionMaker.sourceUrl,
+              decisionMaker: true,
+            }
+          : {}),
       });
       let bestAttempt = publicWebLead;
       let bestAttemptScore = Number(publicWebLead.hasWebsite);
@@ -1158,8 +1282,9 @@ const enrichOneLead = async (
         candidateLead = attachContactProvenance(candidateLead, candidate.website, hadContact);
 
         const contactScore =
+          Number(candidateLead.hasPhone) * 10 +
+          Number(Boolean(candidateLead.decisionMakerName)) * 4 +
           Number(candidateLead.hasEmail) * 3 +
-          Number(candidateLead.hasPhone) * 3 +
           Number(candidateLead.hasWebsite);
 
         if (contactScore > bestAttemptScore) {
@@ -1251,9 +1376,13 @@ export const enrichLinkedinLeadsWithPublicContacts = async ({
     .map((lead, index) => ({ lead, index }))
     .sort((left, right) => {
       const leftPriority =
-        Number(!isPhoneQualifiedLead(left.lead)) * 10 + Number(Boolean(left.lead.website)) * 2;
+        Number(!left.lead.decisionMakerName) * 12 +
+        Number(!isPhoneQualifiedLead(left.lead)) * 10 +
+        Number(Boolean(left.lead.website)) * 2;
       const rightPriority =
-        Number(!isPhoneQualifiedLead(right.lead)) * 10 + Number(Boolean(right.lead.website)) * 2;
+        Number(!right.lead.decisionMakerName) * 12 +
+        Number(!isPhoneQualifiedLead(right.lead)) * 10 +
+        Number(Boolean(right.lead.website)) * 2;
 
       return rightPriority - leftPriority || left.index - right.index;
     });
