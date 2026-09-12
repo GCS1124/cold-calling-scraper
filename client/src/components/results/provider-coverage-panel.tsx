@@ -46,6 +46,20 @@ const getObservedCount = (provider: ProviderCoverage) =>
 
 const getReviewCount = (provider: ProviderCoverage) => provider.reviewCount ?? 0;
 
+// Older persisted snapshots may contain a pre-repair `deferred` outcome with
+// no remaining work. Treat it as the completed state implied by its live
+// counts so the UI never presents a stale permanent spinner.
+const getEffectiveOutcome = (provider: ProviderCoverage) => {
+  if (provider.outcome !== 'deferred' || (provider.deferredCount ?? 0) > 0) {
+    return provider.outcome;
+  }
+
+  if (getAcceptedCount(provider) > 0 || getObservedCount(provider) > 0) return 'returned' as const;
+  if (getReviewCount(provider) > 0) return 'filtered' as const;
+  if ((provider.attemptedCount ?? 0) > 0 || (provider.completedCount ?? 0) > 0) return 'empty' as const;
+  return 'not_started' as const;
+};
+
 const hasStructuredMetrics = (provider: ProviderCoverage) =>
   provider.attemptedCount !== undefined ||
   provider.observedCount !== undefined ||
@@ -80,6 +94,7 @@ const getReturnedLabel = (provider: ProviderCoverage) => {
 };
 
 const getStatusLabel = (provider: ProviderCoverage) => {
+  const outcome = getEffectiveOutcome(provider);
   const accepted = getAcceptedCount(provider);
   const observed = getObservedCount(provider);
   const review = getReviewCount(provider);
@@ -90,12 +105,12 @@ const getStatusLabel = (provider: ProviderCoverage) => {
   // completed category/location/phone screen—not a provider failure.
   if (
     provider.providerId === 'notarycafe-indexed-search' &&
-    (provider.outcome === 'returned' || provider.outcome === 'empty' || provider.outcome === 'filtered')
+    (outcome === 'returned' || outcome === 'empty' || outcome === 'filtered')
   ) {
     return `${accepted} matched / ${observed} screened${review ? ` · ${review} review` : ''}`;
   }
 
-  switch (provider.outcome) {
+  switch (outcome) {
     case 'not_configured':
       return 'Not configured';
     case 'not_started':
@@ -132,40 +147,42 @@ const getStatusLabel = (provider: ProviderCoverage) => {
 };
 
 const getStatusClass = (provider: ProviderCoverage) => {
-  if (provider.outcome === 'returned' || provider.outcome === 'empty' || provider.outcome === 'filtered') {
+  const outcome = getEffectiveOutcome(provider);
+  if (outcome === 'returned' || outcome === 'empty' || outcome === 'filtered') {
     return 'text-emerald-700';
   }
   if (
-    provider.outcome === 'failed' ||
-    provider.outcome === 'timed_out' ||
-    provider.outcome === 'blocked' ||
-    provider.outcome === 'rate_limited' ||
+    outcome === 'failed' ||
+    outcome === 'timed_out' ||
+    outcome === 'blocked' ||
+    outcome === 'rate_limited' ||
     provider.status === 'failed' ||
     provider.status === 'partial'
   ) {
     return 'text-amber-700';
   }
-  if (provider.outcome === 'not_started' || provider.outcome === 'deferred' || provider.status === 'configured') {
+  if (outcome === 'not_started' || outcome === 'deferred' || provider.status === 'configured') {
     return 'text-blue-700';
   }
   return 'text-slate-500';
 };
 
 const StatusIcon = ({ provider }: { provider: ProviderCoverage }) => {
-  if (provider.outcome === 'returned' || provider.outcome === 'empty' || provider.outcome === 'filtered' || provider.status === 'returned') {
+  const outcome = getEffectiveOutcome(provider);
+  if (outcome === 'returned' || outcome === 'empty' || outcome === 'filtered' || provider.status === 'returned') {
     return <CheckCircle2 className="h-4 w-4" />;
   }
   if (
-    provider.outcome === 'failed' ||
-    provider.outcome === 'timed_out' ||
-    provider.outcome === 'blocked' ||
-    provider.outcome === 'rate_limited' ||
+    outcome === 'failed' ||
+    outcome === 'timed_out' ||
+    outcome === 'blocked' ||
+    outcome === 'rate_limited' ||
     provider.status === 'failed' ||
     provider.status === 'partial'
   ) {
     return <AlertTriangle className="h-4 w-4" />;
   }
-  if (provider.outcome === 'not_started' || provider.outcome === 'deferred' || provider.status === 'configured') {
+  if (outcome === 'not_started' || outcome === 'deferred' || provider.status === 'configured') {
     return <CircleDashed className="h-4 w-4" />;
   }
   return <Info className="h-4 w-4" />;

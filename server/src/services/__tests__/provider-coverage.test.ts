@@ -178,4 +178,81 @@ describe('provider coverage', () => {
       outcome: 'deferred',
     });
   });
+
+  it('clears an earlier deferred state when the durable queue completes', () => {
+    const merged = mergeProviderCoverage(
+      [{
+        providerId: 'public-website-enrichment',
+        providerName: 'Public Website Enrichment',
+        status: 'configured',
+        phase: 'queued',
+        outcome: 'deferred',
+        leadCount: 0,
+        attemptedCount: 12,
+        observedCount: 24,
+        reviewCount: 12,
+        deferredCount: 12,
+        message: 'Twelve public websites remain queued.',
+      }],
+      [{
+        providerId: 'public-website-enrichment',
+        providerName: 'Public Website Enrichment',
+        status: 'returned',
+        phase: 'completed',
+        outcome: 'empty',
+        leadCount: 0,
+        attemptedCount: 12,
+        observedCount: 0,
+        reviewCount: 0,
+        deferredCount: 0,
+        completedCount: 12,
+        message: 'All queued public websites were checked.',
+      }],
+    );
+
+    expect(merged[0]).toMatchObject({
+      status: 'returned',
+      phase: 'completed',
+      outcome: 'returned',
+      attemptedCount: 24,
+      observedCount: 24,
+      reviewCount: 0,
+      deferredCount: 0,
+      completedCount: 12,
+      message: 'All queued public websites were checked.',
+    });
+  });
+
+  it('keeps a completed strict-fusion rejection filtered even when people were observed', () => {
+    const merged = mergeProviderCoverage(
+      [{
+        providerId: 'linkedin-public-google-business-fusion',
+        providerName: 'LinkedIn + Google Business fusion',
+        status: 'configured',
+        phase: 'queued',
+        outcome: 'deferred',
+        leadCount: 0,
+        observedCount: 2,
+        deferredCount: 2,
+      }],
+      [{
+        providerId: 'linkedin-public-google-business-fusion',
+        providerName: 'LinkedIn + Google Business fusion',
+        status: 'returned',
+        phase: 'completed',
+        outcome: 'filtered',
+        leadCount: 0,
+        observedCount: 2,
+        reviewCount: 1,
+        deferredCount: 0,
+      }],
+    );
+
+    expect(merged[0]).toMatchObject({
+      phase: 'completed',
+      outcome: 'filtered',
+      reviewCount: 1,
+      deferredCount: 0,
+    });
+  });
 });

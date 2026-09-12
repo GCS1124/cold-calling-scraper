@@ -41,6 +41,7 @@ export type SearchLocationMode =
 export type AiWorkflowStage =
   | 'source_discovery'
   | 'public_listing_continuation'
+  | 'gemini_public_research'
   | 'website_enrichment'
   | 'final_fusion'
   | 'completed';
@@ -58,6 +59,20 @@ export type AiWorkflowState = {
   osmTotalBoxes?: number;
   /** Number of bounded OSM continuation ticks already completed. */
   osmContinuationPasses?: number;
+  /** Whether the one grounded Gemini pass remains queued after source discovery. */
+  geminiPending?: boolean;
+  /**
+   * Canonical-host representatives awaiting bounded public website enrichment.
+   * These lead ids, rather than raw URLs, make the queue safe to persist and
+   * resume after a serverless invocation ends.
+   */
+  websiteQueue?: string[];
+  /** Number of canonical hosts admitted to this logical search's website queue. */
+  websiteTotalHosts?: number;
+  /** Ineligible, duplicate, or cap-excluded website candidates. */
+  websiteSkippedCount?: number;
+  /** Prevents the snapshot metric from double-counting queued hosts per tick. */
+  websiteObservedReported?: boolean;
 };
 
 export type SearchJobRecord = {
@@ -141,7 +156,7 @@ export const isSearchPersistenceError = (
   (error instanceof Error &&
     (error as Error & { code?: unknown }).code === 'SEARCH_PERSISTENCE_UNAVAILABLE');
 
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 const DEFAULT_JOB_TTL_MS = 1000 * 60 * 60 * 6;
 const MEMORY_MAX_JOBS = Number(process.env.SEARCH_JOB_MEMORY_MAX_JOBS ?? 500);
@@ -305,6 +320,7 @@ const normalizeAiWorkflow = (value: unknown): AiWorkflowState | undefined => {
   const stage: AiWorkflowStage | undefined =
     workflow.stage === 'source_discovery' ||
     workflow.stage === 'public_listing_continuation' ||
+    workflow.stage === 'gemini_public_research' ||
     workflow.stage === 'website_enrichment' ||
     workflow.stage === 'final_fusion' ||
     workflow.stage === 'completed'
@@ -341,6 +357,21 @@ const normalizeAiWorkflow = (value: unknown): AiWorkflowState | undefined => {
             Math.floor(workflow.osmContinuationPasses as number),
           ),
         }
+      : {}),
+    ...(typeof workflow.geminiPending === 'boolean'
+      ? { geminiPending: workflow.geminiPending }
+      : {}),
+    ...(Array.isArray(workflow.websiteQueue)
+      ? { websiteQueue: uniqueStrings(workflow.websiteQueue).slice(0, 120) }
+      : {}),
+    ...(Number.isFinite(workflow.websiteTotalHosts)
+      ? { websiteTotalHosts: Math.max(0, Math.min(120, Math.floor(workflow.websiteTotalHosts as number))) }
+      : {}),
+    ...(Number.isFinite(workflow.websiteSkippedCount)
+      ? { websiteSkippedCount: Math.max(0, Math.floor(workflow.websiteSkippedCount as number)) }
+      : {}),
+    ...(typeof workflow.websiteObservedReported === 'boolean'
+      ? { websiteObservedReported: workflow.websiteObservedReported }
       : {}),
   };
 };

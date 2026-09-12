@@ -266,6 +266,11 @@ export function HomePage({ searchApi }: HomePageProps) {
   const publicQueryFamilies = result?.meta.progress.publicQueryFamilies ?? [];
   const publicQueryFamilyCounts = result?.meta.progress.publicQueryFamilyCounts ?? {};
   const providerCoverage = result?.meta.progress.providerCoverage ?? [];
+  const geminiCoverage = providerCoverage.find(
+    (provider) => provider.providerId === 'gemini-public-discovery',
+  );
+  const geminiDeferred = geminiCoverage?.outcome === 'deferred' &&
+    (geminiCoverage.deferredCount ?? 0) > 0;
   const rawDisplayedProviderWarnings =
     activeSourceMode === 'ai'
       ? (result?.meta.providerWarnings ?? []).filter(
@@ -962,7 +967,9 @@ export function HomePage({ searchApi }: HomePageProps) {
 
                     <p className="mt-3 text-xs leading-5 text-slate-500">
                       {result.meta.progress.aiAssistance === 'enabled'
-                        ? 'Gemini ran one grounded public-research pass using deterministic search lenses and bounded public listing seeds. Public evidence and phone validation decide which records become exportable leads.'
+                        ? geminiDeferred
+                          ? 'Gemini is configured and its single grounded public-research pass is queued in the durable workflow. Deterministic public results remain available while it waits for its bounded execution window.'
+                          : 'Gemini ran one grounded public-research pass using deterministic search lenses and bounded public listing seeds. Public evidence and phone validation decide which records become exportable leads.'
                         : result.meta.progress.aiAssistance === 'rate_limited'
                           ? 'Gemini is configured but its free-tier quota is cooling down. Deterministic public expansion continued and no unverified details were promoted.'
                         : result.meta.progress.aiAssistance === 'failed'

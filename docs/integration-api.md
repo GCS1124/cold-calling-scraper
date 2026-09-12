@@ -213,10 +213,13 @@ of creating a duplicate. Reusing the key with different criteria returns
 AI-mode durable jobs use an approximately 90-second logical search window,
 split into resumable invocations below the serverless execution cap. Inspect
 each `meta.progress.providerCoverage` entry's structured `phase`, `outcome`,
-and counts on every snapshot: `deferred` means the next bounded spatial or
-website slice is stored for continuation, whereas `timed_out`, `blocked`, and
-`empty` have distinct meanings. `leadCount` remains the accepted-record count
-for backward-compatible consumers.
+and counts on every snapshot: `deferred` means the current bounded spatial,
+Gemini, or website-host queue still has stored continuation work, whereas
+`timed_out`, `blocked`, and `empty` have distinct meanings. A later zero
+`deferredCount` clears that transient outcome. Website enrichment persists
+canonical host ids (up to 120 per logical search) and advances them in batches
+of 12. `leadCount` remains the accepted-record count for backward-compatible
+consumers.
 
 Stateless LinkedIn and AI fallbacks advertise `pollable: false` and
 `resumable: false`; their response is final for that attempt. They cannot
@@ -269,9 +272,11 @@ silently treated as current.
 
 Deterministic category, role, and location hints are folded into one grounded
 Gemini public-research pass that can use at most 40 high-quality listing seeds.
-Every returned candidate and cited source is retained for review, even when it
-does not pass the required public-phone gate. Public discovery and deterministic
-validation supply the exportable lead facts and contact evidence.
+That pass runs in a dedicated durable tick after deterministic public sources,
+so a bounded source-stage budget skip is reported as `deferred`, not
+`failed`. Every returned candidate and cited source is retained for review,
+even when it does not pass the required public-phone gate. Public discovery and
+deterministic validation supply the exportable lead facts and contact evidence.
 If Gemini is rate-limited or unavailable, `meta.progress.aiAssistance` reports
 `rate_limited` or `failed` and deterministic public expansion continues. AI never
 manufactures a person, owner claim, phone, email, employment relationship, or

@@ -80,6 +80,8 @@ export type AiDiscoveryResult = {
     | 'stoppedEarly'
   >;
   publicCoverage?: LinkedInDiscoveryResult['coverage'];
+  /** True only when a durable caller intentionally queues the one Gemini pass for a later tick. */
+  geminiDeferred?: boolean;
   enrichedCount: number;
 };
 
@@ -520,6 +522,292 @@ const createGeminiReviewCandidate = (candidate: ResearchCandidate): ReviewCandid
   };
 };
 
+export type GroundedGeminiPublicResearchResult = {
+  leads: Lead[];
+  researchCandidates: ResearchCandidate[];
+  reviewCandidates: ReviewCandidate[];
+  warnings: ProviderWarning[];
+  coverage: ProviderCoverage[];
+  aiAssistance: AiDiscoveryResult['aiAssistance'];
+  /** The logical search window ended before a safe provider request could start. */
+  deferred: boolean;
+};
+
+type GroundedGeminiPublicResearchDeps = {
+  discoverGemini?: typeof discoverGeminiResearch;
+  now?: () => number;
+};
+
+/**
+ * Executes the single grounded Gemini pass in its own durable tick. Source
+ * discovery intentionally does not call this helper, so a slow directory or
+ * public-listing batch cannot turn a queued Gemini pass into a false failure.
+ */
+export const createGroundedGeminiPublicResearch = (
+  deps: GroundedGeminiPublicResearchDeps = {},
+) => {
+  const discoverGemini = deps.discoverGemini ?? discoverGeminiResearch;
+  const now = deps.now ?? Date.now;
+
+  return async ({
+    request,
+    location,
+    listingLeads,
+    deadlineMs,
+  }: {
+    request: SearchRequest;
+    location: NormalizedUsLocation;
+    listingLeads: Lead[];
+    deadlineMs: number;
+  }): Promise<GroundedGeminiPublicResearchResult> => {
+    const configured = isGeminiLeadDiscoveryEnabled();
+    const listingSeeds = selectListingSeeds(listingLeads);
+    const queryHints = buildDeterministicQueryHints(request, location);
+    const geminiRequest: SearchRequest = {
+      ...request,
+      researchBrief: uniqueSearchQueries([
+        request.researchBrief?.trim() ?? '',
+        `Deterministic public search lenses: ${queryHints.join(' | ')}`,
+      ]).join('\n').slice(0, 1_800),
+    };
+    const listingCoverage: ProviderCoverage = {
+      providerId: 'gemini-listing-enrichment',
+      providerName: 'Gemini listing enrichment',
+      status: configured ? 'configured' : 'not_configured',
+      phase: configured ? 'queued' : 'skipped',
+      outcome: configured ? 'not_started' : 'not_configured',
+      leadCount: 0,
+      attemptedCount: 0,
+      observedCount: listingSeeds.length,
+      acceptedCount: 0,
+      reviewCount: 0,
+      deferredCount: 0,
+      updatedAt: new Date(now()).toISOString(),
+      message: configured
+        ? `Selected ${listingSeeds.length} de-duplicated public listing seed${listingSeeds.length === 1 ? '' : 's'} for the single grounded Gemini pass.`
+        : 'Gemini listing enrichment was not configured; original public listing fields remain available.',
+    };
+    const emptyResult = (
+      coverage: ProviderCoverage[],
+      aiAssistance: AiDiscoveryResult['aiAssistance'],
+      deferred = false,
+      warnings: ProviderWarning[] = [],
+    ): GroundedGeminiPublicResearchResult => ({
+      leads: [],
+      researchCandidates: [],
+      reviewCandidates: [],
+      warnings,
+      coverage,
+      aiAssistance,
+      deferred,
+    });
+
+    if (!configured) {
+      return emptyResult([
+        {
+          providerId: 'gemini-public-discovery',
+          providerName: 'Gemini public discovery',
+          status: 'not_configured',
+          phase: 'skipped',
+          outcome: 'not_configured',
+          leadCount: 0,
+          attemptedCount: 0,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+          updatedAt: new Date(now()).toISOString(),
+          message: 'Grounded Gemini public discovery was not configured.',
+        },
+        listingCoverage,
+      ], 'disabled');
+    }
+
+    const remainingMs = deadlineMs - now();
+    if (remainingMs <= 1_000) {
+      return emptyResult([
+        {
+          providerId: 'gemini-public-discovery',
+          providerName: 'Gemini public discovery',
+          status: 'configured',
+          phase: 'queued',
+          outcome: 'deferred',
+          leadCount: 0,
+          attemptedCount: 0,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 1,
+          updatedAt: new Date(now()).toISOString(),
+          message: 'Gemini public discovery remains queued because the logical search window no longer has time for a safe grounded request.',
+        },
+        {
+          ...listingCoverage,
+          outcome: 'deferred',
+          deferredCount: listingSeeds.length,
+          message: 'Gemini listing enrichment remains queued with the single grounded public-research pass.',
+        },
+      ], 'enabled', true, [{
+        providerId: 'gemini-public-discovery',
+        providerName: 'Gemini public discovery',
+        severity: 'info',
+        message: 'Gemini public discovery was deferred because the bounded logical search window ended before a safe request could start; deterministic public sources were preserved.',
+      }]);
+    }
+
+    if (isGeminiRateLimited()) {
+      const poolHealth = getGeminiPoolHealth();
+      return emptyResult([
+        {
+          providerId: 'gemini-public-discovery',
+          providerName: 'Gemini public discovery',
+          status: 'partial',
+          phase: 'degraded',
+          outcome: 'rate_limited',
+          leadCount: 0,
+          attemptedCount: 0,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+          updatedAt: new Date(now()).toISOString(),
+          message: `Gemini is cooling down after a free-tier rate-limit response (${poolHealth.coolingDownKeyCount}/${poolHealth.configuredKeyCount} configured key${poolHealth.configuredKeyCount === 1 ? '' : 's'} cooling down); deterministic public discovery continued.`,
+        },
+        {
+          ...listingCoverage,
+          status: 'partial',
+          phase: 'degraded',
+          outcome: 'rate_limited',
+          message: 'Gemini listing enrichment was skipped during the free-tier cooldown; original public listing fields remain available.',
+        },
+      ], 'rate_limited', false, [{
+        providerId: 'gemini-public-discovery',
+        providerName: 'Gemini public discovery',
+        severity: 'info',
+        message: 'Gemini free-tier quota or rate limit is active; deterministic public sources were preserved.',
+      }]);
+    }
+
+    try {
+      const requestTimeoutMs = Math.min(geminiDiscoveryTimeoutMs, remainingMs);
+      const grounded = await withTimeout(
+        discoverGemini(
+          geminiRequest,
+          location.label,
+          listingSeeds,
+          buildGeminiLocationContext(location),
+          requestTimeoutMs,
+        ),
+        Math.min(deadlineMs, now() + requestTimeoutMs),
+        'Gemini public discovery timed out; deterministic public sources were preserved.',
+      );
+      const normalizedLeads = grounded.leads.flatMap((lead) => {
+        try {
+          return [enrichLead(lead)];
+        } catch {
+          return [];
+        }
+      });
+      const locationCheckedLeads = normalizedLeads.filter((lead) => {
+        try {
+          return filterLeadsForLocation([lead], location).length > 0;
+        } catch {
+          return false;
+        }
+      });
+      const acceptedCount = locationCheckedLeads.filter(isPhoneQualifiedLead).length;
+      const reviewCandidates = grounded.candidates.map(createGeminiReviewCandidate);
+
+      return {
+        leads: locationCheckedLeads,
+        researchCandidates: grounded.candidates,
+        reviewCandidates,
+        warnings: [],
+        coverage: [
+          {
+            providerId: 'gemini-public-discovery',
+            providerName: 'Gemini public discovery',
+            status: 'returned',
+            phase: 'completed',
+            outcome: grounded.candidates.length ? 'filtered' : 'empty',
+            leadCount: acceptedCount,
+            attemptedCount: 1,
+            observedCount: grounded.candidates.length,
+            acceptedCount,
+            reviewCount: reviewCandidates.length,
+            deferredCount: 0,
+            updatedAt: new Date(now()).toISOString(),
+            message: `Retained ${grounded.candidates.length} Gemini public research candidate${grounded.candidates.length === 1 ? '' : 's'} for evidence review; independent public phone validation still controls export eligibility.`,
+          },
+          {
+            ...listingCoverage,
+            status: 'returned',
+            phase: 'completed',
+            outcome: listingSeeds.length ? 'returned' : 'empty',
+            attemptedCount: listingSeeds.length ? 1 : 0,
+            observedCount: listingSeeds.length,
+            reviewCount: reviewCandidates.length,
+            deferredCount: 0,
+            message: listingSeeds.length
+              ? `Single Gemini public-research pass included ${listingSeeds.length} public listing seed${listingSeeds.length === 1 ? '' : 's'}; original listing fields remain preserved.`
+              : 'No public listing seeds were available for the single Gemini research pass.',
+          },
+        ],
+        aiAssistance: 'enabled',
+        deferred: false,
+      };
+    } catch (error) {
+      const timedOut = isTimeoutFailure(error);
+      const rateLimited = isRateLimitFailure(error);
+      const message = rateLimited
+        ? 'Gemini free-tier quota or rate limit was reached; deterministic public discovery continued and no unverified Gemini details were promoted.'
+        : error instanceof Error
+          ? `${error.message} Deterministic public discovery continued.`
+          : 'Gemini public discovery failed. Deterministic public discovery continued.';
+      const outcome: NonNullable<ProviderCoverage['outcome']> = rateLimited
+        ? 'rate_limited'
+        : timedOut
+          ? 'timed_out'
+          : 'failed';
+      return emptyResult([
+        {
+          providerId: 'gemini-public-discovery',
+          providerName: 'Gemini public discovery',
+          status: timedOut || rateLimited ? 'partial' : 'failed',
+          phase: 'degraded',
+          outcome,
+          leadCount: 0,
+          attemptedCount: 1,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+          updatedAt: new Date(now()).toISOString(),
+          message,
+        },
+        {
+          ...listingCoverage,
+          status: timedOut || rateLimited ? 'partial' : 'failed',
+          phase: 'degraded',
+          outcome,
+          attemptedCount: listingSeeds.length ? 1 : 0,
+          deferredCount: 0,
+          message: rateLimited
+            ? 'Gemini listing enrichment was skipped after the free-tier limit; original public listing fields and phones remain available.'
+            : 'The single Gemini pass could not enrich the public listing seeds; original listing fields remain available.',
+        },
+      ], rateLimited ? 'rate_limited' : 'failed', false, [{
+        providerId: 'gemini-public-discovery',
+        providerName: 'Gemini public discovery',
+        severity: timedOut || rateLimited ? 'info' : 'warning',
+        message,
+      }]);
+    }
+  };
+};
+
+export const runGroundedGeminiPublicResearch = createGroundedGeminiPublicResearch();
+
 const dedupeReviewCandidates = (candidates: ReviewCandidate[]) => {
   const unique = new Map<string, ReviewCandidate>();
   for (const candidate of candidates) {
@@ -549,6 +837,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     location,
     deadlineMs = Date.now() + discoveryWindowMs + contactEnrichmentWindowMs,
     deferFinalization = false,
+    deferGemini = false,
     publicListingBoxCursor = 0,
     publicListingMaxBoxes = maxInitialOsmBoxes,
   }: {
@@ -557,6 +846,8 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     deadlineMs?: number;
     /** Durable Vercel runs split website recovery and final fusion into later ticks. */
     deferFinalization?: boolean;
+    /** Durable Vercel runs reserve a separate bounded tick for the one Gemini pass. */
+    deferGemini?: boolean;
     /** Durable OSM cursor; omitted for the backwards-compatible full provider call. */
     publicListingBoxCursor?: number;
     /** Maximum OSM boxes to include in this source-discovery tick. */
@@ -582,6 +873,8 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     let publicListingProgress: AiDiscoveryResult['publicListingProgress'];
     let geminiDiscoveryFailed = false;
     let geminiDiscoveryRateLimited = false;
+    let geminiDiscoveryDeferred = false;
+    const geminiDeferred = deferGemini && isGeminiLeadDiscoveryEnabled();
     const queryHints = buildDeterministicQueryHints(request, location);
 
     const discoveryDeadlineMs = Math.min(
@@ -971,8 +1264,10 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     // second grounded request for listing enrichment. That doubled free-tier
     // pressure. Wait for the best public listing seeds and fold them into one
     // grounded pass instead; deterministic sources still run independently.
-    const geminiDiscoveryPromise: Promise<GeminiResearchDiscovery> = isGeminiLeadDiscoveryEnabled()
-      ? (async () => {
+    const geminiDiscoveryPromise: Promise<GeminiResearchDiscovery> = geminiDeferred
+      ? Promise.resolve(emptyGeminiResearch())
+      : isGeminiLeadDiscoveryEnabled()
+        ? (async () => {
           const listingLeads = (await Promise.all([
             discoverGmbListings ? gmbListingPromise : Promise.resolve([] as Lead[]),
             publicListingPromise.then((result) => result.leads),
@@ -1016,7 +1311,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
           try {
             const remainingGeminiMs = discoveryDeadlineMs - Date.now();
             if (remainingGeminiMs <= 1_000) {
-              geminiDiscoveryFailed = true;
+              geminiDiscoveryDeferred = true;
               const message = 'Gemini public discovery was skipped because the bounded discovery window was nearly exhausted; deterministic public sources were preserved.';
               addWarning(warnings, {
                 providerId: 'gemini-public-discovery',
@@ -1098,8 +1393,8 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
             }
             return emptyGeminiResearch();
           }
-        })()
-      : Promise.resolve(emptyGeminiResearch());
+          })()
+        : Promise.resolve(emptyGeminiResearch());
 
     const runLinkedinDiscovery = async (
       hints: string[],
@@ -1283,39 +1578,75 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
     researchCandidates = geminiResult.candidates;
     const geminiReviewCandidates = researchCandidates.map(createGeminiReviewCandidate);
     const geminiAcceptedCount = scopedGeminiLeads.filter(isPhoneQualifiedLead).length;
-    updateCoverage(coverage, 'gemini-public-discovery', {
-      status: !isGeminiLeadDiscoveryEnabled()
-        ? 'not_configured'
-        : geminiDiscoveryFailed
-          ? 'partial'
-          : 'returned',
-      phase: !isGeminiLeadDiscoveryEnabled()
-        ? 'skipped'
-        : geminiDiscoveryFailed
-          ? 'degraded'
-          : 'completed',
-      outcome: !isGeminiLeadDiscoveryEnabled()
-        ? 'not_configured'
-        : geminiDiscoveryRateLimited
-          ? 'rate_limited'
+    if (geminiDeferred) {
+      updateCoverage(coverage, 'gemini-public-discovery', {
+        status: 'configured',
+        phase: 'queued',
+        outcome: 'deferred',
+        attemptedCount: 0,
+        observedCount: 0,
+        acceptedCount: 0,
+        reviewCount: 0,
+        deferredCount: 1,
+        leadCount: 0,
+        message: 'The single grounded Gemini public-research pass is queued for its own bounded durable tick after deterministic public sources finish.',
+      });
+      updateCoverage(coverage, 'gemini-listing-enrichment', {
+        status: 'configured',
+        phase: 'queued',
+        outcome: 'not_started',
+        attemptedCount: 0,
+        observedCount: 0,
+        acceptedCount: 0,
+        reviewCount: 0,
+        deferredCount: 0,
+        leadCount: 0,
+        message: 'Public listing seeds will be selected for the queued single Gemini research pass.',
+      });
+    } else {
+      updateCoverage(coverage, 'gemini-public-discovery', {
+        status: !isGeminiLeadDiscoveryEnabled()
+          ? 'not_configured'
+          : geminiDiscoveryDeferred
+            ? 'configured'
           : geminiDiscoveryFailed
-            ? 'failed'
-            : researchCandidates.length
-              ? 'filtered'
-              : 'empty',
-      attemptedCount: isGeminiLeadDiscoveryEnabled() ? 1 : 0,
-      observedCount: researchCandidates.length,
-      acceptedCount: geminiAcceptedCount,
-      reviewCount: geminiReviewCandidates.length,
-      leadCount: geminiAcceptedCount,
-      message: !isGeminiLeadDiscoveryEnabled()
-        ? 'Grounded Gemini public discovery was not configured.'
-        : geminiDiscoveryRateLimited
-          ? 'Gemini free-tier quota or rate limit was reached; deterministic public sources and original listing fields were preserved.'
-        : geminiDiscoveryFailed
-          ? 'Gemini public discovery was not fully available; public candidates from other sources were preserved.'
-          : `Retained ${researchCandidates.length} Gemini public research candidate${researchCandidates.length === 1 ? '' : 's'}; candidates remain visible even when phone validation excludes them from export.`,
-    });
+            ? 'partial'
+            : 'returned',
+        phase: !isGeminiLeadDiscoveryEnabled()
+          ? 'skipped'
+          : geminiDiscoveryDeferred
+            ? 'queued'
+          : geminiDiscoveryFailed
+            ? 'degraded'
+            : 'completed',
+        outcome: !isGeminiLeadDiscoveryEnabled()
+          ? 'not_configured'
+          : geminiDiscoveryDeferred
+            ? 'deferred'
+          : geminiDiscoveryRateLimited
+            ? 'rate_limited'
+            : geminiDiscoveryFailed
+              ? 'failed'
+              : researchCandidates.length
+                ? 'filtered'
+                : 'empty',
+        attemptedCount: isGeminiLeadDiscoveryEnabled() && !geminiDiscoveryDeferred ? 1 : 0,
+        observedCount: researchCandidates.length,
+        acceptedCount: geminiAcceptedCount,
+        reviewCount: geminiReviewCandidates.length,
+        deferredCount: geminiDiscoveryDeferred ? 1 : 0,
+        leadCount: geminiAcceptedCount,
+        message: !isGeminiLeadDiscoveryEnabled()
+          ? 'Grounded Gemini public discovery was not configured.'
+          : geminiDiscoveryDeferred
+            ? 'Gemini public discovery remains deferred because this bounded execution window ended before a safe grounded request could start; deterministic public sources were preserved.'
+          : geminiDiscoveryRateLimited
+            ? 'Gemini free-tier quota or rate limit was reached; deterministic public sources and original listing fields were preserved.'
+            : geminiDiscoveryFailed
+              ? 'Gemini public discovery was not fully available; public candidates from other sources were preserved.'
+              : `Retained ${researchCandidates.length} Gemini public research candidate${researchCandidates.length === 1 ? '' : 's'}; candidates remain visible even when phone validation excludes them from export.`,
+      });
+    }
 
     const fusion = deferFinalization
       ? undefined
@@ -1546,7 +1877,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       updateCoverage(coverage, 'linkedin-public-google-business-fusion', {
         status: 'configured',
         phase: 'queued',
-        outcome: 'deferred',
+        outcome: scopedLinkedinLeads.length ? 'deferred' : 'not_started',
         deferredCount: scopedLinkedinLeads.length,
         message: 'Final LinkedIn + Google Business fusion is queued after durable website enrichment.',
       });
@@ -1563,6 +1894,7 @@ export const createAiLeadDiscovery = (deps: AiDiscoveryDeps = {}) => {
       reviewCandidates,
       publicListingProgress,
       publicCoverage: discoveryResult.coverage,
+      geminiDeferred,
       enrichedCount,
     };
   };

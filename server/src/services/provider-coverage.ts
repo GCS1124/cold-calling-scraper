@@ -27,10 +27,10 @@ const getAcceptedCount = (entry: ProviderCoverage) =>
   entry.acceptedCount === undefined ? asCount(entry.leadCount) : asCount(entry.acceptedCount);
 
 const combineCount = (left: ProviderCoverage, right: ProviderCoverage, field: CountField) => {
-  // Deferred work is a remaining-work snapshot, not a historical event. A
-  // later durable tick must replace it (and a completed tick clears it), while
-  // observations/attempts remain cumulative across independent ticks.
-  if (field === 'deferredCount') {
+  // Review and deferred work are current queue snapshots, not historical
+  // events. A later durable tick must replace them (and a completed tick
+  // clears them), while observations and attempts remain cumulative.
+  if (field === 'deferredCount' || field === 'reviewCount') {
     return right[field] === undefined ? asCount(left[field]) : asCount(right[field]);
   }
 
@@ -79,7 +79,14 @@ const mergeOutcome = (
   // degraded. Counts communicate what survived; outcome communicates why the
   // stage did not finish cleanly.
   if (failedOutcome) return failedOutcome;
-  if (outcomes.includes('deferred') || counts.deferredCount > 0) return 'deferred';
+  // `deferred` is deliberately not sticky. Once a later tick reports a
+  // zero remaining count, the provider has progressed and must render its
+  // current returned/empty/filtered result rather than a stale queue label.
+  if (counts.deferredCount > 0) return 'deferred';
+  // A filtered result is an explicit current-stage decision (for example a
+  // strict fusion near-match held in review). Observed candidates must not
+  // turn that decision into a misleading successful retained result.
+  if (incoming.outcome === 'filtered') return 'filtered';
   if (counts.acceptedCount > 0 || counts.observedCount > 0 || outcomes.includes('returned')) {
     return 'returned';
   }
@@ -98,10 +105,12 @@ const mergePhase = (
   if (outcome === 'not_configured') return 'skipped';
   if (isFailureOutcome(outcome)) return 'degraded';
   if (outcome === 'deferred') return 'queued';
-  if (current.phase === 'running' || incoming.phase === 'running') return 'running';
-  if (current.phase === 'queued' || incoming.phase === 'queued' || outcome === 'not_started') {
-    return 'queued';
+  if (outcome === 'not_started') {
+    return incoming.phase === 'running' ? 'running' : 'queued';
   }
+  // The incoming lifecycle is the newest durable snapshot. Do not preserve a
+  // previous `queued`/`running` phase after a subsequent completed tick.
+  if (incoming.phase === 'running') return 'running';
   return 'completed';
 };
 
@@ -136,8 +145,22 @@ const mergeStatus = (
   return 'not_configured';
 };
 
-const mergeMessage = (current: string | undefined, incoming: string | undefined) => {
-  const messages = [...new Set([current, incoming].filter((value): value is string => Boolean(value?.trim())))];
+const mergeMessage = (current: ProviderCoverage, incoming: ProviderCoverage) => {
+  // Configuration and queue messages become misleading after a provider has
+  // completed. Keep historical failure detail, but replace transient status
+  // copy with the current completed/degraded result.
+  const replacesTransientMessage =
+    (current.outcome === 'not_started' || current.outcome === 'deferred') &&
+    incoming.outcome !== undefined &&
+    incoming.outcome !== 'not_started' &&
+    incoming.outcome !== 'deferred';
+  if (replacesTransientMessage) {
+    return incoming.message?.trim() || current.message;
+  }
+
+  const currentMessage = current.message;
+  const incomingMessage = incoming.message;
+  const messages = [...new Set([currentMessage, incomingMessage].filter((value): value is string => Boolean(value?.trim())))];
   if (!messages.length) return undefined;
 
   const visibleMessages = messages.slice(0, 3);
@@ -182,7 +205,7 @@ export const mergeProviderCoverage = (
       providerName: entry.providerName || previous.providerName,
       status: mergeStatus(previous.status, entry.status, counts.acceptedCount, outcome, phase),
       leadCount: counts.acceptedCount,
-      message: mergeMessage(previous.message, entry.message),
+      message: mergeMessage(previous, entry),
       ...(structured ? counts : {}),
       ...(outcome ? { outcome } : {}),
       ...(phase ? { phase } : {}),

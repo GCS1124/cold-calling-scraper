@@ -1063,6 +1063,53 @@ describe('App', () => {
     await unmount();
   });
 
+  it('does not render a zero-remaining deferred provider as permanently queued', async () => {
+    const staleDeferredResponse: SearchResponse = {
+      ...aiModeResponse,
+      searchId: 'search-ai-cleared-deferred',
+      meta: {
+        ...aiModeResponse.meta,
+        progress: {
+          ...aiModeResponse.meta.progress,
+          providerCoverage: [{
+            providerId: 'public-website-enrichment',
+            providerName: 'Public Website Enrichment',
+            status: 'configured',
+            phase: 'queued',
+            outcome: 'deferred',
+            leadCount: 0,
+            attemptedCount: 12,
+            observedCount: 12,
+            acceptedCount: 0,
+            reviewCount: 0,
+            deferredCount: 0,
+            completedCount: 12,
+            message: 'Legacy snapshot with no remaining hosts.',
+          }],
+        },
+      },
+    };
+    const searchApi: SearchApi = {
+      startSearch: vi.fn().mockResolvedValue(staleDeferredResponse),
+      getSearch: vi.fn().mockResolvedValue(staleDeferredResponse),
+    };
+    const { container, unmount } = await renderApp(['/search'], searchApi);
+
+    await clickElement(getButton(container, /ai mode/i));
+    await typeValue(getCompanyTypeInput(container), 'Dentist');
+    await selectValue(getSelectByOptionValue(container, 'EST'), 'EST');
+    await clickElement(getButton(container, /find leads/i));
+    await waitForText(container, /public website enrichment/i, 6000);
+
+    const websiteCard = container.querySelector<HTMLElement>(
+      '[data-provider-id="public-website-enrichment"]',
+    );
+    expect(normalizedText(websiteCard)).toContain('12 observed');
+    expect(normalizedText(websiteCard)).not.toContain('Deferred');
+
+    await unmount();
+  });
+
   it('clears results when switching the lead source mode', async () => {
     const searchApi: SearchApi = {
       startSearch: vi.fn().mockResolvedValue(completedResponse),

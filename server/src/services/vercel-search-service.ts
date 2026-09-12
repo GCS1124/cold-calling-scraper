@@ -21,14 +21,21 @@ import {
 } from './osm-discovery';
 import { formatGoogleMapsFailure } from './google-maps-discovery';
 import { enrichLeadFromWebsite } from './website-enrichment';
-import { enrichWebsiteCandidates, type WebsiteLeadEnricher } from './business-website-enrichment';
+import {
+  createWebsiteReviewCandidate,
+  enrichWebsiteCandidates,
+  planWebsiteEnrichment,
+  type WebsiteLeadEnricher,
+} from './business-website-enrichment';
 import {
   discoverUsLeadsFromPublicDirectories,
   type PublicDirectoryDiscoveryResult,
 } from './public-directory-discovery';
 import {
   discoverUsLeadsFromAiMode,
+  runGroundedGeminiPublicResearch,
   type AiDiscoveryResult,
+  type GroundedGeminiPublicResearchResult,
 } from './ai-lead-discovery';
 import {
   googlePlacesProvider,
@@ -127,9 +134,16 @@ type VercelSearchServiceDeps = {
     location: NormalizedUsLocation;
     deadlineMs?: number;
     deferFinalization?: boolean;
+    deferGemini?: boolean;
     publicListingBoxCursor?: number;
     publicListingMaxBoxes?: number;
   }) => Promise<AiDiscoveryResult>;
+  runGeminiPublicResearch?: (args: {
+    request: SearchRequest;
+    location: NormalizedUsLocation;
+    listingLeads: Lead[];
+    deadlineMs: number;
+  }) => Promise<GroundedGeminiPublicResearchResult>;
   discoverOsmLeads?: (args: {
     request: { companyType: string; count: number };
     location: NormalizedUsLocation;
@@ -172,9 +186,12 @@ const getAiDiscoveryWindowMs = (requestedCount: number) =>
   requestedCount >= 50 ? 36_000 : 30_000;
 const aiLogicalBudgetMs = 90_000;
 const aiOsmContinuationTickWindowMs = 15_000;
+const aiGeminiTickWindowMs = 20_000;
 const aiWebsiteTickWindowMs = 36_000;
 const maxAiOsmBoxesPerTick = 4;
-const maxAiOsmContinuationPasses = 2;
+const maxAiOsmContinuationPasses = 1;
+const maxDurableWebsiteHosts = 120;
+const durableWebsiteBatchSize = 12;
 const getMaxTickDurationMs = (requestedCount: number) =>
   requestedCount >= 50 ? 45_000 : 30_000;
 const publicDirectoryDiscoveryTimeoutMs = 10_000;
@@ -393,6 +410,7 @@ const runAiDiscovery = async (
     location,
     deadlineMs,
     deferFinalization: true,
+    deferGemini: true,
     publicListingBoxCursor,
     publicListingMaxBoxes,
   });
@@ -435,6 +453,37 @@ const mergeReviewCandidates = (
   ...(current ?? []),
   ...(incoming ?? []),
 ].map((candidate) => [candidate.id, candidate] as const)).values()].slice(0, 200);
+
+const runAiGroundedGeminiResearch = async (
+  job: SearchJobRecord,
+  location: NormalizedUsLocation,
+  runGeminiPublicResearch: NonNullable<VercelSearchServiceDeps['runGeminiPublicResearch']>,
+  now: () => number,
+  deadlineMs: number,
+) => {
+  job.progress.currentSource = 'Gemini public discovery';
+  const result = await runGeminiPublicResearch({
+    request: job.request,
+    location,
+    listingLeads: job.leads,
+    deadlineMs,
+  });
+  for (const warning of result.warnings) appendWarningOnce(job, warning);
+  recordProviderCoverage(job.progress, result.coverage);
+  job.progress.aiAssistance = result.aiAssistance;
+  mergeLeads(job, result.leads, now);
+  if (result.researchCandidates.length) {
+    job.researchCandidates = [...new Map([
+      ...(job.researchCandidates ?? []),
+      ...result.researchCandidates,
+    ].map((candidate) => [candidate.id, candidate] as const)).values()].slice(0, 200);
+  }
+  if (result.reviewCandidates.length) {
+    job.reviewCandidates = mergeReviewCandidates(job.reviewCandidates, result.reviewCandidates);
+  }
+  job.progress.batchesCompleted += 1;
+  return result;
+};
 
 /**
  * Continue only the persisted OSM spatial slice. This deliberately does not
@@ -560,6 +609,7 @@ const runAiWebsiteEnrichment = async (
   enrichWebsiteLead: WebsiteLeadEnricher | undefined,
   now: () => number,
   deadlineMs: number,
+  workflow: NonNullable<SearchJobRecord['aiWorkflow']>,
 ) => {
   job.progress.currentSource = 'Public website enrichment';
   if (!enrichWebsiteLead) {
@@ -581,51 +631,131 @@ const runAiWebsiteEnrichment = async (
     return undefined;
   }
 
+  const leadById = new Map(job.leads.map((lead) => [lead.id, lead] as const));
+  if (workflow.websiteQueue === undefined) {
+    const plan = planWebsiteEnrichment({
+      leads: job.leads,
+      includeDecisionMakerNames: true,
+    });
+    const queue = plan.candidateLeadIds.slice(0, maxDurableWebsiteHosts);
+    workflow.websiteQueue = queue;
+    workflow.websiteTotalHosts = queue.length;
+    workflow.websiteSkippedCount = plan.skippedCount + Math.max(
+      0,
+      plan.candidateLeadIds.length - queue.length,
+    );
+    workflow.websiteObservedReported = false;
+  }
+
+  const persistedQueue = workflow.websiteQueue.filter((leadId) => leadById.has(leadId));
+  const missingQueuedLeads = workflow.websiteQueue.length - persistedQueue.length;
+  if (missingQueuedLeads) {
+    workflow.websiteSkippedCount = (workflow.websiteSkippedCount ?? 0) + missingQueuedLeads;
+  }
+  workflow.websiteQueue = persistedQueue;
+  const batchIds = persistedQueue.slice(0, durableWebsiteBatchSize);
+  const batchLeads = batchIds.flatMap((leadId) => {
+    const lead = leadById.get(leadId);
+    return lead ? [lead] : [];
+  });
   const result = await enrichWebsiteCandidates({
-    leads: job.leads,
+    leads: batchLeads,
     enrichLead: enrichWebsiteLead,
     deadlineMs,
+    maxCandidates: durableWebsiteBatchSize,
     includeDecisionMakerNames: true,
     now,
   });
   for (const warning of result.warnings) appendWarningOnce(job, warning);
-  job.reviewCandidates = mergeReviewCandidates(job.reviewCandidates, result.reviewCandidates);
-  recordProviderCoverage(job.progress, [{
-    providerId: 'public-website-enrichment',
-    providerName: 'Public Website Enrichment',
-    status: result.blockedCount || result.timedOutCount ? 'partial' : 'returned',
-    phase: result.blockedCount || result.timedOutCount ? 'degraded' : result.deferredCount ? 'queued' : 'completed',
-    outcome: result.blockedCount
+  const deferredIds = new Set(result.deferredLeadIds);
+  workflow.websiteQueue = [
+    ...batchIds.filter((leadId) => deferredIds.has(leadId)),
+    ...persistedQueue.slice(batchIds.length),
+  ];
+
+  // Deferred review candidates are a live queue view. Replace them on every
+  // tick so records that have since been attempted never look permanently
+  // deferred, while real timeout/block candidates remain reviewable.
+  const retainedReviews = (job.reviewCandidates ?? []).filter((candidate) => !(
+    candidate.providerId === 'public-website-enrichment' &&
+    candidate.reason === 'deferred_by_budget'
+  ));
+  const completedReviews = result.reviewCandidates.filter(
+    (candidate) => candidate.reason !== 'deferred_by_budget',
+  );
+  const remainingReviews = workflow.websiteQueue.flatMap((leadId) => {
+    const lead = leadById.get(leadId);
+    return lead
+      ? [createWebsiteReviewCandidate(
+          lead,
+          'deferred_by_budget',
+          'This public website remains queued for a later bounded durable tick; the source profile is preserved and is not exportable until the normal evidence gate passes.',
+        )]
+      : [];
+  });
+  job.reviewCandidates = mergeReviewCandidates(retainedReviews, [
+    ...completedReviews,
+    ...remainingReviews,
+  ]);
+  const remainingCount = workflow.websiteQueue.length;
+  const totalHosts = workflow.websiteTotalHosts ?? 0;
+  const isFirstWebsiteSnapshot = !workflow.websiteObservedReported;
+  const observedCount = isFirstWebsiteSnapshot ? totalHosts : 0;
+  // The initial snapshot reports all hosts that are outside the canonical
+  // queue. If a persisted id disappears from the lead pool later, report that
+  // newly skipped work in that later tick too instead of silently losing it.
+  const skippedCount = isFirstWebsiteSnapshot
+    ? workflow.websiteSkippedCount ?? 0
+    : missingQueuedLeads;
+  workflow.websiteObservedReported = true;
+  const reviewCount = (job.reviewCandidates ?? []).filter(
+    (candidate) => candidate.providerId === 'public-website-enrichment',
+  ).length;
+  const outcome: NonNullable<ProviderCoverage['outcome']> = remainingCount
+    ? 'deferred'
+    : result.blockedCount
       ? 'blocked'
       : result.timedOutCount
         ? 'timed_out'
-        : result.deferredCount
-          ? 'deferred'
-          : result.enrichedCount
-            ? 'returned'
-            : result.candidateCount
-              ? 'empty'
-              : 'empty',
+        : result.enrichedCount
+          ? 'returned'
+          : 'empty';
+  recordProviderCoverage(job.progress, [{
+    providerId: 'public-website-enrichment',
+    providerName: 'Public Website Enrichment',
+    status: remainingCount
+      ? 'configured'
+      : result.blockedCount || result.timedOutCount
+        ? 'partial'
+        : 'returned',
+    phase: remainingCount
+      ? 'queued'
+      : result.blockedCount || result.timedOutCount
+        ? 'degraded'
+        : 'completed',
+    outcome,
     leadCount: result.enrichedCount,
     attemptedCount: result.attemptedCount,
-    observedCount: result.candidateCount,
+    observedCount,
     acceptedCount: result.enrichedCount,
-    reviewCount: result.reviewCandidates.length,
-    deferredCount: result.deferredCount,
+    reviewCount,
+    deferredCount: remainingCount,
     completedCount: result.completedCount,
     enrichedCount: result.enrichedCount,
     blockedCount: result.blockedCount,
     timedOutCount: result.timedOutCount,
-    skippedCount: result.skippedCount,
+    skippedCount,
     decisionMakerRecoveredCount: result.decisionMakerRecoveredCount,
     updatedAt: new Date(now()).toISOString(),
-    message: `Website enrichment: ${result.attemptedCount} attempted, ${result.completedCount} completed, ${result.enrichedCount} enriched, ${result.blockedCount} blocked, ${result.timedOutCount} timed out, ${result.skippedCount} skipped, ${result.deferredCount} deferred, ${result.decisionMakerRecoveredCount} public decision-maker name${result.decisionMakerRecoveredCount === 1 ? '' : 's'} recovered.`,
+    message: remainingCount
+      ? `Website enrichment processed ${result.attemptedCount} bounded public domain${result.attemptedCount === 1 ? '' : 's'} this tick; ${remainingCount}/${totalHosts} canonical host${remainingCount === 1 ? '' : 's'} remain queued. ${result.blockedCount} blocked and ${result.timedOutCount} timed out attempt${result.blockedCount + result.timedOutCount === 1 ? '' : 's'} remain in review.`
+      : `Website enrichment completed ${totalHosts} canonical public host${totalHosts === 1 ? '' : 's'} across durable ticks: ${result.attemptedCount} attempted this tick, ${result.completedCount} completed, ${result.enrichedCount} enriched, ${result.blockedCount} blocked, ${result.timedOutCount} timed out, and ${result.decisionMakerRecoveredCount} public decision-maker name${result.decisionMakerRecoveredCount === 1 ? '' : 's'} recovered.`,
   }]);
   if (result.leads.length) {
     mergeLeads(job, result.leads, now, false);
     job.progress.enriched += result.enrichedCount;
   }
-  return result;
+  return { ...result, deferredCount: remainingCount };
 };
 
 const runAiFinalFusion = (job: SearchJobRecord, now: () => number) => {
@@ -633,8 +763,11 @@ const runAiFinalFusion = (job: SearchJobRecord, now: () => number) => {
   const linkedInLeads = job.leads.filter(isPublicLinkedInLead);
   const googleBusinessLeads = job.leads.filter(isGoogleBusinessLead);
   const fusion = mergeLinkedInWithPublicListingsWithDiagnostics(linkedInLeads, googleBusinessLeads);
-  const bridgedIds = new Set([...linkedInLeads, ...googleBusinessLeads].map((lead) => lead.id));
-  const unrelatedLeads = job.leads.filter((lead) => !bridgedIds.has(lead.id));
+  // The strict fusion helper returns both corroborated bridges and independent
+  // unmatched direct-source records. Preserve those direct records rather than
+  // accidentally dropping every LinkedIn/GMB lead when no pair is fused.
+  const fusionParticipantIds = new Set([...linkedInLeads, ...googleBusinessLeads].map((lead) => lead.id));
+  const unrelatedLeads = job.leads.filter((lead) => !fusionParticipantIds.has(lead.id));
   const merged = deduplicateLeads([...unrelatedLeads, ...fusion.leads].map(normalizeLead));
   job.leads = trimCandidatePool(merged, job.request);
   job.reviewCandidates = mergeReviewCandidates(job.reviewCandidates, fusion.reviewCandidates);
@@ -1217,6 +1350,7 @@ const tickJob = async (
       | 'discoverGoogleMapsLeads'
       | 'discoverPublicDirectories'
       | 'discoverAiLeads'
+      | 'runGeminiPublicResearch'
       | 'discoverOsmLeadsBatch'
       | 'enrichWebsiteLead'
     >,
@@ -1292,6 +1426,7 @@ const tickJob = async (
       websitePasses: 0,
       osmBoxCursor: 0,
       osmContinuationPasses: 0,
+      geminiPending: false,
     };
     job.aiWorkflow = workflow;
 
@@ -1346,18 +1481,23 @@ const tickJob = async (
         workflow.osmBoxCursor = publicListingProgress.nextBoxCursor;
         workflow.osmTotalBoxes = publicListingProgress.totalBoxCount;
       }
+      workflow.geminiPending = Boolean(sourceResult?.geminiDeferred);
       const shouldContinuePublicListings = Boolean(
         publicListingProgress &&
         !publicListingProgress.completed &&
-        deps.now() < workflow.logicalDeadlineAt,
+        deps.now() + aiOsmContinuationTickWindowMs + aiGeminiTickWindowMs < workflow.logicalDeadlineAt,
       );
       workflow.stage = shouldContinuePublicListings
         ? 'public_listing_continuation'
-        : 'website_enrichment';
+        : workflow.geminiPending
+          ? 'gemini_public_research'
+          : 'website_enrichment';
       job.status = 'enriching';
       job.progress.currentSource = shouldContinuePublicListings
         ? 'Public business listings'
-        : 'Public website enrichment';
+        : workflow.geminiPending
+          ? 'Gemini public discovery'
+          : 'Public website enrichment';
       job.updatedAt = deps.now();
       job.expiresAt = deps.now() + jobTtlMs;
       await store.upsert(job);
@@ -1422,16 +1562,76 @@ const tickJob = async (
       const mayContinuePublicListings = Boolean(
         continuation &&
         !continuation.completed &&
-        deps.now() < workflow.logicalDeadlineAt &&
+        deps.now() + aiOsmContinuationTickWindowMs + aiGeminiTickWindowMs < workflow.logicalDeadlineAt &&
         workflow.osmContinuationPasses < maxAiOsmContinuationPasses,
       );
       if (!mayContinuePublicListings) {
-        workflow.stage = 'website_enrichment';
+        workflow.stage = workflow.geminiPending
+          ? 'gemini_public_research'
+          : 'website_enrichment';
       }
       job.status = 'enriching';
       job.progress.currentSource = mayContinuePublicListings
         ? 'Public business listings'
-        : 'Public website enrichment';
+        : workflow.geminiPending
+          ? 'Gemini public discovery'
+          : 'Public website enrichment';
+      job.updatedAt = deps.now();
+      job.expiresAt = deps.now() + jobTtlMs;
+      await store.upsert(job);
+      return job;
+    }
+
+    if (workflow.stage === 'gemini_public_research') {
+      const geminiTickStartedAt = deps.now();
+      job.status = 'enriching';
+      job.progress.currentSource = 'Gemini public discovery';
+      job.updatedAt = geminiTickStartedAt;
+      await store.upsert(job);
+
+      try {
+        const geminiResult = await runAiGroundedGeminiResearch(
+          job,
+          targetLocation,
+          deps.runGeminiPublicResearch ?? runGroundedGeminiPublicResearch,
+          deps.now,
+          Math.min(workflow.logicalDeadlineAt, geminiTickStartedAt + aiGeminiTickWindowMs),
+        );
+        // One logical search makes at most one grounded Gemini request. A
+        // no-time deferral remains visible on the final snapshot rather than
+        // turning into a misleading retry loop or an "Unavailable" result.
+        workflow.geminiPending = geminiResult.deferred;
+      } catch (error) {
+        const timedOut = isTimeoutFailure(error);
+        appendWarningOnce(job, {
+          providerId: 'gemini-public-discovery',
+          providerName: 'Gemini public discovery',
+          message: error instanceof Error
+            ? `${error.message} Deterministic public sources were preserved.`
+            : 'Gemini public discovery failed; deterministic public sources were preserved.',
+          severity: timedOut ? 'info' : 'warning',
+        });
+        recordProviderCoverage(job.progress, [{
+          providerId: 'gemini-public-discovery',
+          providerName: 'Gemini public discovery',
+          status: timedOut ? 'partial' : 'failed',
+          phase: 'degraded',
+          outcome: timedOut ? 'timed_out' : 'failed',
+          leadCount: 0,
+          attemptedCount: 1,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+          updatedAt: new Date(deps.now()).toISOString(),
+          message: 'The bounded Gemini public-research tick did not complete; deterministic public sources were preserved.',
+        }]);
+        workflow.geminiPending = false;
+      }
+
+      workflow.stage = 'website_enrichment';
+      job.status = 'enriching';
+      job.progress.currentSource = 'Public website enrichment';
       job.updatedAt = deps.now();
       job.expiresAt = deps.now() + jobTtlMs;
       await store.upsert(job);
@@ -1452,6 +1652,7 @@ const tickJob = async (
           deps.enrichWebsiteLead,
           deps.now,
           Math.min(workflow.logicalDeadlineAt, websiteTickStartedAt + aiWebsiteTickWindowMs),
+          workflow,
         );
       } catch (error) {
         appendWarningOnce(job, {
@@ -1482,8 +1683,7 @@ const tickJob = async (
       workflow.websitePasses = (workflow.websitePasses ?? 0) + 1;
       const mayResumeDeferredWebsites =
         Boolean(websiteResult?.deferredCount) &&
-        deps.now() < workflow.logicalDeadlineAt &&
-        workflow.websitePasses < 2;
+        deps.now() < workflow.logicalDeadlineAt;
       if (!mayResumeDeferredWebsites) {
         workflow.stage = 'final_fusion';
       }
@@ -1711,6 +1911,7 @@ export const createVercelSearchServiceWithDeps = (
       ? undefined
       : discoverGoogleMapsLeadsOnDemand);
   const discoverAiLeads = deps.discoverAiLeads ?? discoverUsLeadsFromAiMode;
+  const runGeminiPublicResearch = deps.runGeminiPublicResearch ?? runGroundedGeminiPublicResearch;
   const enrichWebsiteLead =
     deps.enrichWebsiteLead ??
     (process.env.NODE_ENV === 'test' ? undefined : enrichLeadFromWebsite);
@@ -1789,6 +1990,7 @@ export const createVercelSearchServiceWithDeps = (
       normalizeLocation,
       discoverGoogleMapsLeads,
       discoverAiLeads,
+      runGeminiPublicResearch,
       enrichWebsiteLead,
       discoverOsmLeads: discoverOsm,
       discoverOsmLeadsBatch: discoverOsmBatch,

@@ -626,7 +626,6 @@ describe('createVercelSearchServiceWithDeps', () => {
       sourceMode: 'ai',
     });
     await service.getSearch(started.searchId);
-    await service.getSearch(started.searchId);
     const afterOsm = await service.getSearch(started.searchId);
     const job = await store.get(started.searchId);
 
@@ -635,20 +634,154 @@ describe('createVercelSearchServiceWithDeps', () => {
       1,
       expect.objectContaining({ boxCursor: 4, maxBoxes: 4 }),
     );
-    expect(discoverOsmLeadsBatch).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ boxCursor: 8, maxBoxes: 4 }),
-    );
     expect(job?.aiWorkflow).toMatchObject({
       stage: 'website_enrichment',
-      osmBoxCursor: 12,
+      osmBoxCursor: 8,
       osmTotalBoxes: 12,
-      osmContinuationPasses: 2,
+      osmContinuationPasses: 1,
     });
     expect(afterOsm?.meta.progress.providerCoverage).toEqual(expect.arrayContaining([
       expect.objectContaining({
         providerId: 'public-business-listings',
+        deferredCount: 4,
+      }),
+    ]));
+  });
+
+  it('runs the queued Gemini pass in its own durable tick and clears its deferred state', async () => {
+    const runGeminiPublicResearch = vi.fn().mockResolvedValue({
+      leads: [],
+      researchCandidates: [],
+      reviewCandidates: [],
+      warnings: [],
+      aiAssistance: 'enabled' as const,
+      deferred: false,
+      coverage: [
+        {
+          providerId: 'gemini-public-discovery',
+          providerName: 'Gemini public discovery',
+          status: 'returned' as const,
+          phase: 'completed' as const,
+          outcome: 'empty' as const,
+          leadCount: 0,
+          attemptedCount: 1,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+        },
+        {
+          providerId: 'gemini-listing-enrichment',
+          providerName: 'Gemini listing enrichment',
+          status: 'returned' as const,
+          phase: 'completed' as const,
+          outcome: 'empty' as const,
+          leadCount: 0,
+          attemptedCount: 0,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 0,
+        },
+      ],
+    });
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      discoverAiLeads: vi.fn().mockResolvedValue({
+        leads: [makeLead({ id: 'gemini-stage-lead', source: 'LinkedIn, Public Profile' })],
+        warnings: [],
+        coverage: [{
+          providerId: 'gemini-public-discovery',
+          providerName: 'Gemini public discovery',
+          status: 'configured' as const,
+          phase: 'queued' as const,
+          outcome: 'deferred' as const,
+          leadCount: 0,
+          attemptedCount: 0,
+          observedCount: 0,
+          acceptedCount: 0,
+          reviewCount: 0,
+          deferredCount: 1,
+        }],
+        aiAssistance: 'enabled' as const,
+        researchCandidates: [],
+        enrichedCount: 0,
+        geminiDeferred: true,
+      }),
+      runGeminiPublicResearch: runGeminiPublicResearch as never,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-ai-gemini-durable',
+      now: () => 1_000,
+    });
+
+    const started = await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin, TX',
+      count: 50,
+      sourceMode: 'ai',
+    });
+    const completed = await pollJob(service, started.searchId, 5);
+
+    expect(runGeminiPublicResearch).toHaveBeenCalledOnce();
+    expect(completed?.meta.progress.providerCoverage).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerId: 'gemini-public-discovery',
+        phase: 'completed',
+        outcome: 'empty',
         deferredCount: 0,
+      }),
+    ]));
+  });
+
+  it('drains all planned website hosts across durable ticks instead of skipping after the first batch', async () => {
+    const websiteLeads = Array.from({ length: 25 }, (_, index) => makeLead({
+      id: `website-durable-${index + 1}`,
+      name: `Website Durable ${index + 1}`,
+      website: `https://website-durable-${index + 1}.example`,
+      source: 'Google Places',
+      listingUrl: `https://www.google.com/maps/place/website-durable-${index + 1}`,
+    }));
+    const enrichWebsiteLead = vi.fn().mockImplementation(async (lead: Lead) => ({
+      lead: { ...lead, crawlAttempts: (lead.crawlAttempts ?? 0) + 1 },
+      warnings: [],
+    }));
+    const service = createVercelSearchServiceWithDeps({
+      store: createSearchJobStore(),
+      normalizeLocation: vi.fn().mockResolvedValue(localLocation),
+      discoverAiLeads: vi.fn().mockResolvedValue({
+        leads: websiteLeads,
+        warnings: [],
+        coverage: [],
+        aiAssistance: 'disabled' as const,
+        researchCandidates: [],
+        enrichedCount: 0,
+      }),
+      enrichWebsiteLead,
+      discoverOsmLeads: vi.fn().mockResolvedValue([]),
+      idFactory: () => 'search-ai-website-durable',
+      now: () => 1_000,
+    });
+
+    const started = await service.startSearch({
+      companyType: 'Dentist',
+      city: 'Austin, TX',
+      count: 50,
+      sourceMode: 'ai',
+    });
+    const completed = await pollJob(service, started.searchId, 5);
+
+    expect(enrichWebsiteLead).toHaveBeenCalledTimes(25);
+    expect(completed?.meta.progress.providerCoverage).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerId: 'public-website-enrichment',
+        attemptedCount: 25,
+        observedCount: 25,
+        completedCount: 25,
+        deferredCount: 0,
+        skippedCount: 0,
+        outcome: 'returned',
+        phase: 'completed',
       }),
     ]));
   });

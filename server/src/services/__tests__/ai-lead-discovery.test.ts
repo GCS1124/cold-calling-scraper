@@ -720,6 +720,33 @@ describe('free AI lead discovery', () => {
     });
   });
 
+  it('queues the one Gemini pass for a durable tick without mislabeling it as unavailable', async () => {
+    process.env.GEMINI_API_KEY = 'user-supplied-test-key';
+    process.env.GEMINI_QUERY_ASSISTANCE_ENABLED = 'true';
+    process.env.GEMINI_LEAD_DISCOVERY_ENABLED = 'true';
+    const discoverGemini = vi.fn();
+
+    const result = await createAiLeadDiscovery({
+      discoverLinkedin: vi.fn().mockResolvedValue({ leads: [], warnings: [], blocked: false }) as never,
+      discoverGemini: discoverGemini as never,
+    })({
+      request: { companyType: 'Dentist', city: 'Austin, TX', count: 50 },
+      location,
+      deferFinalization: true,
+      deferGemini: true,
+      deadlineMs: Date.now() + 20_000,
+    });
+
+    expect(discoverGemini).not.toHaveBeenCalled();
+    expect(result.geminiDeferred).toBe(true);
+    expect(result.coverage.find((entry) => entry.providerId === 'gemini-public-discovery')).toMatchObject({
+      status: 'configured',
+      phase: 'queued',
+      outcome: 'deferred',
+      deferredCount: 1,
+    });
+  });
+
   it('does not add unverified profiles when public search is blocked', async () => {
     const result = await createAiLeadDiscovery({
       discoverLinkedin: vi.fn().mockResolvedValue({

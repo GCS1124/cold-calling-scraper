@@ -17,6 +17,10 @@ export type WebsiteEnrichmentResult = {
   candidateCount: number;
   /** Individual crawl attempts actually started. */
   attemptedCount: number;
+  /** Stable ids for crawls started in this bounded batch. */
+  attemptedLeadIds: string[];
+  /** Stable ids left untouched because the bounded window ended first. */
+  deferredLeadIds: string[];
   completedCount: number;
   enrichedCount: number;
   blockedCount: number;
@@ -56,7 +60,7 @@ const withDeadline = async <T>(promise: Promise<T>, deadlineMs: number, now: () 
   }
 };
 
-const createWebsiteReviewCandidate = (
+export const createWebsiteReviewCandidate = (
   lead: Lead,
   reason: 'website_timeout' | 'website_blocked' | 'deferred_by_budget',
   detail: string,
@@ -87,23 +91,27 @@ const createWebsiteReviewCandidate = (
   };
 };
 
-export const enrichWebsiteCandidates = async ({
+export type WebsiteEnrichmentPlan = {
+  /** One representative lead per canonical public business host. */
+  candidates: Lead[];
+  /** Stable lead ids persisted by durable callers between ticks. */
+  candidateLeadIds: string[];
+  /** Invalid or duplicate hosts excluded from the public crawl queue. */
+  skippedCount: number;
+};
+
+/**
+ * Builds a stable, bounded-free host queue. Durable callers persist the lead
+ * ids and choose their own per-tick batch size; one-off callers can still use
+ * `enrichWebsiteCandidates` with its existing bounded default.
+ */
+export const planWebsiteEnrichment = ({
   leads,
-  enrichLead,
-  deadlineMs,
-  now = Date.now,
-  maxCandidates = 12,
-  concurrency = 3,
   includeDecisionMakerNames = false,
 }: {
   leads: Lead[];
-  enrichLead: WebsiteLeadEnricher;
-  deadlineMs: number;
-  maxCandidates?: number;
-  concurrency?: number;
   includeDecisionMakerNames?: boolean;
-  now?: () => number;
-}): Promise<WebsiteEnrichmentResult> => {
+}): WebsiteEnrichmentPlan => {
   const eligible = leads.filter((lead) =>
     Boolean(lead.website?.trim()) &&
     (!isPhoneQualifiedLead(lead) || (includeDecisionMakerNames && !lead.decisionMakerName)) &&
@@ -121,13 +129,40 @@ export const enrichWebsiteCandidates = async ({
     candidatesByHost.set(host, lead);
   }
 
-  const candidates = [...candidatesByHost.values()].slice(0, Math.max(0, maxCandidates));
-  skippedCount += Math.max(0, candidatesByHost.size - candidates.length);
+  const candidates = [...candidatesByHost.values()];
+  return {
+    candidates,
+    candidateLeadIds: candidates.map((lead) => lead.id),
+    skippedCount,
+  };
+};
+
+export const enrichWebsiteCandidates = async ({
+  leads,
+  enrichLead,
+  deadlineMs,
+  now = Date.now,
+  maxCandidates = 12,
+  concurrency = 3,
+  includeDecisionMakerNames = false,
+}: {
+  leads: Lead[];
+  enrichLead: WebsiteLeadEnricher;
+  deadlineMs: number;
+  maxCandidates?: number;
+  concurrency?: number;
+  includeDecisionMakerNames?: boolean;
+  now?: () => number;
+}): Promise<WebsiteEnrichmentResult> => {
+  const plan = planWebsiteEnrichment({ leads, includeDecisionMakerNames });
+  const candidates = plan.candidates.slice(0, Math.max(0, maxCandidates));
+  const skippedCount = plan.skippedCount + Math.max(0, plan.candidates.length - candidates.length);
   const enrichedLeads: Lead[] = [];
   const reviewCandidates: ReviewCandidate[] = [];
   const warnings: ProviderWarning[] = [];
   let cursor = 0;
   let attemptedCount = 0;
+  const attemptedLeadIds: string[] = [];
   let completedCount = 0;
   let enrichedCount = 0;
   let blockedCount = 0;
@@ -141,6 +176,7 @@ export const enrichWebsiteCandidates = async ({
       cursor += 1;
       if (!candidate) return;
       attemptedCount += 1;
+      attemptedLeadIds.push(candidate.id);
 
       try {
         const result = await withDeadline(enrichLead(candidate, { deadlineMs }), deadlineMs, now);
@@ -187,9 +223,11 @@ export const enrichWebsiteCandidates = async ({
     await Promise.all(Array.from({ length: workerCount }, () => work()));
   }
 
-  const deferredCount = Math.max(0, candidates.length - attemptedCount);
+  const attemptedLeadIdSet = new Set(attemptedLeadIds);
+  const deferredLeads = candidates.filter((candidate) => !attemptedLeadIdSet.has(candidate.id));
+  const deferredCount = deferredLeads.length;
   if (deferredCount) {
-    for (const candidate of candidates.slice(attemptedCount)) {
+    for (const candidate of deferredLeads) {
       reviewCandidates.push(createWebsiteReviewCandidate(
         candidate,
         'deferred_by_budget',
@@ -204,6 +242,8 @@ export const enrichWebsiteCandidates = async ({
     warnings,
     candidateCount: candidates.length,
     attemptedCount,
+    attemptedLeadIds,
+    deferredLeadIds: deferredLeads.map((lead) => lead.id),
     completedCount,
     enrichedCount,
     blockedCount,

@@ -120,10 +120,15 @@ and evidence gates.
 Durable AI searches use an approximately 90-second logical window, divided into
 resumable sub-60-second invocations. The first tick performs bounded source
 discovery, later ticks continue the persisted OpenStreetMap spatial-box cursor,
-then public website enrichment resumes deferred domains before strict final
-fusion. A `deferred` provider outcome therefore means safe remaining work is
-stored for the next durable snapshot; it is neither an empty provider response
-nor a hidden timeout. Stateless fallback responses stay hard-capped below the
+run the one grounded Gemini pass in its own bounded tick, then process a
+canonical public-website host queue in batches of 12 before strict final fusion.
+The durable website queue admits at most 120 canonical hosts per logical search;
+it persists remaining host ids and replaces obsolete deferred review records on
+each tick. A `deferred` provider outcome therefore means current safe remaining
+work is stored for the next durable snapshot; it is neither an empty provider
+response nor a hidden timeout. When a later tick reports zero remaining work,
+the outcome resolves to its current completed state rather than retaining a
+stale `deferred` label. Stateless fallback responses stay hard-capped below the
 runtime limit and identify deferred work explicitly instead of implying it ran.
 
 ## HTTP errors and tracing
@@ -202,8 +207,9 @@ by the owner id and remain separate product work.
 
 ## Coverage semantics
 
-`leadCount` is the number of candidates observed from that provider before the
-final cross-provider dedupe and phone gate. It is not a unique-lead guarantee.
+`leadCount` remains the backward-compatible accepted-record count whenever a
+provider supplies structured counts; it mirrors `acceptedCount`. Legacy entries
+without structured counts retain their original provider-specific semantics.
 
 - `configured`: the source is available but has not returned an observation yet.
 - `not_configured`: the source is intentionally unavailable in this execution.
@@ -235,9 +241,12 @@ the final phone gate still applies.
 ### AI
 
 Deterministic public search lenses are folded into one grounded Gemini pass that
-can return public research candidates. Candidates and cited source details remain available for review even
-when the required public-phone gate excludes them from export. Public discovery
-providers supply independently validated lead and contact facts, including
+can return public research candidates. Durable execution reserves that one pass
+for a separate bounded tick, so slow public listing or directory work cannot
+mislabel a queued Gemini pass as unavailable. Candidates and cited source details
+remain available for review even when the required public-phone gate excludes
+them from export. Public discovery providers supply independently validated lead
+and contact facts, including
 search-indexed NotaryCafe public profile references. Apollo, Lusha,
 ZoomInfo, and RocketReach are audited for limitation messaging only and are never
 called; no paid lead database is required. Gemini usage remains subject to the

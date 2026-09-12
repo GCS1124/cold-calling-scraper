@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Lead } from '../../types/lead';
-import { enrichWebsiteCandidates } from '../business-website-enrichment';
+import { enrichWebsiteCandidates, planWebsiteEnrichment } from '../business-website-enrichment';
 
 const makeLead = (overrides: Partial<Lead> = {}): Lead => ({
   id: 'website-candidate',
@@ -116,5 +116,18 @@ describe('enrichWebsiteCandidates', () => {
 
     expect(enrichLead).toHaveBeenCalledOnce();
     expect(result.leads[0]?.decisionMakerName).toBe('Jordan Lee');
+  });
+
+  it('plans every canonical host for durable callers without discarding the overflow batch', () => {
+    const leads = Array.from({ length: 20 }, (_, index) => makeLead({
+      id: `website-${index + 1}`,
+      website: `https://business-${index + 1}.example`,
+    }));
+
+    const plan = planWebsiteEnrichment({ leads, includeDecisionMakerNames: true });
+
+    expect(plan.candidates).toHaveLength(20);
+    expect(plan.candidateLeadIds).toEqual(leads.map((lead) => lead.id));
+    expect(plan.skippedCount).toBe(0);
   });
 });
